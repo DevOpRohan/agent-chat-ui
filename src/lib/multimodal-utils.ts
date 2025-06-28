@@ -1,6 +1,24 @@
 import type { Base64ContentBlock } from "@langchain/core/messages";
 import { toast } from "sonner";
 
+async function uploadToGCS(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch("/api/upload", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    toast.error("Failed to upload file");
+    throw new Error("Failed to upload file");
+  }
+
+  const data = (await res.json()) as { url: string };
+  return data.url;
+}
+
 // Returns a Promise of a typed multimodal block for images or PDFs
 export async function fileToContentBlock(
   file: File,
@@ -21,6 +39,7 @@ export async function fileToContentBlock(
   }
 
   const data = await fileToBase64(file);
+  const gcsUrl = await uploadToGCS(file);
 
   if (supportedImageTypes.includes(file.type)) {
     return {
@@ -28,7 +47,7 @@ export async function fileToContentBlock(
       source_type: "base64",
       mime_type: file.type,
       data,
-      metadata: { name: file.name },
+      metadata: { name: file.name, gcsUrl },
     };
   }
 
@@ -38,7 +57,7 @@ export async function fileToContentBlock(
     source_type: "base64",
     mime_type: "application/pdf",
     data,
-    metadata: { filename: file.name },
+    metadata: { filename: file.name, gcsUrl },
   };
 }
 

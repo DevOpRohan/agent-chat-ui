@@ -201,12 +201,29 @@ export function Thread() {
       return;
     setFirstTokenReceived(false);
 
+    const attachmentLines = contentBlocks
+      .map((b, i) => {
+        const name =
+          b.type === "image"
+            ? String(b.metadata?.name)
+            : String(b.metadata?.filename);
+        const url = String(b.metadata?.gcsUrl ?? "");
+        return `${i + 1}. FILE_NAME="${name}", FILE_URL="${url}", MIME_TYPE="${b.mime_type}"`;
+      })
+      .join("\n");
+
+    const metadataText =
+      attachmentLines.length > 0
+        ? `ATTACHMENTS_INFO:\n${attachmentLines}`
+        : undefined;
+
     const newHumanMessage: Message = {
       id: uuidv4(),
       type: "human",
       content: [
         ...(input.trim().length > 0 ? [{ type: "text", text: input }] : []),
         ...contentBlocks,
+        ...(metadataText ? [{ type: "text", text: metadataText }] : []),
       ] as Message["content"],
     };
 

@@ -55,6 +55,8 @@ You can bypass the initial setup form by setting the following environment varia
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:2024
 NEXT_PUBLIC_ASSISTANT_ID=agent
+# Bucket used for uploading attachments
+GCS_BUCKET_NAME=my-chat-bucket
 ```
 
 > [!TIP]
