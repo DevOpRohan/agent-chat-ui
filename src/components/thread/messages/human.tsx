@@ -6,7 +6,10 @@ import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
-import { isBase64ContentBlock } from "@/lib/multimodal-utils";
+import {
+  isBase64ContentBlock,
+  isURLContentBlock,
+} from "@/lib/multimodal-utils";
 
 function EditableContent({
   value,
@@ -92,11 +95,14 @@ export function HumanMessage({
               <div className="flex flex-wrap items-end justify-end gap-2">
                 {message.content.reduce<React.ReactNode[]>(
                   (acc, block, idx) => {
-                    if (isBase64ContentBlock(block)) {
+                    if (
+                      isBase64ContentBlock(block) ||
+                      isURLContentBlock(block)
+                    ) {
                       acc.push(
                         <MultimodalPreview
                           key={idx}
-                          block={block}
+                          block={block as any}
                           size="md"
                         />,
                       );

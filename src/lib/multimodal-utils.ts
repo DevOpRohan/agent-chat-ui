@@ -1,28 +1,50 @@
-import type { Base64ContentBlock } from "@langchain/core/messages";
+import type {
+  URLContentBlock,
+  Base64ContentBlock,
+} from "@langchain/core/messages";
 import { toast } from "sonner";
 
-async function uploadToGCS(file: File): Promise<string> {
-  const formData = new FormData();
-  formData.append("file", file);
+async function uploadToGCS(
+  file: File,
+  onProgress?: (progress: number) => void,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
 
-  const res = await fetch("/api/upload", {
-    method: "POST",
-    body: formData,
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(e.loaded / e.total);
+      }
+    };
+    xhr.onerror = () => {
+      toast.error("Failed to upload file");
+      reject(new Error("Failed to upload file"));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText) as { url: string };
+          resolve(data.url);
+        } catch {
+          reject(new Error("Invalid upload response"));
+        }
+      } else {
+        toast.error("Failed to upload file");
+        reject(new Error("Failed to upload file"));
+      }
+    };
+    xhr.send(formData);
   });
-
-  if (!res.ok) {
-    toast.error("Failed to upload file");
-    throw new Error("Failed to upload file");
-  }
-
-  const data = (await res.json()) as { url: string };
-  return data.url;
 }
 
 // Returns a Promise of a typed multimodal block for images or PDFs
 export async function fileToContentBlock(
   file: File,
-): Promise<Base64ContentBlock> {
+  onProgress?: (progress: number) => void,
+): Promise<URLContentBlock & { filename?: string }> {
   const supportedImageTypes = [
     "image/jpeg",
     "image/png",
@@ -38,15 +60,14 @@ export async function fileToContentBlock(
     return Promise.reject(new Error(`Unsupported file type: ${file.type}`));
   }
 
-  const data = await fileToBase64(file);
-  const gcsUrl = await uploadToGCS(file);
+  const gcsUrl = await uploadToGCS(file, onProgress);
 
   if (supportedImageTypes.includes(file.type)) {
     return {
       type: "image",
-      source_type: "base64",
+      source_type: "url",
       mime_type: file.type,
-      data,
+      url: gcsUrl,
       metadata: { name: file.name, gcsUrl },
     };
   }
@@ -54,9 +75,10 @@ export async function fileToContentBlock(
   // PDF
   return {
     type: "file",
-    source_type: "base64",
+    source_type: "url",
     mime_type: "application/pdf",
-    data,
+    url: gcsUrl,
+    filename: file.name,
     metadata: { filename: file.name, gcsUrl },
   };
 }
@@ -101,6 +123,25 @@ export function isBase64ContentBlock(
     "mime_type" in block &&
     typeof (block as { mime_type?: unknown }).mime_type === "string" &&
     (block as { mime_type: string }).mime_type.startsWith("image/")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function isURLContentBlock(block: unknown): block is URLContentBlock {
+  if (typeof block !== "object" || block === null || !("type" in block))
+    return false;
+  if (
+    ((block as { type: unknown }).type === "image" ||
+      (block as { type: unknown }).type === "audio" ||
+      (block as { type: unknown }).type === "file") &&
+    "source_type" in block &&
+    (block as { source_type: unknown }).source_type === "url" &&
+    "mime_type" in block &&
+    typeof (block as { mime_type?: unknown }).mime_type === "string" &&
+    "url" in block &&
+    typeof (block as { url?: unknown }).url === "string"
   ) {
     return true;
   }
