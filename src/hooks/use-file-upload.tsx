@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, ChangeEvent } from "react";
 import { toast } from "sonner";
-import type { Base64ContentBlock } from "@langchain/core/messages";
+import type { URLContentBlock } from "@langchain/core/messages";
 import { fileToContentBlock } from "@/lib/multimodal-utils";
 
 export const SUPPORTED_FILE_TYPES = [
@@ -12,19 +12,22 @@ export const SUPPORTED_FILE_TYPES = [
 ];
 
 interface UseFileUploadOptions {
-  initialBlocks?: Base64ContentBlock[];
+  initialBlocks?: URLContentBlock[];
 }
 
 export function useFileUpload({
   initialBlocks = [],
 }: UseFileUploadOptions = {}) {
   const [contentBlocks, setContentBlocks] =
-    useState<Base64ContentBlock[]>(initialBlocks);
+    useState<URLContentBlock[]>(initialBlocks);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>(
+    {},
+  );
   const dropRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
 
-  const isDuplicate = (file: File, blocks: Base64ContentBlock[]) => {
+  const isDuplicate = (file: File, blocks: URLContentBlock[]) => {
     if (file.type === "application/pdf") {
       return blocks.some(
         (b) =>
@@ -73,7 +76,18 @@ export function useFileUpload({
     }
 
     const newBlocks = uniqueFiles.length
-      ? await Promise.all(uniqueFiles.map(fileToContentBlock))
+      ? await Promise.all(
+          uniqueFiles.map(async (f) => {
+            const block = await fileToContentBlock(f, (p) =>
+              setUploadProgress((prev) => ({ ...prev, [f.name]: p })),
+            );
+            setUploadProgress((prev) => {
+              const { [f.name]: _, ...rest } = prev;
+              return rest;
+            });
+            return block;
+          }),
+        )
       : [];
     setContentBlocks((prev) => [...prev, ...newBlocks]);
     e.target.value = "";
@@ -133,7 +147,18 @@ export function useFileUpload({
       }
 
       const newBlocks = uniqueFiles.length
-        ? await Promise.all(uniqueFiles.map(fileToContentBlock))
+        ? await Promise.all(
+            uniqueFiles.map(async (f) => {
+              const block = await fileToContentBlock(f, (p) =>
+                setUploadProgress((prev) => ({ ...prev, [f.name]: p })),
+              );
+              setUploadProgress((prev) => {
+                const { [f.name]: _, ...rest } = prev;
+                return rest;
+              });
+              return block;
+            }),
+          )
         : [];
       setContentBlocks((prev) => [...prev, ...newBlocks]);
     };
@@ -252,7 +277,18 @@ export function useFileUpload({
       );
     }
     if (uniqueFiles.length > 0) {
-      const newBlocks = await Promise.all(uniqueFiles.map(fileToContentBlock));
+      const newBlocks = await Promise.all(
+        uniqueFiles.map(async (f) => {
+          const block = await fileToContentBlock(f, (p) =>
+            setUploadProgress((prev) => ({ ...prev, [f.name]: p })),
+          );
+          setUploadProgress((prev) => {
+            const { [f.name]: _, ...rest } = prev;
+            return rest;
+          });
+          return block;
+        }),
+      );
       setContentBlocks((prev) => [...prev, ...newBlocks]);
     }
   };
@@ -266,5 +302,6 @@ export function useFileUpload({
     resetBlocks,
     dragOver,
     handlePaste,
+    uploadProgress,
   };
 }

@@ -23,6 +23,6 @@ export async function POST(req: NextRequest) {
   await storage.bucket(bucketName).file(filename).save(buffer, {
     contentType: file.type,
   });
-  const url = `gs://${bucketName}/${filename}`;
+  const url = `https://storage.googleapis.com/${bucketName}/${filename}`;
   return NextResponse.json({ url });
 }
