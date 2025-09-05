@@ -57,6 +57,9 @@ NEXT_PUBLIC_API_URL=http://localhost:2024
 NEXT_PUBLIC_ASSISTANT_ID=agent
 # Bucket used for uploading attachments
 GCS_BUCKET_NAME=my-chat-bucket
+# Provider selection (affects client hints and server behavior)
+NEXT_PUBLIC_MODEL_PROVIDER=OPENAI
+MODEL_PROVIDER=OPENAI
 ```
 
 > [!TIP]
@@ -69,6 +72,15 @@ To use these variables:
 3. Restart the application
 
 When these environment variables are set, the application will use them instead of showing the setup form.
+
+> [!NOTE]
+> For image/PDF uploads, this project now:
+> - Sends images as URL content blocks for small client payloads and fast previews.
+> - Sends PDFs as file ID blocks when using OpenAI (to satisfy LangChain’s OpenAI converter), or as URL blocks for other providers. See CODE_CHANGES.md for details.
+
+### Additional Docs
+- Multimodal upload refactor and full code walkthrough: `CODE_CHANGES.md`
+- Build, push, and Cloud Run deployment: `DEPLOYMENT_GUIDE.md`
 
 ## Hiding Messages in the Chat
 

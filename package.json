@@ -19,6 +19,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.16.0",
     "@langchain/core": "^0.3.44",
     "@langchain/langgraph": "^0.2.63",
     "@langchain/langgraph-sdk": "^0.0.73",
@@ -34,6 +35,7 @@
     "date-fns": "^4.1.0",
     "esbuild": "^0.25.0",
     "esbuild-plugin-tailwindcss": "^2.0.1",
+    "form-data": "^4.0.0",
     "framer-motion": "^12.4.9",
     "katex": "^0.16.21",
     "langgraph-nextjs-api-passthrough": "^0.0.4",
@@ -54,8 +56,7 @@
     "tailwindcss-animate": "^1.0.7",
     "use-stick-to-bottom": "^1.0.46",
     "uuid": "^11.1.0",
-    "zod": "^3.24.2",
-    "@google-cloud/storage": "^7.16.0"
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",

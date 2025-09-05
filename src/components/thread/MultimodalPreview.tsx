@@ -1,10 +1,10 @@
 import React from "react";
-import { File, Image as ImageIcon, X as XIcon } from "lucide-react";
-import type { Base64ContentBlock } from "@langchain/core/messages";
+import { File, X as XIcon } from "lucide-react";
+import type { DataContentBlock } from "@langchain/core/messages";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 export interface MultimodalPreviewProps {
-  block: Base64ContentBlock;
+  block: DataContentBlock;
   removable?: boolean;
   onRemove?: () => void;
   className?: string;
@@ -18,48 +18,49 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
   className,
   size = "md",
 }) => {
-  // Image block
+  // Image block (base64 or url)
   if (
     block.type === "image" &&
-    block.source_type === "base64" &&
     typeof block.mime_type === "string" &&
     block.mime_type.startsWith("image/")
   ) {
-    const url = `data:${block.mime_type};base64,${block.data}`;
-    let imgClass: string = "rounded-md object-cover h-16 w-16 text-lg";
-    if (size === "sm") imgClass = "rounded-md object-cover h-10 w-10 text-base";
-    if (size === "lg") imgClass = "rounded-md object-cover h-24 w-24 text-xl";
-    return (
-      <div className={cn("relative inline-block", className)}>
-        <Image
-          src={url}
-          alt={String(block.metadata?.name || "uploaded image")}
-          className={imgClass}
-          width={size === "sm" ? 16 : size === "md" ? 32 : 48}
-          height={size === "sm" ? 16 : size === "md" ? 32 : 48}
-        />
-        {removable && (
-          <button
-            type="button"
-            className="absolute top-1 right-1 z-10 rounded-full bg-gray-500 text-white hover:bg-gray-700"
-            onClick={onRemove}
-            aria-label="Remove image"
-          >
-            <XIcon className="h-4 w-4" />
-          </button>
-        )}
-      </div>
-    );
+    const url =
+      block.source_type === "base64"
+        ? `data:${block.mime_type};base64,${(block as any).data}`
+        : block.source_type === "url"
+          ? String((block as any).url)
+          : undefined;
+    if (url) {
+      let imgClass: string = "rounded-md object-cover h-16 w-16 text-lg";
+      if (size === "sm") imgClass = "rounded-md object-cover h-10 w-10 text-base";
+      if (size === "lg") imgClass = "rounded-md object-cover h-24 w-24 text-xl";
+      return (
+        <div className={cn("relative inline-block", className)}>
+          <Image
+            src={url}
+            alt={String((block as any).metadata?.name || "uploaded image")}
+            className={imgClass}
+            width={size === "sm" ? 16 : size === "md" ? 32 : 48}
+            height={size === "sm" ? 16 : size === "md" ? 32 : 48}
+          />
+          {removable && (
+            <button
+              type="button"
+              className="absolute top-1 right-1 z-10 rounded-full bg-gray-500 text-white hover:bg-gray-700"
+              onClick={onRemove}
+              aria-label="Remove image"
+            >
+              <XIcon className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      );
+    }
   }
 
   // PDF block
-  if (
-    block.type === "file" &&
-    block.source_type === "base64" &&
-    block.mime_type === "application/pdf"
-  ) {
-    const filename =
-      block.metadata?.filename || block.metadata?.name || "PDF file";
+  if (block.type === "file" && block.mime_type === "application/pdf") {
+    const filename = (block as any).metadata?.filename || (block as any).metadata?.name || "PDF file";
     return (
       <div
         className={cn(

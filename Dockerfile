@@ -19,10 +19,12 @@ COPY . .
 # Accept build arguments for Next.js public variables
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_ASSISTANT_ID
+ARG NEXT_PUBLIC_MODEL_PROVIDER
 
 # Set them as environment variables for the build
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_ASSISTANT_ID=$NEXT_PUBLIC_ASSISTANT_ID
+ENV NEXT_PUBLIC_MODEL_PROVIDER=$NEXT_PUBLIC_MODEL_PROVIDER
 
 # Build the application
 RUN corepack enable pnpm && pnpm run build

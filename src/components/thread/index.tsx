@@ -207,7 +207,14 @@ export function Thread() {
           b.type === "image"
             ? String(b.metadata?.name)
             : String(b.metadata?.filename);
-        const url = String(b.metadata?.gcsUrl ?? "");
+        const preferredUrl =
+          (b as any).url ||
+          (b.metadata as any)?.httpsUrl ||
+          (b.metadata as any)?.publicUrl ||
+          (b.metadata as any)?.gsUrl ||
+          (b.metadata as any)?.gcsUrl ||
+          "";
+        const url = String(preferredUrl);
         return `${i + 1}. FILE_NAME="${name}", FILE_URL="${url}", MIME_TYPE="${b.mime_type}"`;
       })
       .join("\n");

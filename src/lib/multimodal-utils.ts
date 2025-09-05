@@ -1,28 +1,37 @@
-import type { Base64ContentBlock } from "@langchain/core/messages";
+import type { DataContentBlock } from "@langchain/core/messages";
 import { toast } from "sonner";
 
-async function uploadToGCS(file: File): Promise<string> {
+type UploadResponse = {
+  gsUrl: string;
+  httpsUrl: string;
+  openaiFileId?: string;
+  mime_type: string;
+  filename: string;
+  size: number;
+};
+
+async function upload(file: File): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
-
-  const res = await fetch("/api/upload", {
-    method: "POST",
-    body: formData,
-  });
-
+  const res = await fetch("/api/upload", { method: "POST", body: formData });
   if (!res.ok) {
-    toast.error("Failed to upload file");
-    throw new Error("Failed to upload file");
+    let message = "Failed to upload";
+    try {
+      const data = await res.json();
+      message = data?.error || message;
+    } catch (_e) {
+      // ignore JSON parse errors
+    }
+    toast.error(message);
+    throw new Error(message);
   }
-
-  const data = (await res.json()) as { url: string };
-  return data.url;
+  return (await res.json()) as UploadResponse;
 }
 
 // Returns a Promise of a typed multimodal block for images or PDFs
 export async function fileToContentBlock(
   file: File,
-): Promise<Base64ContentBlock> {
+): Promise<DataContentBlock> {
   const supportedImageTypes = [
     "image/jpeg",
     "image/png",
@@ -38,71 +47,82 @@ export async function fileToContentBlock(
     return Promise.reject(new Error(`Unsupported file type: ${file.type}`));
   }
 
-  const data = await fileToBase64(file);
-  const gcsUrl = await uploadToGCS(file);
+  const { gsUrl, httpsUrl, openaiFileId } = await upload(file);
+
+  const provider = (process.env.NEXT_PUBLIC_MODEL_PROVIDER || "").toUpperCase();
 
   if (supportedImageTypes.includes(file.type)) {
     return {
       type: "image",
-      source_type: "base64",
+      source_type: "url",
       mime_type: file.type,
-      data,
-      metadata: { name: file.name, gcsUrl },
+      url: httpsUrl,
+      metadata: { name: file.name, gsUrl, httpsUrl },
     };
   }
 
   // PDF
+  if (provider === "OPENAI" && openaiFileId) {
+    // Return ID-based file block for OpenAI
+    return {
+      type: "file",
+      source_type: "id",
+      mime_type: "application/pdf",
+      id: openaiFileId,
+      metadata: { filename: file.name, gsUrl, httpsUrl },
+    };
+  }
+
+  // Default: send as public URL (non-OpenAI providers)
   return {
     type: "file",
-    source_type: "base64",
+    source_type: "url",
     mime_type: "application/pdf",
-    data,
-    metadata: { filename: file.name, gcsUrl },
+    url: httpsUrl,
+    metadata: { filename: file.name, gsUrl, httpsUrl },
   };
 }
 
 // Helper to convert File to base64 string
-export async function fileToBase64(file: File): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
-      // Remove the data:...;base64, prefix
-      resolve(result.split(",")[1]);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
+// Removed legacy base64 helpers; preview remains backward-compatible.
 
-// Type guard for Base64ContentBlock
-export function isBase64ContentBlock(
-  block: unknown,
-): block is Base64ContentBlock {
+// New: General guard for previewable blocks (image or PDF via base64 or url)
+export function isPreviewableContentBlock(block: unknown): block is DataContentBlock {
   if (typeof block !== "object" || block === null || !("type" in block))
     return false;
-  // file type (legacy)
-  if (
-    (block as { type: unknown }).type === "file" &&
-    "source_type" in block &&
-    (block as { source_type: unknown }).source_type === "base64" &&
-    "mime_type" in block &&
-    typeof (block as { mime_type?: unknown }).mime_type === "string" &&
-    ((block as { mime_type: string }).mime_type.startsWith("image/") ||
-      (block as { mime_type: string }).mime_type === "application/pdf")
-  ) {
-    return true;
+  const t = (block as { type?: unknown }).type;
+  const st = (block as { source_type?: unknown }).source_type;
+  const mt = (block as { mime_type?: unknown }).mime_type;
+  if (t === "image") {
+    return (
+      (st === "base64" || st === "url" || st === "id") &&
+      typeof mt === "string" &&
+      mt.startsWith("image/")
+    );
   }
-  // image type (new)
-  if (
-    (block as { type: unknown }).type === "image" &&
-    "source_type" in block &&
-    (block as { source_type: unknown }).source_type === "base64" &&
-    "mime_type" in block &&
-    typeof (block as { mime_type?: unknown }).mime_type === "string" &&
-    (block as { mime_type: string }).mime_type.startsWith("image/")
-  ) {
-    return true;
+  if (t === "file") {
+    return (
+      (st === "base64" || st === "url" || st === "id" || st === "text") &&
+      mt === "application/pdf"
+    );
   }
   return false;
+}
+
+// Convert gs://bucket/key to https://storage.googleapis.com/bucket/key
+export function toPublicHttpUrl(gsUrl: string): string {
+  if (!gsUrl) return gsUrl;
+  try {
+    if (gsUrl.startsWith("gs://")) {
+      const withoutScheme = gsUrl.slice("gs://".length);
+      const firstSlash = withoutScheme.indexOf("/");
+      if (firstSlash === -1) return gsUrl;
+      const bucket = withoutScheme.slice(0, firstSlash);
+      const object = withoutScheme.slice(firstSlash + 1);
+      return `https://storage.googleapis.com/${bucket}/${object}`;
+    }
+  } catch {
+    // fallthrough to return original
+  }
+  return gsUrl;
 }
