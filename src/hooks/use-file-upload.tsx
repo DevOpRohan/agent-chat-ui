@@ -21,6 +21,7 @@ export function useFileUpload({
   const [contentBlocks, setContentBlocks] = useState<DataContentBlock[]>(
     initialBlocks,
   );
+  const [isUploading, setIsUploading] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
@@ -73,10 +74,19 @@ export function useFileUpload({
       );
     }
 
-    const newBlocks = uniqueFiles.length
-      ? await Promise.all(uniqueFiles.map(fileToContentBlock))
-      : [];
-    setContentBlocks((prev) => [...prev, ...newBlocks]);
+    if (uniqueFiles.length > 0) {
+      setIsUploading(true);
+      try {
+        const newBlocks = await Promise.all(
+          uniqueFiles.map(fileToContentBlock),
+        );
+        setContentBlocks((prev) => [...prev, ...newBlocks]);
+      } catch (err) {
+        // error toasts are handled inside upload utilities
+      } finally {
+        setIsUploading(false);
+      }
+    }
     e.target.value = "";
   };
 
@@ -132,11 +142,19 @@ export function useFileUpload({
           `Duplicate file(s) detected: ${duplicateFiles.map((f) => f.name).join(", ")}. Each file can only be uploaded once per message.`,
         );
       }
-
-      const newBlocks = uniqueFiles.length
-        ? await Promise.all(uniqueFiles.map(fileToContentBlock))
-        : [];
-      setContentBlocks((prev) => [...prev, ...newBlocks]);
+      if (uniqueFiles.length > 0) {
+        setIsUploading(true);
+        try {
+          const newBlocks = await Promise.all(
+            uniqueFiles.map(fileToContentBlock),
+          );
+          setContentBlocks((prev) => [...prev, ...newBlocks]);
+        } catch (err) {
+          // error toasts are handled inside upload utilities
+        } finally {
+          setIsUploading(false);
+        }
+      }
     };
     const handleWindowDragEnd = (e: DragEvent) => {
       dragCounter.current = 0;
@@ -253,8 +271,17 @@ export function useFileUpload({
       );
     }
     if (uniqueFiles.length > 0) {
-      const newBlocks = await Promise.all(uniqueFiles.map(fileToContentBlock));
-      setContentBlocks((prev) => [...prev, ...newBlocks]);
+      setIsUploading(true);
+      try {
+        const newBlocks = await Promise.all(
+          uniqueFiles.map(fileToContentBlock),
+        );
+        setContentBlocks((prev) => [...prev, ...newBlocks]);
+      } catch (err) {
+        // error toasts are handled inside upload utilities
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -267,5 +294,6 @@ export function useFileUpload({
     resetBlocks,
     dragOver,
     handlePaste,
+    isUploading,
   };
 }

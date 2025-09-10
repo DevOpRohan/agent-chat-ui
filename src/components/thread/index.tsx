@@ -135,6 +135,7 @@ export function Thread() {
     resetBlocks,
     dragOver,
     handlePaste,
+    isUploading,
   } = useFileUpload();
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
@@ -522,12 +523,22 @@ export function Thread() {
                         </div>
                         <Label
                           htmlFor="file-input"
-                          className="flex cursor-pointer items-center gap-2"
+                          className={cn(
+                            "flex items-center gap-2",
+                            isUploading ? "cursor-wait" : "cursor-pointer",
+                          )}
+                          aria-disabled={isUploading}
                         >
                           <Plus className="size-5 text-gray-600" />
                           <span className="text-sm text-gray-600">
                             Upload PDF or Image
                           </span>
+                          {isUploading && (
+                            <span className="ml-2 flex items-center gap-2 text-sm text-gray-600">
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                              Uploading...
+                            </span>
+                          )}
                         </Label>
                         <input
                           id="file-input"
@@ -536,6 +547,7 @@ export function Thread() {
                           multiple
                           accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
                           className="hidden"
+                          disabled={isUploading}
                         />
                         {stream.isLoading ? (
                           <Button
@@ -552,6 +564,7 @@ export function Thread() {
                             className="ml-auto shadow-md transition-all"
                             disabled={
                               isLoading ||
+                              isUploading ||
                               (!input.trim() && contentBlocks.length === 0)
                             }
                           >
