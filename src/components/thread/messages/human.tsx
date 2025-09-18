@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 import { isPreviewableContentBlock } from "@/lib/multimodal-utils";
+import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
 
 function EditableContent({
   value,
@@ -56,6 +57,9 @@ export function HumanMessage({
     thread.submit(
       { messages: [newMessage] },
       {
+        config: {
+          recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+        },
         onDisconnect: "continue",
         checkpoint: parentCheckpoint,
         streamMode: ["values"],

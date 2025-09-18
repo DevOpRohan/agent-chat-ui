@@ -22,6 +22,7 @@ Client (Next public — must be passed at build time):
 - `NEXT_PUBLIC_API_URL`: your site’s `/api` base. Example: `https://your-site.run.app/api`.
 - `NEXT_PUBLIC_ASSISTANT_ID`: assistant id to use in the UI.
 - `NEXT_PUBLIC_MODEL_PROVIDER`: `OPENAI` or `GOOGLE`.
+- `NEXT_PUBLIC_AGENT_RECURSION_LIMIT`: optional recursion depth override (defaults to 50).
 
 The Dockerfile already accepts these as build args and sets them during the build.
 
@@ -55,17 +56,6 @@ gcloud secrets add-iam-policy-binding $SECRET \
   --role roles/secretmanager.secretAccessor
 ```
 
-In Cloud Run, set `OPENAI_API_KEY` from Secret:
-
-```
-gcloud run deploy agent-chat-ui \
-  --image gcr.io/cerebryai/question_crafter_agent_ui:latest \
-  --region asia-south1 \
-  --platform managed \
-  --allow-unauthenticated \
-  --set-secrets OPENAI_API_KEY=OPENAI_API_KEY:latest \
-  --set-env-vars MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=your-bucket
-```
 
 ## Build and Push (Multi-Arch)
 Use buildx so the image works on both amd64 (Cloud Run) and arm64 (Apple Silicon).
@@ -87,6 +77,7 @@ docker buildx build \
   --build-arg NEXT_PUBLIC_API_URL=https://agent-chat-ui-55487246974.asia-south1.run.app/api \
   --build-arg NEXT_PUBLIC_ASSISTANT_ID=o3_question_crafter_agent \
   --build-arg NEXT_PUBLIC_MODEL_PROVIDER=OPENAI \
+  --build-arg NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50 \
   --push .
 ```
 
@@ -108,7 +99,7 @@ gcloud run deploy agent-chat-ui \
   --region asia-south1 \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=your-bucket \
+  --set-env-vars MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=your-bucket,NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50 \
   --set-secrets OPENAI_API_KEY=OPENAI_API_KEY:latest
 ```
 
@@ -119,25 +110,6 @@ gcloud run deploy agent-chat-ui \
   --region asia-south1 \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=your-bucket \
+  --set-env-vars MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=your-bucket,NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50 \
   --set-secrets OPENAI_API_KEY=OPENAI_API_KEY:latest
 ```
-
-## Troubleshooting
-- Error: "Cannot insert legacy ACL..." → Your bucket has UBLA enabled. Remove object ACL usage and manage access via bucket IAM (the code already does this).
-- Error: "'file' is a required property" from OpenAI → Ensure we’re using Web `FormData` + `Blob` (already implemented).
-- Error: "exec format error" on Cloud Run → You deployed a single-arch arm64 image. Rebuild and push multi-arch using Buildx, or deploy the multi-arch digest.
-- App not listening on port → Cloud Run sets `PORT` (typically 8080). The app respects `process.env.PORT`. Locally, it defaults to 3000.
-
-## Quick Local Run
-```
-pnpm i
-pnpm dev
-# Open http://localhost:3000
-```
-
-## Summary
-- Build with Buildx and pass `NEXT_PUBLIC_*` build args.
-- Use GCS HTTPS URLs for images, and OpenAI file IDs for PDFs when on OPENAI.
-- Deploy by digest or timestamp tag to avoid accidental latest overwrites.
-

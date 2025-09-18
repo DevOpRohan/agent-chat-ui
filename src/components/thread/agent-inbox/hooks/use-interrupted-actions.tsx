@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END } from "@langchain/langgraph/web";
 import { useStreamContext } from "@/providers/Stream";
+import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
 
 interface UseInterruptedActionsInput {
   interrupt: HumanInterrupt;
@@ -85,6 +86,9 @@ export default function useInterruptedActions({
       thread.submit(
         {},
         {
+          config: {
+            recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+          },
           onDisconnect: "continue",
           command: {
             resume: response,
@@ -257,6 +261,9 @@ export default function useInterruptedActions({
       thread.submit(
         {},
         {
+          config: {
+            recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+          },
           onDisconnect: "continue",
           command: {
             goto: END,

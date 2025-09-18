@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from "uuid";
 import { ReactNode, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
 import { useStreamContext } from "@/providers/Stream";
 import { useState, FormEvent } from "react";
 import { Button } from "../ui/button";
@@ -243,6 +244,9 @@ export function Thread() {
     stream.submit(
       { messages: [...toolMessages, newHumanMessage], context },
       {
+        config: {
+          recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+        },
         onDisconnect: "continue",
         streamMode: ["values"],
         optimisticValues: (prev) => ({
@@ -268,6 +272,9 @@ export function Thread() {
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
     stream.submit(undefined, {
+      config: {
+        recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+      },
       checkpoint: parentCheckpoint,
       onDisconnect: "continue",
       streamMode: ["values"],
