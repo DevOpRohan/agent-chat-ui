@@ -56,6 +56,7 @@ export function HumanMessage({
     thread.submit(
       { messages: [newMessage] },
       {
+        onDisconnect: "continue",
         checkpoint: parentCheckpoint,
         streamMode: ["values"],
         optimisticValues: (prev) => {

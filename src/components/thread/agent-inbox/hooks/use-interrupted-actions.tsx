@@ -85,6 +85,7 @@ export default function useInterruptedActions({
       thread.submit(
         {},
         {
+          onDisconnect: "continue",
           command: {
             resume: response,
           },
@@ -256,6 +257,7 @@ export default function useInterruptedActions({
       thread.submit(
         {},
         {
+          onDisconnect: "continue",
           command: {
             goto: END,
           },

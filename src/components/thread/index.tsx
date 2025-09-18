@@ -243,6 +243,7 @@ export function Thread() {
     stream.submit(
       { messages: [...toolMessages, newHumanMessage], context },
       {
+        onDisconnect: "continue",
         streamMode: ["values"],
         optimisticValues: (prev) => ({
           ...prev,
@@ -268,6 +269,7 @@ export function Thread() {
     setFirstTokenReceived(false);
     stream.submit(undefined, {
       checkpoint: parentCheckpoint,
+      onDisconnect: "continue",
       streamMode: ["values"],
     });
   };
