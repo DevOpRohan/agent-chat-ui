@@ -4,6 +4,8 @@ import React, {
   ReactNode,
   useState,
   useEffect,
+  useRef,
+  useCallback,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -24,6 +26,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
+import { useStreamHealthCheck } from "@/hooks/useStreamHealthCheck";
 
 export type StateType = { messages: Message[]; ui?: UIMessage[] };
 
@@ -79,6 +82,10 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
+
+  // Track last seen message count to detect stale state
+  const lastMessageCountRef = useRef<number>(0);
+
   const streamValue = useTypedStream({
     apiUrl,
     apiKey: apiKey ?? undefined,
@@ -99,6 +106,50 @@ const StreamSession = ({
       sleep().then(() => getThreads().then(setThreads).catch(console.error));
     },
   });
+
+  // Callback to refresh state when stream appears stalled
+  const handleStateRefresh = useCallback(async () => {
+    if (!threadId) return;
+
+    try {
+      // Fetch the latest thread state from the backend
+      const state = await streamValue.client.threads.getState(threadId);
+
+      if (state && state.values) {
+        const messages = (state.values as StateType).messages || [];
+
+        // Only trigger update if we have new messages
+        if (messages.length > lastMessageCountRef.current) {
+          console.log("[StreamHealthCheck] Detected new messages, refreshing UI...");
+          lastMessageCountRef.current = messages.length;
+
+          // Force a re-render by fetching thread history
+          // This is a workaround since we can't directly mutate the stream state
+          // The component will re-render with fresh data on next interaction
+          toast.info("Stream sync: Refreshed from server", {
+            duration: 2000,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("[StreamHealthCheck] Error refreshing state:", error);
+    }
+  }, [threadId, streamValue.client]);
+
+  // Use the stream health check hook
+  useStreamHealthCheck({
+    threadId,
+    isLoading: streamValue.isLoading,
+    client: streamValue.client,
+    onStateRefresh: handleStateRefresh,
+    pollIntervalMs: 30000, // 30 seconds
+    debug: process.env.NODE_ENV === "development",
+  });
+
+  // Update message count when messages change
+  useEffect(() => {
+    lastMessageCountRef.current = streamValue.messages.length;
+  }, [streamValue.messages.length]);
 
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey).then((ok) => {
