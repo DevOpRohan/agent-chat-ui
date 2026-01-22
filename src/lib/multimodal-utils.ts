@@ -1,4 +1,4 @@
-import type { DataContentBlock } from "@langchain/core/messages";
+import { ContentBlock } from "@langchain/core/messages";
 import { toast } from "sonner";
 
 type UploadResponse = {
@@ -28,10 +28,27 @@ async function upload(file: File): Promise<UploadResponse> {
   return (await res.json()) as UploadResponse;
 }
 
+// Custom content block type that extends SDK types with URL-based sources
+// This supports our GCS URL-based uploads alongside base64
+export type ExtendedContentBlock = ContentBlock.Multimodal.Data | {
+  type: "image";
+  source_type: "url";
+  mime_type: string;
+  url: string;
+  metadata?: Record<string, unknown>;
+} | {
+  type: "file";
+  source_type: "url" | "id";
+  mime_type: string;
+  url?: string;
+  id?: string;
+  metadata?: Record<string, unknown>;
+};
+
 // Returns a Promise of a typed multimodal block for images or PDFs
 export async function fileToContentBlock(
   file: File,
-): Promise<DataContentBlock> {
+): Promise<ExtendedContentBlock> {
   const supportedImageTypes = [
     "image/jpeg",
     "image/png",
@@ -86,28 +103,33 @@ export async function fileToContentBlock(
 // Helper to convert File to base64 string
 // Removed legacy base64 helpers; preview remains backward-compatible.
 
-// New: General guard for previewable blocks (image or PDF via base64 or url)
-export function isPreviewableContentBlock(block: unknown): block is DataContentBlock {
+// Type guard for previewable content blocks (image or PDF via base64, url, or id)
+export function isPreviewableContentBlock(block: unknown): block is ExtendedContentBlock {
   if (typeof block !== "object" || block === null || !("type" in block))
     return false;
   const t = (block as { type?: unknown }).type;
   const st = (block as { source_type?: unknown }).source_type;
-  const mt = (block as { mime_type?: unknown }).mime_type;
+  const mt = (block as { mime_type?: unknown; mimeType?: unknown }).mime_type ||
+    (block as { mimeType?: unknown }).mimeType;
+
   if (t === "image") {
     return (
-      (st === "base64" || st === "url" || st === "id") &&
+      (st === "base64" || st === "url" || st === "id" || !st) &&
       typeof mt === "string" &&
       mt.startsWith("image/")
     );
   }
   if (t === "file") {
     return (
-      (st === "base64" || st === "url" || st === "id" || st === "text") &&
+      (st === "base64" || st === "url" || st === "id" || st === "text" || !st) &&
       mt === "application/pdf"
     );
   }
   return false;
 }
+
+// Alias for backward compatibility with upstream code
+export const isBase64ContentBlock = isPreviewableContentBlock;
 
 // Convert gs://bucket/key to https://storage.googleapis.com/bucket/key
 export function toPublicHttpUrl(gsUrl: string): string {

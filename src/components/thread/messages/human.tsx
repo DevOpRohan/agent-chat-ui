@@ -63,6 +63,8 @@ export function HumanMessage({
         onDisconnect: "continue",
         checkpoint: parentCheckpoint,
         streamMode: ["values"],
+        streamSubgraphs: true,
+        streamResumable: true,
         optimisticValues: (prev) => {
           const values = meta?.firstSeenState?.values;
           if (!values) return prev;

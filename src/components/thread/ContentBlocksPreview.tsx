@@ -1,10 +1,10 @@
 import React from "react";
-import type { DataContentBlock } from "@langchain/core/messages";
 import { MultimodalPreview } from "./MultimodalPreview";
 import { cn } from "@/lib/utils";
+import { ExtendedContentBlock } from "@/lib/multimodal-utils";
 
 interface ContentBlocksPreviewProps {
-  blocks: DataContentBlock[];
+  blocks: ExtendedContentBlock[];
   onRemove: (idx: number) => void;
   size?: "sm" | "md" | "lg";
   className?: string;

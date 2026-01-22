@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, ChangeEvent } from "react";
 import { toast } from "sonner";
-import type { DataContentBlock } from "@langchain/core/messages";
-import { fileToContentBlock } from "@/lib/multimodal-utils";
+import { ExtendedContentBlock, fileToContentBlock } from "@/lib/multimodal-utils";
 
 export const SUPPORTED_FILE_TYPES = [
   "image/jpeg",
@@ -12,13 +11,13 @@ export const SUPPORTED_FILE_TYPES = [
 ];
 
 interface UseFileUploadOptions {
-  initialBlocks?: DataContentBlock[];
+  initialBlocks?: ExtendedContentBlock[];
 }
 
 export function useFileUpload({
   initialBlocks = [],
 }: UseFileUploadOptions = {}) {
-  const [contentBlocks, setContentBlocks] = useState<DataContentBlock[]>(
+  const [contentBlocks, setContentBlocks] = useState<ExtendedContentBlock[]>(
     initialBlocks,
   );
   const [isUploading, setIsUploading] = useState(false);
@@ -26,21 +25,22 @@ export function useFileUpload({
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
 
-  const isDuplicate = (file: File, blocks: DataContentBlock[]) => {
+  // Helper to check for duplicates - handles both mimeType and mime_type
+  const isDuplicate = (file: File, blocks: ExtendedContentBlock[]) => {
     if (file.type === "application/pdf") {
       return blocks.some(
         (b) =>
           b.type === "file" &&
-          b.mime_type === "application/pdf" &&
-          b.metadata?.filename === file.name,
+          ((b as any).mimeType === "application/pdf" || (b as any).mime_type === "application/pdf") &&
+          (b as any).metadata?.filename === file.name,
       );
     }
     if (SUPPORTED_FILE_TYPES.includes(file.type)) {
       return blocks.some(
         (b) =>
           b.type === "image" &&
-          b.metadata?.name === file.name &&
-          b.mime_type === file.type,
+          (b as any).metadata?.name === file.name &&
+          ((b as any).mimeType === file.type || (b as any).mime_type === file.type),
       );
     }
     return false;
@@ -239,27 +239,27 @@ export function useFileUpload({
     const invalidFiles = files.filter(
       (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
     );
-    const isDuplicate = (file: File) => {
+    const checkDuplicate = (file: File) => {
       if (file.type === "application/pdf") {
         return contentBlocks.some(
           (b) =>
             b.type === "file" &&
-            b.mime_type === "application/pdf" &&
-            b.metadata?.filename === file.name,
+            ((b as any).mimeType === "application/pdf" || (b as any).mime_type === "application/pdf") &&
+            (b as any).metadata?.filename === file.name,
         );
       }
       if (SUPPORTED_FILE_TYPES.includes(file.type)) {
         return contentBlocks.some(
           (b) =>
             b.type === "image" &&
-            b.metadata?.name === file.name &&
-            b.mime_type === file.type,
+            (b as any).metadata?.name === file.name &&
+            ((b as any).mimeType === file.type || (b as any).mime_type === file.type),
         );
       }
       return false;
     };
-    const duplicateFiles = validFiles.filter(isDuplicate);
-    const uniqueFiles = validFiles.filter((file) => !isDuplicate(file));
+    const duplicateFiles = validFiles.filter(checkDuplicate);
+    const uniqueFiles = validFiles.filter((file) => !checkDuplicate(file));
     if (invalidFiles.length > 0) {
       toast.error(
         "You have pasted an invalid file type. Please paste a JPEG, PNG, GIF, WEBP image or a PDF.",
