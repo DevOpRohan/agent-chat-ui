@@ -1,5 +1,6 @@
 import { validate } from "uuid";
 import { getApiKey } from "@/lib/api-key";
+import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 import { Thread } from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
 import {
@@ -40,6 +41,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threadsLoading, setThreadsLoading] = useState(false);
 
   const getThreads = useCallback(async (): Promise<Thread[]> => {
+    if (!THREAD_HISTORY_ENABLED) return [];
     if (!apiUrl || !assistantId) return [];
     const client = createClient(apiUrl, getApiKey() ?? undefined);
 

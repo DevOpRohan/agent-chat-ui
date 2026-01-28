@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { useThreads } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
 import { useEffect } from "react";
+import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 
 import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
@@ -84,15 +85,17 @@ export default function ThreadHistory() {
 
   const { getThreads, threads, setThreads, threadsLoading, setThreadsLoading } =
     useThreads();
+  const historyDisabled = !THREAD_HISTORY_ENABLED;
 
   useEffect(() => {
+    if (historyDisabled) return;
     if (typeof window === "undefined") return;
     setThreadsLoading(true);
     getThreads()
       .then(setThreads)
       .catch(console.error)
       .finally(() => setThreadsLoading(false));
-  }, []);
+  }, [getThreads, historyDisabled, setThreads, setThreadsLoading]);
 
   return (
     <>
@@ -113,7 +116,11 @@ export default function ThreadHistory() {
             Thread History
           </h1>
         </div>
-        {threadsLoading ? (
+        {historyDisabled ? (
+          <div className="px-4 text-sm text-slate-500">
+            Thread history is disabled.
+          </div>
+        ) : threadsLoading ? (
           <ThreadHistoryLoading />
         ) : (
           <ThreadList threads={threads} />
@@ -134,10 +141,16 @@ export default function ThreadHistory() {
             <SheetHeader>
               <SheetTitle>Thread History</SheetTitle>
             </SheetHeader>
-            <ThreadList
-              threads={threads}
-              onThreadClick={() => setChatHistoryOpen((o) => !o)}
-            />
+            {historyDisabled ? (
+              <div className="px-1 text-sm text-slate-500">
+                Thread history is disabled.
+              </div>
+            ) : (
+              <ThreadList
+                threads={threads}
+                onThreadClick={() => setChatHistoryOpen((o) => !o)}
+              />
+            )}
           </SheetContent>
         </Sheet>
       </div>

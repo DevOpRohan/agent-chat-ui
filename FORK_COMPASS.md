@@ -1,6 +1,6 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-01-29_  
+_Last updated: 2026-01-28_  
 _Branch: testing_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
@@ -132,6 +132,7 @@ Tracking anchor commits:
 - Upload label shows spinner + “Uploading...”
 - Tool call results render in scrollable `<pre>` blocks with prettier JSON formatting.
 - Human message bubble alignment adjusted (removed `text-right`).
+- Thread history fetching is temporarily disabled until thread ownership is enforced.
 
 ---
 
@@ -185,6 +186,7 @@ Use this as a jump list when editing or debugging:
 
 **UI formatting tweaks**
 - `src/components/thread/messages/tool-calls.tsx`
+- `src/components/thread/history/index.tsx`
 
 **Config, build, deploy**
 - `next.config.mjs`

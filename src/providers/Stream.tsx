@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { ArrowRight } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
+import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 
@@ -100,7 +101,9 @@ const StreamSession = ({
       setThreadId(id);
       // Refetch threads list when thread ID changes.
       // Wait for some seconds before fetching so we're able to get the new thread that was created.
-      sleep().then(() => getThreads().then(setThreads).catch(console.error));
+      if (THREAD_HISTORY_ENABLED) {
+        sleep().then(() => getThreads().then(setThreads).catch(console.error));
+      }
     },
   });
 

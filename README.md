@@ -78,6 +78,9 @@ When these environment variables are set, the application will use them instead 
 > - Sends images as URL content blocks for small client payloads and fast previews.
 > - Sends PDFs as file ID blocks when using OpenAI (to satisfy LangChain’s OpenAI converter), or as URL blocks for other providers. See FORK_COMPASS.md for details.
 
+> [!NOTE]
+> Thread history list is temporarily disabled in this fork until per-user thread ownership is supported.
+
 ### Additional Docs
 - Fork customization guide (includes upload refactor details): `FORK_COMPASS.md`
 - Build, push, and Cloud Run deployment: `DEPLOYMENT_GUIDE.md`
