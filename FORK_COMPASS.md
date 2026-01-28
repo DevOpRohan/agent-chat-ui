@@ -1,0 +1,229 @@
+# Fork Compass — Agent Chat UI Customizations
+
+_Last updated: 2026-01-29_  
+_Branch: testing_  
+_Upstream: langchain-ai/agent-chat-ui (upstream/main)_
+
+This document is a high-detail map of how this fork diverges from the upstream Agent Chat UI. It is designed so a new developer can quickly understand what was customized, why it exists, and where to edit it.
+
+## Table of Contents
+- [1) Executive Summary](#1-executive-summary)
+- [2) Diff Snapshot (Upstream vs Fork)](#2-diff-snapshot-upstream-vs-fork)
+- [3) Customization Map (by area)](#3-customization-map-by-area)
+  - [3.1 Upload Pipeline (GCS + OpenAI Files)](#31-upload-pipeline-gcs--openai-files)
+    - [3.1.1 Implementation Notes & Limits](#311-implementation-notes--limits)
+  - [3.2 Multimodal Content Blocks & Previews](#32-multimodal-content-blocks--previews)
+  - [3.3 Thread Submission Behavior (recursion + disconnects)](#33-thread-submission-behavior-recursion--disconnects)
+  - [3.4 UX Polish & Rendering Tweaks](#34-ux-polish--rendering-tweaks)
+  - [3.5 Configuration & Deployment](#35-configuration--deployment)
+  - [3.6 Documentation Added](#36-documentation-added)
+- [4) File Navigation Index](#4-file-navigation-index)
+- [5) Fork-only Commit Log](#5-fork-only-commit-log)
+- [6) Notes / Known Deviations](#6-notes--known-deviations)
+
+---
+
+## 1) Executive Summary
+This fork focuses on **efficient multimodal uploads, OpenAI-compatible PDF handling, deployment readiness, and a few UX tweaks**. The biggest architectural change is a new **server-side upload pipeline** that stores files in GCS, optionally uploads PDFs to OpenAI Files API, and then constructs **URL/ID-based content blocks** instead of base64-heavy payloads.
+
+Key differences in one sentence:
+- **Uploads now go to GCS first (and optionally OpenAI), content blocks are URL/ID-based, and the UI and submission configs were adjusted for reliability and UX.**
+
+---
+
+## 2) Diff Snapshot (Upstream vs Fork)
+- **Upstream status:** 0 commits behind
+- **Fork status:** 14 commits ahead
+- **Files changed vs upstream:** 21
+- **Net diff vs upstream:** +1264 / -183 lines
+
+Tracking anchor commits:
+- **Fork HEAD:** `b73a84a`
+- **Upstream main:** `1a0e8af`
+
+---
+
+## 3) Customization Map (by area)
+
+### 3.1 Upload Pipeline (GCS + OpenAI Files)
+**What changed:** Uploads are handled server-side, stored in GCS, and optionally forwarded to OpenAI Files API for PDFs when `MODEL_PROVIDER=OPENAI`.
+
+**Why:**
+- Avoids large base64 payloads in messages.
+- Makes PDFs OpenAI-compatible using file IDs (LangChain converter rejects URL-based `file` blocks for OpenAI).
+- Keeps upload logic centralized with size validation and metadata handling.
+
+**Primary files:**
+- `src/app/api/upload/route.ts`
+- `src/app/api/openai/upload/route.ts`
+
+**Key behaviors:**
+- `/api/upload` accepts multipart `file`, enforces 100MB max, uploads to GCS, and returns `{ gsUrl, httpsUrl, openaiFileId?, ... }`.
+- When `MODEL_PROVIDER=OPENAI` and file is PDF, server uploads to OpenAI Files API in-memory and returns `openaiFileId`.
+- `/api/openai/upload` supports URL-based OpenAI file uploads and returns file metadata to the client.
+
+**Operational knobs:**
+- `GCS_BUCKET_NAME` (server)
+- `MODEL_PROVIDER` and `NEXT_PUBLIC_MODEL_PROVIDER`
+- `OPENAI_API_KEY` and `OPENAI_FILES_*`
+
+---
+
+#### 3.1.1 Implementation Notes & Limits
+- **Size cap:** 100MB enforced twice (file size + buffer length). Returns `413` with `{ max_bytes, content_length }`.
+- **In-memory upload:** Files are read once into memory and uploaded to GCS via `file.save(...)` with `resumable: false`.
+- **Uniform Bucket-Level Access (UBLA):** Object ACLs are not set. Public access must be handled at the bucket IAM policy, or use signed URLs.
+- **OpenAI Files:** PDFs use Web `FormData` + `Blob` (not Node `form-data`) to avoid OpenAI rejecting the `file` field. Expiry defaults to ~90 days unless overridden by `OPENAI_FILES_EXPIRES_AFTER_*`.
+- **Failure mode:** If OpenAI upload fails, the API still returns GCS URLs so uploads remain usable for non-OpenAI paths.
+- **/api/openai/upload path:** Performs an optional `HEAD` check for size, then downloads the file and uploads it to OpenAI; returns structured error info on failures.
+- **Preview limitation:** ID-based PDF blocks render as filename chips (no inline PDF preview). URL PDFs use a filename chip as well.
+
+---
+
+### 3.2 Multimodal Content Blocks & Previews
+**What changed:** The client now constructs **URL/ID-based blocks** instead of base64 for images/PDFs. UI previews handle URL-based images and ID-based PDFs.
+
+**Primary files:**
+- `src/lib/multimodal-utils.ts`
+- `src/hooks/use-file-upload.tsx`
+- `src/components/thread/MultimodalPreview.tsx`
+- `src/components/thread/ContentBlocksPreview.tsx`
+
+**Key behaviors:**
+- `fileToContentBlock` calls `/api/upload`, then creates:
+  - **Images:** `{ type: "image", source_type: "url", url: httpsUrl }`
+  - **PDFs (OpenAI):** `{ type: "file", source_type: "id", id: openaiFileId }`
+  - **PDFs (others):** `{ type: "file", source_type: "url", url: httpsUrl }`
+- Added `ExtendedContentBlock` and `isPreviewableContentBlock` to support base64 + URL + ID formats.
+- Preview components now support URL-based images and ID-based PDFs.
+
+---
+
+### 3.3 Thread Submission Behavior (recursion + disconnects)
+**What changed:** Thread submissions pass a recursion limit and keep the run alive on disconnect; stream auto-reconnects on mount.
+
+**Primary files:**
+- `src/lib/constants.ts`
+- `src/components/thread/index.tsx`
+- `src/components/thread/messages/human.tsx`
+- `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`
+- `src/providers/Stream.tsx`
+
+**Key behaviors:**
+- `DEFAULT_AGENT_RECURSION_LIMIT` is read from `NEXT_PUBLIC_AGENT_RECURSION_LIMIT` (fallback 50).
+- All `thread.submit` calls include:
+  - `config: { recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT }`
+  - `onDisconnect: "continue"`
+- Stream provider sets `reconnectOnMount: true` so state resumes after refresh.
+
+---
+
+### 3.4 UX Polish & Rendering Tweaks
+**What changed:** Small but important UX changes, especially around uploads and tool-call formatting.
+
+**Primary files:**
+- `src/hooks/use-file-upload.tsx`
+- `src/components/thread/index.tsx`
+- `src/components/thread/messages/tool-calls.tsx`
+- `src/components/thread/messages/human.tsx`
+
+**Key behaviors:**
+- Upload flow now exposes `isUploading` and disables inputs while files upload.
+- Upload label shows spinner + “Uploading...”
+- Tool call results render in scrollable `<pre>` blocks with prettier JSON formatting.
+- Human message bubble alignment adjusted (removed `text-right`).
+
+---
+
+### 3.5 Configuration & Deployment
+**What changed:** Build/deploy setup is configured for GCS, large uploads, and standalone Next output.
+
+**Primary files:**
+- `next.config.mjs`
+- `.env.example`
+- `Dockerfile`
+- `package.json`
+
+**Key behaviors:**
+- Next output set to `standalone` for containerized deploys.
+- `serverActions.bodySizeLimit` increased to `100mb`.
+- `images.remotePatterns` allows `storage.googleapis.com` for URL-based image previews.
+- Dockerfile accepts build args for all `NEXT_PUBLIC_*` variables used at build time.
+- Added deps: `@google-cloud/storage`, `form-data`.
+
+---
+
+### 3.6 Documentation Added
+**What changed:** Added internal docs to explain uploads and deployment.
+
+**Primary files:**
+- `FORK_COMPASS.md` — this guide (includes upload refactor details).
+- `DEPLOYMENT_GUIDE.md` — multi-arch build + Cloud Run steps.
+- `README.md` — updated env vars and pointers to new docs.
+
+---
+
+## 4) File Navigation Index
+Use this as a jump list when editing or debugging:
+
+**Uploads & provider logic**
+- `src/app/api/upload/route.ts`
+- `src/app/api/openai/upload/route.ts`
+- `src/lib/multimodal-utils.ts`
+- `src/hooks/use-file-upload.tsx`
+
+**UI preview components**
+- `src/components/thread/MultimodalPreview.tsx`
+- `src/components/thread/ContentBlocksPreview.tsx`
+
+**Thread submission and run behavior**
+- `src/components/thread/index.tsx`
+- `src/components/thread/messages/human.tsx`
+- `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`
+- `src/lib/constants.ts`
+- `src/providers/Stream.tsx`
+
+**UI formatting tweaks**
+- `src/components/thread/messages/tool-calls.tsx`
+
+**Config, build, deploy**
+- `next.config.mjs`
+- `.env.example`
+- `Dockerfile`
+- `package.json`
+
+**Docs**
+- `FORK_COMPASS.md`
+- `DEPLOYMENT_GUIDE.md`
+- `README.md`
+
+---
+
+## 5) Fork-only Commit Log
+Commits unique to this fork (upstream/main..HEAD):
+- `b73a84a` chore: remove stream health polling
+- `659c943` Merge upstream/main: SDK 1.0 + upstream fixes
+- `93be0c5` feat: add stream health polling for stale connection detection (later removed)
+- `faafbf2` improve tool call formatting
+- `9087615` Make agent recursion limit configurable
+- `9d6c559` Ensure thread submissions continue on disconnect
+- `38a0bac` Upload UX: show spinner and disable inputs while files upload
+- `2a9e2a3` feat(multimodal,deploy): efficient uploads + OpenAI file IDs; add deployment docs and env plumbing
+- `68d0685` Merge pull request #3 from hars008/fix/text-alignment
+- `f339e1b` corrected text alignment
+- `be88ac1` Updated nect.confing.mjs file for production grade docker deployment
+- `a618a1e` Added Docker File
+- `383d0e6` Merge pull request #1 from DevOpRohan/codex/modify-agent-chat-ui-to-add-gcs-file-metadata
+- `6338f64` Add GCS upload and attachment metadata
+
+---
+
+## 6) Notes / Known Deviations
+- **Polling removed:** A stream health polling hook was added and later removed. Current behavior relies on `onDisconnect: "continue"` plus `reconnectOnMount`.
+- **Tracked build artifact:** `tsconfig.tsbuildinfo` is currently tracked in git (from upstream diff list). Consider removing if you want a clean repo.
+- **OpenAI vs non-OpenAI:** PDF blocks use `source_type: "id"` only when OpenAI is the provider; otherwise they use URL blocks.
+- **Private buckets:** If the GCS bucket is private, previews require signed URLs or IAM policy changes (current flow assumes public-read or equivalent).
+
+---
+
+For deployment steps, open `DEPLOYMENT_GUIDE.md`.

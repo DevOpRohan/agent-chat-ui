@@ -76,10 +76,10 @@ When these environment variables are set, the application will use them instead 
 > [!NOTE]
 > For image/PDF uploads, this project now:
 > - Sends images as URL content blocks for small client payloads and fast previews.
-> - Sends PDFs as file ID blocks when using OpenAI (to satisfy LangChain’s OpenAI converter), or as URL blocks for other providers. See CODE_CHANGES.md for details.
+> - Sends PDFs as file ID blocks when using OpenAI (to satisfy LangChain’s OpenAI converter), or as URL blocks for other providers. See FORK_COMPASS.md for details.
 
 ### Additional Docs
-- Multimodal upload refactor and full code walkthrough: `CODE_CHANGES.md`
+- Fork customization guide (includes upload refactor details): `FORK_COMPASS.md`
 - Build, push, and Cloud Run deployment: `DEPLOYMENT_GUIDE.md`
 
 ## Hiding Messages in the Chat
