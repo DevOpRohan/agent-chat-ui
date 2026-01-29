@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { LangGraphLogoSVG } from "@/components/icons/langgraph";
 import { Label } from "@/components/ui/label";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, LoaderCircle } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
@@ -67,25 +67,32 @@ async function checkGraphStatus(
   }
 }
 
-const StreamSession = ({
+// Inner component that actually uses the stream hook
+// This is separate to ensure the hook is not called conditionally
+const StreamSessionInner = ({
   children,
   apiKey,
   apiUrl,
   assistantId,
+  initialThreadId,
 }: {
   children: ReactNode;
   apiKey: string | null;
   apiUrl: string;
   assistantId: string;
+  initialThreadId: string | null;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
+
+  // Use the hydrated threadId on first render, then nuqs takes over
+  const effectiveThreadId = threadId ?? initialThreadId;
 
   const streamValue = useTypedStream({
     apiUrl,
     apiKey: apiKey ?? undefined,
     assistantId,
-    threadId: threadId ?? null,
+    threadId: effectiveThreadId,
     fetchStateHistory: true,
     // Auto-resume stream after page refresh to stay in sync with backend
     reconnectOnMount: true,
@@ -129,6 +136,53 @@ const StreamSession = ({
     <StreamContext.Provider value={streamValue}>
       {children}
     </StreamContext.Provider>
+  );
+};
+
+// Wrapper component that ensures threadId is hydrated before mounting the stream session
+// This fixes the reconnectOnMount timing issue where the SDK's reconnect logic would run
+// before nuqs had parsed the threadId from the URL
+const StreamSession = ({
+  children,
+  apiKey,
+  apiUrl,
+  assistantId,
+}: {
+  children: ReactNode;
+  apiKey: string | null;
+  apiUrl: string;
+  assistantId: string;
+}) => {
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [initialThreadId, setInitialThreadId] = useState<string | null>(null);
+
+  // On first render, check URL for threadId and set hydration state
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const threadIdFromUrl = urlParams.get("threadId");
+    setInitialThreadId(threadIdFromUrl);
+    setIsHydrated(true);
+  }, []);
+
+  // Show brief loading state while waiting for hydration
+  // This ensures the SDK's reconnectOnMount logic has the correct threadId on first render
+  if (!isHydrated) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center">
+        <LoaderCircle className="h-8 w-8 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  return (
+    <StreamSessionInner
+      apiKey={apiKey}
+      apiUrl={apiUrl}
+      assistantId={assistantId}
+      initialThreadId={initialThreadId}
+    >
+      {children}
+    </StreamSessionInner>
   );
 };
 
