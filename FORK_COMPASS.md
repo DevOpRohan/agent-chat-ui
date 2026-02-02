@@ -1,7 +1,7 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-01-28_  
-_Branch: testing_  
+_Last updated: 2026-02-02_  
+_Branch: main_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
 This document is a high-detail map of how this fork diverges from the upstream Agent Chat UI. It is designed so a new developer can quickly understand what was customized, why it exists, and where to edit it.
@@ -9,6 +9,7 @@ This document is a high-detail map of how this fork diverges from the upstream A
 ## Table of Contents
 - [1) Executive Summary](#1-executive-summary)
 - [2) Diff Snapshot (Upstream vs Fork)](#2-diff-snapshot-upstream-vs-fork)
+- [2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)](#21-recent-fork-changes-since-upstream-sync-2026-01-22)
 - [3) Customization Map (by area)](#3-customization-map-by-area)
   - [3.1 Upload Pipeline (GCS + OpenAI Files)](#31-upload-pipeline-gcs--openai-files)
     - [3.1.1 Implementation Notes & Limits](#311-implementation-notes--limits)
@@ -28,18 +29,28 @@ This fork focuses on **efficient multimodal uploads, OpenAI-compatible PDF handl
 
 Key differences in one sentence:
 - **Uploads now go to GCS first (and optionally OpenAI), content blocks are URL/ID-based, and the UI and submission configs were adjusted for reliability and UX.**
+Recent post-sync changes (after 2026-01-22) include **disabling thread history list**, **removing stream health polling**, and **documentation updates**.
 
 ---
 
 ## 2) Diff Snapshot (Upstream vs Fork)
 - **Upstream status:** 0 commits behind
-- **Fork status:** 14 commits ahead
-- **Files changed vs upstream:** 21
-- **Net diff vs upstream:** +1264 / -183 lines
+- **Fork status:** 19 commits ahead
+- **Files changed vs upstream:** 25
+- **Net diff vs upstream:** +1914 / -193 lines
 
 Tracking anchor commits:
-- **Fork HEAD:** `b73a84a`
+- **Fork HEAD:** `645cbdb`
 - **Upstream main:** `1a0e8af`
+
+---
+
+## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-01-29: Disable thread history list until ownership. Files: `src/components/thread/history/index.tsx`, `src/lib/constants.ts`, `src/providers/Stream.tsx`, `src/providers/Thread.tsx`, `README.md`, `FORK_COMPASS.md`.
+- 2026-01-29: Remove stream health polling. Files: `src/providers/Stream.tsx`; removed `src/hooks/useStreamHealthCheck.ts`, `plan.md`.
+- 2026-01-29: Add fork agent instructions. Files: `AGENTS.md`.
+- 2026-01-29: Update deployment docs. Files: `DEPLOYMENT_GUIDE.md`.
+- 2026-01-29: Consolidate fork docs. Files: `FORK_COMPASS.md`, `README.md`; removed `CODE_CHANGES.md`.
 
 ---
 
@@ -100,7 +111,7 @@ Tracking anchor commits:
 ---
 
 ### 3.3 Thread Submission Behavior (recursion + disconnects)
-**What changed:** Thread submissions pass a recursion limit and keep the run alive on disconnect; stream auto-reconnects on mount.
+**What changed:** Thread submissions pass a recursion limit and keep the run alive on disconnect.
 
 **Primary files:**
 - `src/lib/constants.ts`
@@ -114,7 +125,6 @@ Tracking anchor commits:
 - All `thread.submit` calls include:
   - `config: { recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT }`
   - `onDisconnect: "continue"`
-- Stream provider sets `reconnectOnMount: true` so state resumes after refresh.
 
 ---
 
@@ -132,7 +142,7 @@ Tracking anchor commits:
 - Upload label shows spinner + “Uploading...”
 - Tool call results render in scrollable `<pre>` blocks with prettier JSON formatting.
 - Human message bubble alignment adjusted (removed `text-right`).
-- Thread history fetching is temporarily disabled until thread ownership is enforced.
+- Thread history list is disabled until thread ownership is enforced; controlled by `THREAD_HISTORY_ENABLED`.
 
 ---
 
@@ -161,6 +171,7 @@ Tracking anchor commits:
 - `FORK_COMPASS.md` — this guide (includes upload refactor details).
 - `DEPLOYMENT_GUIDE.md` — multi-arch build + Cloud Run steps.
 - `README.md` — updated env vars and pointers to new docs.
+- `AGENTS.md` — fork-specific agent instructions.
 
 ---
 
@@ -198,11 +209,17 @@ Use this as a jump list when editing or debugging:
 - `FORK_COMPASS.md`
 - `DEPLOYMENT_GUIDE.md`
 - `README.md`
+- `AGENTS.md`
 
 ---
 
 ## 5) Fork-only Commit Log
 Commits unique to this fork (upstream/main..HEAD):
+- `645cbdb` Updated Deployment
+- `7e75347` fix: stream auto-reconnect on page refresh
+- `4fc9b47` Added agents.md
+- `a3a8de5` fix: disable thread history list until ownership
+- `2934dfd` docs: consolidate fork customization notes
 - `b73a84a` chore: remove stream health polling
 - `659c943` Merge upstream/main: SDK 1.0 + upstream fixes
 - `93be0c5` feat: add stream health polling for stale connection detection (later removed)
@@ -221,7 +238,8 @@ Commits unique to this fork (upstream/main..HEAD):
 ---
 
 ## 6) Notes / Known Deviations
-- **Polling removed:** A stream health polling hook was added and later removed. Current behavior relies on `onDisconnect: "continue"` plus `reconnectOnMount`.
+- **Polling removed:** A stream health polling hook was added and later removed. Current behavior relies on `onDisconnect: "continue"`.
+- **Docs consolidated:** `CODE_CHANGES.md` was removed in favor of this document.
 - **Tracked build artifact:** `tsconfig.tsbuildinfo` is currently tracked in git (from upstream diff list). Consider removing if you want a clean repo.
 - **OpenAI vs non-OpenAI:** PDF blocks use `source_type: "id"` only when OpenAI is the provider; otherwise they use URL blocks.
 - **Private buckets:** If the GCS bucket is private, previews require signed URLs or IAM policy changes (current flow assumes public-read or equivalent).
