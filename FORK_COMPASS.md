@@ -29,23 +29,24 @@ This fork focuses on **efficient multimodal uploads, OpenAI-compatible PDF handl
 
 Key differences in one sentence:
 - **Uploads now go to GCS first (and optionally OpenAI), content blocks are URL/ID-based, and the UI and submission configs were adjusted for reliability and UX.**
-Recent post-sync changes (after 2026-01-22) include **disabling thread history list**, **removing stream health polling**, and **documentation updates**.
+Recent post-sync changes (after 2026-01-22) include **disabling thread history list**, **removing stream health polling**, **removing stream auto-reconnect**, and **documentation updates**.
 
 ---
 
 ## 2) Diff Snapshot (Upstream vs Fork)
 - **Upstream status:** 0 commits behind
-- **Fork status:** 19 commits ahead
+- **Fork status:** 20 commits ahead
 - **Files changed vs upstream:** 25
-- **Net diff vs upstream:** +1914 / -193 lines
+- **Net diff vs upstream:** +1873 / -190 lines
 
 Tracking anchor commits:
-- **Fork HEAD:** `645cbdb`
+- **Fork HEAD:** `fbd3d13`
 - **Upstream main:** `1a0e8af`
 
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-02: Remove stream auto-reconnect (buggy). Files: `src/providers/Stream.tsx`, `FORK_COMPASS.md`.
 - 2026-01-29: Disable thread history list until ownership. Files: `src/components/thread/history/index.tsx`, `src/lib/constants.ts`, `src/providers/Stream.tsx`, `src/providers/Thread.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-01-29: Remove stream health polling. Files: `src/providers/Stream.tsx`; removed `src/hooks/useStreamHealthCheck.ts`, `plan.md`.
 - 2026-01-29: Add fork agent instructions. Files: `AGENTS.md`.
@@ -215,6 +216,7 @@ Use this as a jump list when editing or debugging:
 
 ## 5) Fork-only Commit Log
 Commits unique to this fork (upstream/main..HEAD):
+- `fbd3d13` fix: remove stream auto-reconnect
 - `645cbdb` Updated Deployment
 - `7e75347` fix: stream auto-reconnect on page refresh
 - `4fc9b47` Added agents.md
