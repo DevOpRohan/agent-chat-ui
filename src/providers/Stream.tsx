@@ -140,6 +140,7 @@ const StreamSession = ({
     apiKey: isIapAuth ? undefined : (apiKey ?? undefined),
     assistantId,
     threadId: threadId ?? null,
+    reconnectOnMount: true,
     fetchStateHistory: true,
     callerOptions,
     defaultHeaders,
