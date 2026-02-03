@@ -43,8 +43,9 @@ These are baked into the Docker image at build time. **`NEXT_PUBLIC_*` variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `NEXT_PUBLIC_API_URL` | Frontend's API base URL. Points to the app's own `/api` route which proxies to LangGraph. | `https://agent-chat-ui-55487246974.asia-south1.run.app/api` |
+| `NEXT_PUBLIC_API_URL` | Frontend's API base URL. Points directly to your LangGraph deployment. | `https://questioncrafter-a13b34cfbfc25c1084843165f9c71db7.us.langgraph.app` |
 | `NEXT_PUBLIC_ASSISTANT_ID` | LangGraph assistant ID to use in the UI. | `o3_question_crafter_agent` |
+| `NEXT_PUBLIC_AUTH_MODE` | Optional auth mode. Set to `iap` to enable IAP-backed JWT flow and hide the API key UI. | `iap` |
 | `NEXT_PUBLIC_MODEL_PROVIDER` | `OPENAI` or `GOOGLE` — controls client-side behavior. | `OPENAI` |
 | `NEXT_PUBLIC_AGENT_RECURSION_LIMIT` | Max agent recursion depth (defaults to 50). | `50` |
 
@@ -60,7 +61,9 @@ In Cloud Run Console: **Service → Edit & Deploy New Revision → Variables & S
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `LANGGRAPH_API_URL` | LangGraph backend server URL. The API route proxies requests here. | **Yes** | - |
+| `IAP_AUDIENCE` | IAP signed header JWT audience for the frontend service. | **Yes** (if using IAP) | - |
+| `LANGGRAPH_AUTH_JWT_ISSUER` | Issuer claim for LangGraph JWTs minted by `/api/auth/token`. | **Yes** (if using IAP) | - |
+| `LANGGRAPH_AUTH_JWT_AUDIENCE` | Audience claim for LangGraph JWTs minted by `/api/auth/token`. | **Yes** (if using IAP) | - |
 | `MODEL_PROVIDER` | Server-side provider (`OPENAI` or `GOOGLE`). Controls PDF handling behavior. | **Yes** | - |
 | `GCS_BUCKET_NAME` | GCS bucket name for file storage/uploads. | **Yes** | - |
 | `NEXT_PUBLIC_MODEL_PROVIDER` | Duplicated at runtime for server-side access. | No | - |
@@ -84,7 +87,7 @@ In Cloud Run Console: **Service → Edit & Deploy New Revision → Variables & S
 | Secret Name | Description | Required |
 |-------------|-------------|----------|
 | `OPENAI_API_KEY` | OpenAI API key — required for PDF uploads to OpenAI Files API when `MODEL_PROVIDER=OPENAI`. | When using OpenAI |
-| `LANGSMITH_API_KEY` | LangSmith API key — used by the server to authenticate with LangGraph. | **Yes** |
+| `LANGGRAPH_AUTH_JWT_SECRET` | HMAC secret used to sign LangGraph JWTs in `/api/auth/token`. | **Yes** (if using IAP) |
 
 ---
 
@@ -120,7 +123,7 @@ create_secret() {
 
 # Create each secret
 create_secret "OPENAI_API_KEY" "sk-..."
-create_secret "LANGSMITH_API_KEY" "lsv2_..."
+create_secret "LANGGRAPH_AUTH_JWT_SECRET" "super-secret"
 ```
 
 ### List Existing Secrets
@@ -157,8 +160,9 @@ docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t "$IMAGE:$TS" \
   -t "$IMAGE:latest" \
-  --build-arg NEXT_PUBLIC_API_URL=https://agent-chat-ui-55487246974.asia-south1.run.app/api \
+  --build-arg NEXT_PUBLIC_API_URL=https://questioncrafter-a13b34cfbfc25c1084843165f9c71db7.us.langgraph.app \
   --build-arg NEXT_PUBLIC_ASSISTANT_ID=o3_question_crafter_agent \
+  --build-arg NEXT_PUBLIC_AUTH_MODE=iap \
   --build-arg NEXT_PUBLIC_MODEL_PROVIDER=OPENAI \
   --build-arg NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50 \
   --push .
@@ -166,7 +170,7 @@ docker buildx build \
 
 ### Develop Build
 
-For the develop environment, use the develop URL:
+For the develop environment, use the staging LangGraph URL:
 
 ```bash
 IMAGE=gcr.io/cerebryai/question_crafter_agent_ui
@@ -176,8 +180,29 @@ docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t "$IMAGE:develop" \
   -t "$IMAGE:develop-$TS" \
-  --build-arg NEXT_PUBLIC_API_URL=https://develop---agent-chat-ui-6duluzey3a-el.a.run.app/api \
+  --build-arg NEXT_PUBLIC_API_URL=https://questioncrafter-a13b34cfbfc25c1084843165f9c71db7.us.langgraph.app \
   --build-arg NEXT_PUBLIC_ASSISTANT_ID=o3_question_crafter_agent \
+  --build-arg NEXT_PUBLIC_AUTH_MODE=iap \
+  --build-arg NEXT_PUBLIC_MODEL_PROVIDER=OPENAI \
+  --build-arg NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50 \
+  --push .
+```
+
+### Faster Cloud Run Build (amd64-only)
+
+When you only target **Cloud Run** (which uses amd64), you can speed up builds by skipping multi-arch:
+
+```bash
+IMAGE=gcr.io/cerebryai/question_crafter_agent_ui
+TS=$(date -u +%Y%m%d-%H%M%S)
+
+docker buildx build \
+  --platform linux/amd64 \
+  -t "$IMAGE:develop" \
+  -t "$IMAGE:develop-$TS" \
+  --build-arg NEXT_PUBLIC_API_URL=https://questioncrafter-a13b34cfbfc25c1084843165f9c71db7.us.langgraph.app \
+  --build-arg NEXT_PUBLIC_ASSISTANT_ID=o3_question_crafter_agent \
+  --build-arg NEXT_PUBLIC_AUTH_MODE=iap \
   --build-arg NEXT_PUBLIC_MODEL_PROVIDER=OPENAI \
   --build-arg NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50 \
   --push .
@@ -204,15 +229,17 @@ gcloud run deploy agent-chat-ui \
   --platform managed \
   --allow-unauthenticated \
   --set-env-vars "\
+IAP_AUDIENCE=/projects/PROJECT_NUMBER/locations/REGION/services/SERVICE_NAME,\
+LANGGRAPH_AUTH_JWT_ISSUER=https://your-company.example,\
+LANGGRAPH_AUTH_JWT_AUDIENCE=https://your-langgraph.example,\
 MODEL_PROVIDER=OPENAI,\
 GCS_BUCKET_NAME=question_crafter_public,\
-LANGGRAPH_API_URL=https://questioncrafter-a13b34cfbfc25c1084843165f9c71db7.us.langgraph.app,\
 NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,\
 NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,\
 OPENAI_FILES_PURPOSE=assistants,\
 OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,\
 OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
-  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGSMITH_API_KEY=LANGSMITH_API_KEY:latest"
+  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
 ```
 
 ### Develop Deployment (Zero Traffic + Tag)
@@ -227,15 +254,30 @@ gcloud run deploy agent-chat-ui \
   --no-traffic \
   --tag develop \
   --set-env-vars "\
+IAP_AUDIENCE=/projects/PROJECT_NUMBER/locations/REGION/services/SERVICE_NAME,\
+LANGGRAPH_AUTH_JWT_ISSUER=https://your-company.example,\
+LANGGRAPH_AUTH_JWT_AUDIENCE=https://your-langgraph.example,\
 MODEL_PROVIDER=OPENAI,\
 GCS_BUCKET_NAME=question_crafter_public,\
-LANGGRAPH_API_URL=https://questioncrafter-a13b34cfbfc25c1084843165f9c71db7.us.langgraph.app,\
 NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,\
 NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,\
 OPENAI_FILES_PURPOSE=assistants,\
 OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,\
 OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
-  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGSMITH_API_KEY=LANGSMITH_API_KEY:latest"
+  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
+```
+
+### Develop Deployment (Pinned Image Example)
+
+```bash
+gcloud run deploy agent-chat-ui \
+  --image gcr.io/cerebryai/question_crafter_agent_ui:develop-20260203-082603 \
+  --region asia-south1 \
+  --platform managed \
+  --no-traffic \
+  --tag develop \
+  --set-env-vars "IAP_AUDIENCE=/projects/55487246974/locations/asia-south1/services/agent-chat-ui,LANGGRAPH_AUTH_JWT_ISSUER=agent-chat-ui-frontend-a8b6a18a,LANGGRAPH_AUTH_JWT_AUDIENCE=question_crafter-backend-a8b6a18a,MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=question_crafter_public,NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,OPENAI_FILES_PURPOSE=assistants,OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
+  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
 ```
 
 Access at: `https://develop---agent-chat-ui-6duluzey3a-el.a.run.app`
@@ -307,7 +349,7 @@ gcloud run logs read --service agent-chat-ui --region asia-south1 --limit 50
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `exec format error` | Wrong architecture | Use `docker buildx build` with `--platform linux/amd64,linux/arm64` |
-| `Failed to connect to LangGraph server` | Missing `LANGGRAPH_API_URL` | Add env var to deployment |
+| `Failed to connect to LangGraph server` | Missing `NEXT_PUBLIC_API_URL` build arg or invalid IAP/JWT config | Rebuild with correct `NEXT_PUBLIC_API_URL` and verify `IAP_AUDIENCE` / `LANGGRAPH_AUTH_JWT_*` |
 | `error getting credentials` | Docker not authenticated | Run `gcloud auth configure-docker gcr.io` |
 | `gcloud crashed (AttributeError)` | Conflicting gcloud installations | Remove old `~/google-cloud-sdk` and use Homebrew version |
 

@@ -10,5 +10,5 @@ export const DEFAULT_AGENT_RECURSION_LIMIT =
     ? envRecursionLimit
     : FALLBACK_RECURSION_LIMIT;
 
-// Temporarily disable thread history fetch until ownership is enforced.
-export const THREAD_HISTORY_ENABLED = false;
+// Thread history requires backend ownership enforcement.
+export const THREAD_HISTORY_ENABLED = true;

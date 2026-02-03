@@ -44,7 +44,7 @@ Once the app is running (or if using the deployed site), you'll be prompted to e
 
 - **Deployment URL**: The URL of the LangGraph server you want to chat with. This can be a production or development URL.
 - **Assistant/Graph ID**: The name of the graph, or ID of the assistant to use when fetching, and submitting runs via the chat interface.
-- **LangSmith API Key**: (only required for connecting to deployed LangGraph servers) Your LangSmith API key to use when authenticating requests sent to LangGraph servers.
+- **LangSmith API Key**: Optional and only shown when `NEXT_PUBLIC_AUTH_MODE` is not set to `iap`. Use it when your LangGraph deployment expects API-key auth.
 
 After entering these values, click `Continue`. You'll then be redirected to a chat interface where you can start chatting with your LangGraph server.
 
@@ -55,6 +55,13 @@ You can bypass the initial setup form by setting the following environment varia
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:2024
 NEXT_PUBLIC_ASSISTANT_ID=agent
+# Optional: enable IAP-backed auth mode (hides API key UI)
+NEXT_PUBLIC_AUTH_MODE=iap
+# Required for IAP auth token minting (server-side)
+IAP_AUDIENCE=/projects/PROJECT_NUMBER/locations/REGION/services/SERVICE_NAME
+LANGGRAPH_AUTH_JWT_SECRET=changeme
+LANGGRAPH_AUTH_JWT_ISSUER=https://your-company.example
+LANGGRAPH_AUTH_JWT_AUDIENCE=https://your-langgraph.example
 # Bucket used for uploading attachments
 GCS_BUCKET_NAME=my-chat-bucket
 # Provider selection (affects client hints and server behavior)
@@ -74,12 +81,15 @@ To use these variables:
 When these environment variables are set, the application will use them instead of showing the setup form.
 
 > [!NOTE]
+> `NEXT_PUBLIC_API_URL` should point directly at your LangGraph deployment (not the Next.js `/api` route).
+
+> [!NOTE]
+> When `NEXT_PUBLIC_AUTH_MODE=iap`, the UI calls `/api/auth/token` to validate IAP headers and mint a LangGraph JWT for `Authorization: Bearer <token>`.
+
+> [!NOTE]
 > For image/PDF uploads, this project now:
 > - Sends images as URL content blocks for small client payloads and fast previews.
 > - Sends PDFs as file ID blocks when using OpenAI (to satisfy LangChain’s OpenAI converter), or as URL blocks for other providers. See FORK_COMPASS.md for details.
-
-> [!NOTE]
-> Thread history list is temporarily disabled in this fork until per-user thread ownership is supported.
 
 ### Additional Docs
 - Fork customization guide (includes upload refactor details): `FORK_COMPASS.md`
@@ -203,57 +213,17 @@ export function Writer(props: {
 
 ## Going to Production
 
-Once you're ready to go to production, you'll need to update how you connect, and authenticate requests to your deployment. By default, the Agent Chat UI is setup for local development, and connects to your LangGraph server directly from the client. This is not possible if you want to go to production, because it requires every user to have their own LangSmith API key, and set the LangGraph configuration themselves.
+Once you're ready to go to production, you'll need to ensure the frontend calls LangGraph directly and uses an auth mechanism that doesn't require every user to bring their own API key. This fork supports two options.
 
-### Production Setup
+### Recommended: IAP + LangGraph Custom Auth
 
-To productionize the Agent Chat UI, you'll need to pick one of two ways to authenticate requests to your LangGraph server. Below, I'll outline the two options:
+1. Enable IAP on the frontend service and note the Signed Header JWT audience (`IAP_AUDIENCE`).
+2. Configure custom auth in your LangGraph deployment (per the LangGraph auth docs).
+3. Build the frontend with `NEXT_PUBLIC_API_URL` pointing directly to your LangGraph deployment URL, `NEXT_PUBLIC_ASSISTANT_ID` set to your assistant/graph ID, and `NEXT_PUBLIC_AUTH_MODE=iap`.
+4. Set runtime env vars on the frontend service: `IAP_AUDIENCE`, `LANGGRAPH_AUTH_JWT_SECRET`, `LANGGRAPH_AUTH_JWT_ISSUER`, `LANGGRAPH_AUTH_JWT_AUDIENCE`.
 
-### Quickstart - API Passthrough
+The frontend will call `/api/auth/token`, validate the IAP signed header, mint a LangGraph JWT, and then send `Authorization: Bearer <token>` on all LangGraph requests.
 
-The quickest way to productionize the Agent Chat UI is to use the [API Passthrough](https://github.com/bracesproul/langgraph-nextjs-api-passthrough) package ([NPM link here](https://www.npmjs.com/package/langgraph-nextjs-api-passthrough)). This package provides a simple way to proxy requests to your LangGraph server, and handle authentication for you.
+### API Key Auth (no IAP)
 
-This repository already contains all of the code you need to start using this method. The only configuration you need to do is set the proper environment variables.
-
-```bash
-NEXT_PUBLIC_ASSISTANT_ID="agent"
-# This should be the deployment URL of your LangGraph server
-LANGGRAPH_API_URL="https://my-agent.default.us.langgraph.app"
-# This should be the URL of your website + "/api". This is how you connect to the API proxy
-NEXT_PUBLIC_API_URL="https://my-website.com/api"
-# Your LangSmith API key which is injected into requests inside the API proxy
-LANGSMITH_API_KEY="lsv2_..."
-```
-
-Let's cover what each of these environment variables does:
-
-- `NEXT_PUBLIC_ASSISTANT_ID`: The ID of the assistant you want to use when fetching, and submitting runs via the chat interface. This still needs the `NEXT_PUBLIC_` prefix, since it's not a secret, and we use it on the client when submitting requests.
-- `LANGGRAPH_API_URL`: The URL of your LangGraph server. This should be the production deployment URL.
-- `NEXT_PUBLIC_API_URL`: The URL of your website + `/api`. This is how you connect to the API proxy. For the [Agent Chat demo](https://agentchat.vercel.app), this would be set as `https://agentchat.vercel.app/api`. You should set this to whatever your production URL is.
-- `LANGSMITH_API_KEY`: Your LangSmith API key to use when authenticating requests sent to LangGraph servers. Once again, do _not_ prefix this with `NEXT_PUBLIC_` since it's a secret, and is only used on the server when the API proxy injects it into the request to your deployed LangGraph server.
-
-For in depth documentation, consult the [LangGraph Next.js API Passthrough](https://www.npmjs.com/package/langgraph-nextjs-api-passthrough) docs.
-
-### Advanced Setup - Custom Authentication
-
-Custom authentication in your LangGraph deployment is an advanced, and more robust way of authenticating requests to your LangGraph server. Using custom authentication, you can allow requests to be made from the client, without the need for a LangSmith API key. Additionally, you can specify custom access controls on requests.
-
-To set this up in your LangGraph deployment, please read the LangGraph custom authentication docs for [Python](https://langchain-ai.github.io/langgraph/tutorials/auth/getting_started/), and [TypeScript here](https://langchain-ai.github.io/langgraphjs/how-tos/auth/custom_auth/).
-
-Once you've set it up on your deployment, you should make the following changes to the Agent Chat UI:
-
-1. Configure any additional API requests to fetch the authentication token from your LangGraph deployment which will be used to authenticate requests from the client.
-2. Set the `NEXT_PUBLIC_API_URL` environment variable to your production LangGraph deployment URL.
-3. Set the `NEXT_PUBLIC_ASSISTANT_ID` environment variable to the ID of the assistant you want to use when fetching, and submitting runs via the chat interface.
-4. Modify the [`useTypedStream`](src/providers/Stream.tsx) (extension of `useStream`) hook to pass your authentication token through headers to the LangGraph server:
-
-```tsx
-const streamValue = useTypedStream({
-  apiUrl: process.env.NEXT_PUBLIC_API_URL,
-  assistantId: process.env.NEXT_PUBLIC_ASSISTANT_ID,
-  // ... other fields
-  defaultHeaders: {
-    Authentication: `Bearer ${addYourTokenHere}`, // this is where you would pass your authentication token
-  },
-});
-```
+If your LangGraph deployment expects API keys, leave `NEXT_PUBLIC_AUTH_MODE` unset and enter the key in the UI. `NEXT_PUBLIC_API_URL` should still point directly to your LangGraph deployment URL.

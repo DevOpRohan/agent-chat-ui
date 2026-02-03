@@ -4,6 +4,7 @@ import React, {
   ReactNode,
   useState,
   useEffect,
+  useMemo,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -22,6 +23,13 @@ import { Label } from "@/components/ui/label";
 import { ArrowRight } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
+import {
+  createAuthFetch,
+  getAuthHeaderValue,
+  getCachedAuthHeader,
+  getAuthToken,
+  isIapAuthMode,
+} from "@/lib/auth-token";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
@@ -50,14 +58,21 @@ async function sleep(ms = 4000) {
 async function checkGraphStatus(
   apiUrl: string,
   apiKey: string | null,
+  isIapAuth: boolean,
 ): Promise<boolean> {
   try {
+    const headers: Record<string, string> = {};
+    if (isIapAuth) {
+      const authHeader = await getAuthHeaderValue();
+      if (authHeader) {
+        headers.Authorization = authHeader;
+      }
+    } else if (apiKey) {
+      headers["X-Api-Key"] = apiKey;
+    }
+
     const res = await fetch(`${apiUrl}/info`, {
-      ...(apiKey && {
-        headers: {
-          "X-Api-Key": apiKey,
-        },
-      }),
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
     });
 
     return res.ok;
@@ -72,21 +87,62 @@ const StreamSession = ({
   apiKey,
   apiUrl,
   assistantId,
+  isIapAuth,
 }: {
   children: ReactNode;
   apiKey: string | null;
   apiUrl: string;
   assistantId: string;
+  isIapAuth: boolean;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
+  const [authHeader, setAuthHeader] = useState<string | undefined>(() =>
+    isIapAuth ? getCachedAuthHeader() : undefined,
+  );
+  const authFetch = useMemo(
+    () => (isIapAuth ? createAuthFetch() : undefined),
+    [isIapAuth],
+  );
+  const callerOptions = useMemo(
+    () => (authFetch ? { fetch: authFetch } : undefined),
+    [authFetch],
+  );
+  const defaultHeaders = useMemo(
+    () => (authHeader ? { Authorization: authHeader } : undefined),
+    [authHeader],
+  );
+
+  useEffect(() => {
+    if (!isIapAuth) {
+      setAuthHeader(undefined);
+      return;
+    }
+
+    let cancelled = false;
+    getAuthToken()
+      .then((token) => {
+        if (!cancelled && token) {
+          setAuthHeader(`Bearer ${token}`);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to prefetch auth token", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isIapAuth]);
 
   const streamValue = useTypedStream({
     apiUrl,
-    apiKey: apiKey ?? undefined,
+    apiKey: isIapAuth ? undefined : (apiKey ?? undefined),
     assistantId,
     threadId: threadId ?? null,
     fetchStateHistory: true,
+    callerOptions,
+    defaultHeaders,
     onCustomEvent: (event, options) => {
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
         options.mutate((prev) => {
@@ -106,13 +162,15 @@ const StreamSession = ({
   });
 
   useEffect(() => {
-    checkGraphStatus(apiUrl, apiKey).then((ok) => {
+    checkGraphStatus(apiUrl, apiKey, isIapAuth).then((ok) => {
       if (!ok) {
         toast.error("Failed to connect to LangGraph server", {
           description: () => (
             <p>
               Please ensure your graph is running at <code>{apiUrl}</code> and
-              your API key is correctly set (if connecting to a deployed graph).
+              {isIapAuth
+                ? " your IAP auth configuration is valid."
+                : " your API key is correctly set (if connecting to a deployed graph)."}
             </p>
           ),
           duration: 10000,
@@ -121,7 +179,7 @@ const StreamSession = ({
         });
       }
     });
-  }, [apiKey, apiUrl]);
+  }, [apiKey, apiUrl, isIapAuth]);
 
   return (
     <StreamContext.Provider value={streamValue}>
@@ -137,6 +195,7 @@ const DEFAULT_ASSISTANT_ID = "agent";
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
+  const isIapAuth = isIapAuthMode();
   // Get environment variables
   const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
   const envAssistantId: string | undefined =
@@ -152,11 +211,13 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   // For API key, use localStorage with env var fallback
   const [apiKey, _setApiKey] = useState(() => {
+    if (isIapAuth) return "";
     const storedKey = getApiKey();
     return storedKey || "";
   });
 
   const setApiKey = (key: string) => {
+    if (isIapAuth) return;
     window.localStorage.setItem("lg:chat:apiKey", key);
     _setApiKey(key);
   };
@@ -190,10 +251,14 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
               const formData = new FormData(form);
               const apiUrl = formData.get("apiUrl") as string;
               const assistantId = formData.get("assistantId") as string;
-              const apiKey = formData.get("apiKey") as string;
+              const apiKey = isIapAuth
+                ? ""
+                : (formData.get("apiKey") as string);
 
               setApiUrl(apiUrl);
-              setApiKey(apiKey);
+              if (!isIapAuth) {
+                setApiKey(apiKey);
+              }
               setAssistantId(assistantId);
 
               form.reset();
@@ -235,22 +300,24 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
               />
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="apiKey">LangSmith API Key</Label>
-              <p className="text-muted-foreground text-sm">
-                This is <strong>NOT</strong> required if using a local LangGraph
-                server. This value is stored in your browser's local storage and
-                is only used to authenticate requests sent to your LangGraph
-                server.
-              </p>
-              <PasswordInput
-                id="apiKey"
-                name="apiKey"
-                defaultValue={apiKey ?? ""}
-                className="bg-background"
-                placeholder="lsv2_pt_..."
-              />
-            </div>
+            {!isIapAuth && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="apiKey">LangSmith API Key</Label>
+                <p className="text-muted-foreground text-sm">
+                  This is <strong>NOT</strong> required if using a local
+                  LangGraph server. This value is stored in your browser's local
+                  storage and is only used to authenticate requests sent to your
+                  LangGraph server.
+                </p>
+                <PasswordInput
+                  id="apiKey"
+                  name="apiKey"
+                  defaultValue={apiKey ?? ""}
+                  className="bg-background"
+                  placeholder="lsv2_pt_..."
+                />
+              </div>
+            )}
 
             <div className="mt-2 flex justify-end">
               <Button
@@ -270,8 +337,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   return (
     <StreamSession
       apiKey={apiKey}
-      apiUrl={apiUrl}
-      assistantId={assistantId}
+      apiUrl={finalApiUrl}
+      assistantId={finalAssistantId}
+      isIapAuth={isIapAuth}
     >
       {children}
     </StreamSession>

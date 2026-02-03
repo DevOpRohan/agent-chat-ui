@@ -62,12 +62,12 @@ importers:
       framer-motion:
         specifier: ^12.4.9
         version: 12.12.1(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+      jose:
+        specifier: ^5.10.0
+        version: 5.10.0
       katex:
         specifier: ^0.16.21
         version: 0.16.22
-      langgraph-nextjs-api-passthrough:
-        specifier: ^0.0.4
-        version: 0.0.4(next@15.4.10(@playwright/test@1.58.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))
       lodash:
         specifier: ^4.17.21
         version: 4.17.21
@@ -2448,6 +2448,9 @@ packages:
     resolution: {integrity: sha512-rg9zJN+G4n2nfJl5MW3BMygZX56zKPNVEYYqq7adpmMh4Jn2QNEwhvQlFy6jPVdcod7txZtKHWnyZiA3a0zP7A==}
     hasBin: true
 
+  jose@5.10.0:
+    resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
+
   js-tiktoken@1.0.20:
     resolution: {integrity: sha512-Xlaqhhs8VfCd6Sh7a1cFkZHQbYTLCwVJJWiHVxBYzLPxW0XsoxBy1hitmjkdIjD3Aon5BXLHFwU5O8WUx6HH+A==}
 
@@ -2490,11 +2493,6 @@ packages:
 
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
-
-  langgraph-nextjs-api-passthrough@0.0.4:
-    resolution: {integrity: sha512-Hhey2o7/hvbvr4t8qT+w/5YT2L6m381RJ1K6mBQPJt+W2fJJ1youS3EEtVkAHQDJcn1cdCccOc0GTPsqT6F9IQ==}
-    peerDependencies:
-      next: '*'
 
   langsmith@0.3.78:
     resolution: {integrity: sha512-PVrog/DiTsiyOQ38GeZEIVadgk55/dfE3axagQksT3dt6KhFuRxhNaZrC0rp3dNW9RQJCm/c3tn+PiybwQNY0Q==}
@@ -6084,6 +6082,8 @@ snapshots:
 
   jiti@2.4.2: {}
 
+  jose@5.10.0: {}
+
   js-tiktoken@1.0.20:
     dependencies:
       base64-js: 1.5.1
@@ -6133,10 +6133,6 @@ snapshots:
   keyv@4.5.4:
     dependencies:
       json-buffer: 3.0.1
-
-  langgraph-nextjs-api-passthrough@0.0.4(next@15.4.10(@playwright/test@1.58.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)):
-    dependencies:
-      next: 15.4.10(@playwright/test@1.58.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
 
   langsmith@0.3.78(openai@4.100.0(ws@8.18.2)(zod@4.1.12)):
     dependencies:

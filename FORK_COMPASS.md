@@ -1,6 +1,6 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-02-02_  
+_Last updated: 2026-02-03_  
 _Branch: main_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
@@ -25,11 +25,11 @@ This document is a high-detail map of how this fork diverges from the upstream A
 ---
 
 ## 1) Executive Summary
-This fork focuses on **efficient multimodal uploads, OpenAI-compatible PDF handling, deployment readiness, and a few UX tweaks**. The biggest architectural change is a new **server-side upload pipeline** that stores files in GCS, optionally uploads PDFs to OpenAI Files API, and then constructs **URL/ID-based content blocks** instead of base64-heavy payloads.
+This fork focuses on **efficient multimodal uploads, IAP-backed auth for direct LangGraph calls, OpenAI-compatible PDF handling, deployment readiness, and a few UX tweaks**. The biggest architectural changes are a new **server-side upload pipeline** (GCS + optional OpenAI Files) and a **frontend token mint endpoint** that validates IAP headers and issues LangGraph JWTs so the browser can call LangGraph directly.
 
 Key differences in one sentence:
-- **Uploads now go to GCS first (and optionally OpenAI), content blocks are URL/ID-based, and the UI and submission configs were adjusted for reliability and UX.**
-Recent post-sync changes (after 2026-01-22) include **disabling thread history list**, **removing stream health polling**, **removing stream auto-reconnect**, and **documentation updates**.
+- **Uploads now go to GCS first (and optionally OpenAI), IAP JWTs are validated and exchanged for LangGraph JWTs, content blocks are URL/ID-based, and the UI and submission configs were adjusted for reliability and UX.**
+Recent post-sync changes (after 2026-01-22) include **re-enabling thread history list**, **removing assistant/graph gating for history (owner-only)**, **removing stream health polling**, **removing stream auto-reconnect**, and **documentation updates**.
 
 ---
 
@@ -46,6 +46,9 @@ Tracking anchor commits:
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-03: Re-enable thread history list now that ownership is enforced. Files: `src/lib/constants.ts`, `README.md`, `FORK_COMPASS.md`.
+- 2026-02-03: Thread history search now relies on owner filtering only (no assistant/graph gating). Files: `src/providers/Thread.tsx`, `FORK_COMPASS.md`.
+- 2026-02-03: Add IAP-backed auth token endpoint + client token cache; remove API passthrough; update docs.
 - 2026-02-02: Remove stream auto-reconnect (buggy). Files: `src/providers/Stream.tsx`, `FORK_COMPASS.md`.
 - 2026-01-29: Disable thread history list until ownership. Files: `src/components/thread/history/index.tsx`, `src/lib/constants.ts`, `src/providers/Stream.tsx`, `src/providers/Thread.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-01-29: Remove stream health polling. Files: `src/providers/Stream.tsx`; removed `src/hooks/useStreamHealthCheck.ts`, `plan.md`.
@@ -143,25 +146,32 @@ Tracking anchor commits:
 - Upload label shows spinner + “Uploading...”
 - Tool call results render in scrollable `<pre>` blocks with prettier JSON formatting.
 - Human message bubble alignment adjusted (removed `text-right`).
-- Thread history list is disabled until thread ownership is enforced; controlled by `THREAD_HISTORY_ENABLED`.
+- Thread history list is enabled and controlled by `THREAD_HISTORY_ENABLED`.
+- History search no longer gates by assistant/graph; the backend ownership filter scopes results per-user.
 
 ---
 
 ### 3.5 Configuration & Deployment
-**What changed:** Build/deploy setup is configured for GCS, large uploads, and standalone Next output.
+**What changed:** Build/deploy setup now supports **direct LangGraph calls with IAP-backed JWT auth**, plus GCS uploads and standalone Next output.
 
 **Primary files:**
 - `next.config.mjs`
 - `.env.example`
 - `Dockerfile`
 - `package.json`
+- `src/app/api/auth/token/route.ts`
+- `src/lib/auth-token.ts`
+- `src/lib/iap-keys.ts`
 
 **Key behaviors:**
 - Next output set to `standalone` for containerized deploys.
 - `serverActions.bodySizeLimit` increased to `100mb`.
 - `images.remotePatterns` allows `storage.googleapis.com` for URL-based image previews.
 - Dockerfile accepts build args for all `NEXT_PUBLIC_*` variables used at build time.
-- Added deps: `@google-cloud/storage`, `form-data`.
+- `/api/auth/token` validates IAP signed headers and mints LangGraph JWTs (HS256).
+- `NEXT_PUBLIC_AUTH_MODE=iap` hides the API key UI and enables auth header injection.
+- API passthrough dependency removed; `NEXT_PUBLIC_API_URL` now points directly to LangGraph.
+- Added deps: `@google-cloud/storage`, `form-data`, `jose`.
 
 ---
 
@@ -188,6 +198,11 @@ Use this as a jump list when editing or debugging:
 **UI preview components**
 - `src/components/thread/MultimodalPreview.tsx`
 - `src/components/thread/ContentBlocksPreview.tsx`
+
+**Auth & tokens**
+- `src/app/api/auth/token/route.ts`
+- `src/lib/auth-token.ts`
+- `src/lib/iap-keys.ts`
 
 **Thread submission and run behavior**
 - `src/components/thread/index.tsx`
@@ -245,6 +260,7 @@ Commits unique to this fork (upstream/main..HEAD):
 - **Tracked build artifact:** `tsconfig.tsbuildinfo` is currently tracked in git (from upstream diff list). Consider removing if you want a clean repo.
 - **OpenAI vs non-OpenAI:** PDF blocks use `source_type: "id"` only when OpenAI is the provider; otherwise they use URL blocks.
 - **Private buckets:** If the GCS bucket is private, previews require signed URLs or IAM policy changes (current flow assumes public-read or equivalent).
+- **Auth flow:** API passthrough is removed; the frontend now mints JWTs via `/api/auth/token` after validating IAP headers and calls LangGraph directly.
 
 ---
 
