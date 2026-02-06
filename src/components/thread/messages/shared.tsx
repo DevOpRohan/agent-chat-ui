@@ -196,7 +196,6 @@ export function CommandBar({
       />
       {isAiMessage && !!handleRegenerate && (
         <TooltipIconButton
-          disabled={isLoading}
           tooltip="Refresh"
           variant="ghost"
           onClick={handleRegenerate}

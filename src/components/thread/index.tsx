@@ -245,24 +245,37 @@ export function Thread() {
     markThreadSeen(threadId, Date.now());
   }, [threadId]);
 
+  const shouldBlockWhileCurrentThreadBusy = async (
+    source: "submit" | "regenerate",
+  ): Promise<boolean> => {
+    if (isCurrentThreadLoading) {
+      showThreadRunningToast();
+      return true;
+    }
+
+    if (!threadId) return false;
+
+    try {
+      const currentThread = await stream.client.threads.get(threadId);
+      if (currentThread.status === "busy") {
+        showThreadRunningToast();
+        return true;
+      }
+    } catch (error) {
+      console.error(
+        `Failed to preflight thread status before ${source}`,
+        error,
+      );
+    }
+
+    return false;
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (input.trim().length === 0 && contentBlocks.length === 0) return;
-    if (isCurrentThreadLoading) {
-      showThreadRunningToast();
+    if (await shouldBlockWhileCurrentThreadBusy("submit")) {
       return;
-    }
-
-    if (threadId) {
-      try {
-        const currentThread = await stream.client.threads.get(threadId);
-        if (currentThread.status === "busy") {
-          showThreadRunningToast();
-          return;
-        }
-      } catch (error) {
-        console.error("Failed to preflight thread status before submit", error);
-      }
     }
 
     const threadPreview = buildThreadPreview(input, contentBlocks.length);
@@ -342,9 +355,13 @@ export function Thread() {
     setContentBlocks([]);
   };
 
-  const handleRegenerate = (
+  const handleRegenerate = async (
     parentCheckpoint: Checkpoint | null | undefined,
   ) => {
+    if (await shouldBlockWhileCurrentThreadBusy("regenerate")) {
+      return;
+    }
+
     // Do this so the loading state is correct
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
@@ -352,7 +369,7 @@ export function Thread() {
       setLoadingThreadId(threadId);
       markBusy(threadId, true);
     }
-    stream.submit(undefined, {
+    void stream.submit(undefined, {
       config: {
         recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
       },
