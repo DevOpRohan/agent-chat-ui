@@ -17,6 +17,12 @@ import { useArtifact } from "../artifact";
 
 const REASONING_PREVIEW_CHARS = 500;
 
+function isReasoningLikeType(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const normalized = value.toLowerCase();
+  return normalized.includes("reasoning") || normalized.includes("thinking");
+}
+
 function extractReasoningTextFromThinkTags(text: string): string[] {
   const matches: string[] = [];
   const patterns = [
@@ -56,9 +62,13 @@ function readReasoningValue(value: unknown): string[] {
     record.reasoning,
     record.thinking,
     record.summary,
+    record.summary_text,
     record.text,
     record.content,
     record.reasoning_content,
+    record.reasoning_details,
+    record.reasoning_blocks,
+    record.value,
   ];
 
   return fieldsToCheck.flatMap((field) => readReasoningValue(field));
@@ -74,8 +84,12 @@ function extractReasoningText(message: Message | undefined): string {
     for (const block of contentBlocks) {
       if (!block || typeof block !== "object") continue;
       const record = block as Record<string, unknown>;
-      if (record.type === "reasoning" || record.type === "thinking") {
-        collected.push(...readReasoningValue(record.reasoning ?? record.thinking));
+      const hasReasoningField =
+        "reasoning" in record ||
+        "thinking" in record ||
+        "reasoning_content" in record;
+      if (isReasoningLikeType(record.type) || hasReasoningField) {
+        collected.push(...readReasoningValue(record));
       }
     }
   }
