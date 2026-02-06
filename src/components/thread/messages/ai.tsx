@@ -865,13 +865,14 @@ export function AssistantMessage({
     message.id === firstGroupMessageWithIntermediateId;
   const isCurrentGroupAtThreadTail =
     groupEndIndex >= 0 && groupEndIndex === renderedMessages.length - 1;
-  const isGroupStreaming =
-    isLoading &&
-    isCurrentGroupAtThreadTail &&
-    groupedIntermediateParts.length > 0;
   const groupHasRenderableText = groupedMessages.some((groupMessage) =>
     messageHasRenderableText(groupMessage),
   );
+  const isGroupStreaming =
+    isLoading &&
+    isCurrentGroupAtThreadTail &&
+    groupedIntermediateParts.length > 0 &&
+    !groupHasRenderableText;
   const shouldRenderInlineActionsForIntermediate =
     shouldRenderGroupIntermediateTrigger &&
     isCurrentGroupAtThreadTail &&
