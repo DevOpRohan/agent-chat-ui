@@ -14,8 +14,25 @@ import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
+import { useEffect, useState } from "react";
 
 const REASONING_PREVIEW_CHARS = 500;
+type OrderedContentPart =
+  | {
+      kind: "text";
+      key: string;
+      text: string;
+    }
+  | {
+      kind: "reasoning";
+      key: string;
+      text: string;
+    }
+  | {
+      kind: "tool_calls";
+      key: string;
+      toolCalls: NonNullable<AIMessage["tool_calls"]>;
+    };
 
 function isReasoningLikeType(value: unknown): boolean {
   if (typeof value !== "string") return false;
@@ -41,6 +58,25 @@ function extractReasoningTextFromThinkTags(text: string): string[] {
   }
 
   return matches;
+}
+
+function readTextValue(value: unknown): string[] {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => readTextValue(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  const fieldsToCheck = [record.text, record.content, record.value];
+  return fieldsToCheck.flatMap((field) => readTextValue(field));
 }
 
 function readReasoningValue(value: unknown): string[] {
@@ -121,6 +157,155 @@ function extractReasoningText(message: Message | undefined): string {
 function getReasoningPreview(text: string): string {
   if (text.length <= REASONING_PREVIEW_CHARS) return text;
   return text.slice(-REASONING_PREVIEW_CHARS);
+}
+
+function isToolCallLikeType(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return (
+    value === "tool_use" ||
+    value === "tool_call" ||
+    value.endsWith("_call")
+  );
+}
+
+function parseToolCallFromContentBlock(
+  record: Record<string, unknown>,
+): NonNullable<AIMessage["tool_calls"]>[number] {
+  const rawType =
+    typeof record.type === "string" && record.type.length > 0
+      ? record.type
+      : "tool_call";
+  const name =
+    typeof record.name === "string" && record.name.length > 0
+      ? record.name
+      : rawType;
+  const id =
+    typeof record.id === "string" && record.id.length > 0
+      ? record.id
+      : undefined;
+
+  const rawInput = record.input ?? record.args ?? record.arguments;
+  let args: Record<string, any> = {};
+
+  if (typeof rawInput === "string") {
+    try {
+      args = parsePartialJson(rawInput) ?? {};
+    } catch {
+      args = { input: rawInput };
+    }
+  } else if (rawInput && typeof rawInput === "object") {
+    args = rawInput as Record<string, any>;
+  } else {
+    const entries = Object.entries(record).filter(
+      ([key]) => !["type", "name", "id"].includes(key),
+    );
+    if (entries.length > 0) {
+      args = Object.fromEntries(entries);
+    }
+  }
+
+  return {
+    name,
+    id,
+    args,
+    type: "tool_call",
+  };
+}
+
+function getOrderedContentParts(message: Message | undefined): OrderedContentPart[] {
+  if (!message) return [];
+  if (!Array.isArray(message.content)) return [];
+
+  const parts: OrderedContentPart[] = [];
+  const contentBlocks = message.content as unknown[];
+
+  for (let idx = 0; idx < contentBlocks.length; idx += 1) {
+    const block = contentBlocks[idx];
+    if (!block || typeof block !== "object") continue;
+    const record = block as Record<string, unknown>;
+    const type = record.type;
+
+    const hasReasoningField =
+      "reasoning" in record ||
+      "thinking" in record ||
+      "reasoning_content" in record;
+    const isReasoningBlock = isReasoningLikeType(type) || hasReasoningField;
+    const isTextBlock = type === "text" || type === "output_text";
+    const isToolCallBlock = isToolCallLikeType(type);
+
+    if (isReasoningBlock) {
+      const reasoningText = Array.from(
+        new Set(
+          readReasoningValue(record)
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0),
+        ),
+      ).join("\n\n");
+      if (reasoningText.length > 0) {
+        parts.push({
+          kind: "reasoning",
+          key: `reasoning-${idx}`,
+          text: reasoningText,
+        });
+      }
+      continue;
+    }
+
+    if (isTextBlock) {
+      const textValue = readTextValue(record.text ?? record.content).join("\n\n");
+      if (textValue.length > 0) {
+        parts.push({ kind: "text", key: `text-${idx}`, text: textValue });
+      }
+      continue;
+    }
+
+    if (isToolCallBlock) {
+      const toolCall = parseToolCallFromContentBlock(record);
+      parts.push({
+        kind: "tool_calls",
+        key: `tool-call-${idx}`,
+        toolCalls: [toolCall],
+      });
+    }
+  }
+
+  return parts;
+}
+
+function shouldRenderReasoningFirst(message: Message | undefined): boolean {
+  if (!message) return false;
+  if (!Array.isArray(message.content)) return false;
+
+  const contentBlocks = message.content as unknown[];
+  let firstReasoningIdx = Number.POSITIVE_INFINITY;
+  let firstTextIdx = Number.POSITIVE_INFINITY;
+
+  for (let idx = 0; idx < contentBlocks.length; idx += 1) {
+    const block = contentBlocks[idx];
+    if (!block || typeof block !== "object") continue;
+    const record = block as Record<string, unknown>;
+
+    const type = record.type;
+    const isTextBlock = type === "text" || type === "output_text";
+    const isReasoningBlock =
+      isReasoningLikeType(type) ||
+      "reasoning" in record ||
+      "thinking" in record ||
+      "reasoning_content" in record;
+
+    if (isReasoningBlock && firstReasoningIdx === Number.POSITIVE_INFINITY) {
+      firstReasoningIdx = idx;
+    }
+    if (isTextBlock && firstTextIdx === Number.POSITIVE_INFINITY) {
+      firstTextIdx = idx;
+    }
+  }
+
+  if (firstReasoningIdx !== Number.POSITIVE_INFINITY && firstTextIdx !== Number.POSITIVE_INFINITY) {
+    return firstReasoningIdx <= firstTextIdx;
+  }
+
+  return firstReasoningIdx !== Number.POSITIVE_INFINITY;
 }
 
 function CustomComponent({
@@ -219,6 +404,16 @@ export function AssistantMessage({
   const contentString = getContentString(content);
   const reasoningText = extractReasoningText(message);
   const reasoningPreview = getReasoningPreview(reasoningText);
+  const orderedContentParts = getOrderedContentParts(message);
+  const hasOrderedContentParts = orderedContentParts.length > 0;
+  const hasOrderedReasoning = orderedContentParts.some(
+    (part) => part.kind === "reasoning",
+  );
+  const hasInlineToolCalls = orderedContentParts.some(
+    (part) => part.kind === "tool_calls",
+  );
+  const renderReasoningFirst = shouldRenderReasoningFirst(message);
+  const [reasoningOrderLockedFirst, setReasoningOrderLockedFirst] = useState(false);
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
@@ -251,9 +446,30 @@ export function AssistantMessage({
   const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
 
+  useEffect(() => {
+    if (reasoningPreview.length > 0 && contentString.length === 0) {
+      setReasoningOrderLockedFirst(true);
+    }
+  }, [reasoningPreview, contentString]);
+
   if (isToolResult && hideToolCalls) {
     return null;
   }
+
+  const shouldRenderReasoningAboveText =
+    renderReasoningFirst || reasoningOrderLockedFirst;
+
+  const reasoningPreviewPanel =
+    reasoningPreview.length > 0 ? (
+      <details className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <summary className="cursor-pointer select-none font-medium text-slate-700">
+          Thinking (latest {REASONING_PREVIEW_CHARS} chars)
+        </summary>
+        <pre className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed">
+          {reasoningPreview}
+        </pre>
+      </details>
+    ) : null;
 
   return (
     <div className="group mr-auto flex w-full items-start gap-2">
@@ -269,23 +485,59 @@ export function AssistantMessage({
           </>
         ) : (
           <>
-            {contentString.length > 0 && (
-              <div className="py-1">
-                <MarkdownText>{contentString}</MarkdownText>
-              </div>
-            )}
-            {reasoningPreview.length > 0 && (
-              <details className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                <summary className="cursor-pointer select-none font-medium text-slate-700">
-                  Thinking (latest {REASONING_PREVIEW_CHARS} chars)
-                </summary>
-                <pre className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed">
-                  {reasoningPreview}
-                </pre>
-              </details>
+            {hasOrderedContentParts ? (
+              <>
+                {orderedContentParts.map((part) => {
+                  if (part.kind === "text") {
+                    return (
+                      <div
+                        key={part.key}
+                        className="py-1"
+                      >
+                        <MarkdownText>{part.text}</MarkdownText>
+                      </div>
+                    );
+                  }
+
+                  if (part.kind === "reasoning") {
+                    const partReasoningPreview = getReasoningPreview(part.text);
+                    return (
+                      <details
+                        key={part.key}
+                        className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+                      >
+                        <summary className="cursor-pointer select-none font-medium text-slate-700">
+                          Thinking (latest {REASONING_PREVIEW_CHARS} chars)
+                        </summary>
+                        <pre className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed">
+                          {partReasoningPreview}
+                        </pre>
+                      </details>
+                    );
+                  }
+
+                  return hideToolCalls ? null : (
+                    <ToolCalls
+                      key={part.key}
+                      toolCalls={part.toolCalls}
+                    />
+                  );
+                })}
+                {!hasOrderedReasoning && reasoningPreviewPanel}
+              </>
+            ) : (
+              <>
+                {shouldRenderReasoningAboveText && reasoningPreviewPanel}
+                {contentString.length > 0 && (
+                  <div className="py-1">
+                    <MarkdownText>{contentString}</MarkdownText>
+                  </div>
+                )}
+                {!shouldRenderReasoningAboveText && reasoningPreviewPanel}
+              </>
             )}
 
-            {!hideToolCalls && (
+            {!hideToolCalls && !hasInlineToolCalls && (
               <>
                 {(hasToolCalls && toolCallsHaveContents && (
                   <ToolCalls toolCalls={message.tool_calls} />
