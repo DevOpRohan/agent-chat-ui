@@ -17,40 +17,6 @@ export function QuestionCrafterLogoSVG({
       className={className}
       aria-hidden="true"
     >
-      <defs>
-        <linearGradient
-          id="question-crafter-logo-bg"
-          x1="8"
-          y1="8"
-          x2="88"
-          y2="88"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#0B4A58" />
-          <stop
-            offset="1"
-            stopColor="#0A3344"
-          />
-        </linearGradient>
-      </defs>
-
-      <rect
-        x="6"
-        y="6"
-        width="84"
-        height="84"
-        rx="22"
-        fill="url(#question-crafter-logo-bg)"
-      />
-      <rect
-        x="14"
-        y="14"
-        width="68"
-        height="68"
-        rx="18"
-        fill="#0F5E72"
-      />
-
       <line
         x1="28"
         y1="48"
