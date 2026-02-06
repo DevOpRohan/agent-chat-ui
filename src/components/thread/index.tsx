@@ -30,7 +30,6 @@ import ThreadHistory from "./history";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import { markThreadSeen } from "@/lib/thread-activity";
@@ -132,10 +131,6 @@ export function Thread() {
   const [threadId, _setThreadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
-    parseAsBoolean.withDefault(false),
-  );
-  const [hideToolCalls, setHideToolCalls] = useQueryState(
-    "hideToolCalls",
     parseAsBoolean.withDefault(false),
   );
   const [input, setInput] = useState("");
@@ -610,21 +605,6 @@ export function Thread() {
                       />
 
                       <div className="flex items-center gap-6 p-2 pt-4">
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <Switch
-                              id="render-tool-calls"
-                              checked={hideToolCalls ?? false}
-                              onCheckedChange={setHideToolCalls}
-                            />
-                            <Label
-                              htmlFor="render-tool-calls"
-                              className="text-sm text-gray-600"
-                            >
-                              Hide Tool Calls
-                            </Label>
-                          </div>
-                        </div>
                         <Label
                           htmlFor="file-input"
                           className={cn(

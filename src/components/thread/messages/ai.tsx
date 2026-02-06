@@ -11,7 +11,6 @@ import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
 import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
-import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 import { useEffect, useRef, useState } from "react";
@@ -33,6 +32,7 @@ type OrderedContentPart =
       key: string;
       toolCalls: NonNullable<AIMessage["tool_calls"]>;
     };
+type IntermediateContentPart = Exclude<OrderedContentPart, { kind: "text" }>;
 
 function isReasoningLikeType(value: unknown): boolean {
   if (typeof value !== "string") return false;
@@ -209,6 +209,44 @@ function ThinkingPanel({ text }: { text: string }) {
   );
 }
 
+function IntermediateStepsPanel({
+  parts,
+}: {
+  parts: IntermediateContentPart[];
+}) {
+  if (parts.length === 0) return null;
+
+  return (
+    <details className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-sm text-slate-700">
+      <summary className="cursor-pointer select-none font-semibold text-slate-800">
+        Intermediate Steps ({parts.length})
+      </summary>
+      <div className="mt-3 flex flex-col gap-3">
+        {parts.map((part) => {
+          if (part.kind === "reasoning") {
+            return (
+              <ThinkingPanel
+                key={part.key}
+                text={part.text}
+              />
+            );
+          }
+
+          return (
+            <div
+              key={part.key}
+              className="rounded-md border border-slate-200 bg-white p-2"
+            >
+              <p className="mb-2 text-xs font-medium text-slate-600">Tool Calls</p>
+              <ToolCalls toolCalls={part.toolCalls} />
+            </div>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
 function isToolCallLikeType(value: unknown): boolean {
   if (typeof value !== "string") return false;
   return (
@@ -322,42 +360,6 @@ function getOrderedContentParts(message: Message | undefined): OrderedContentPar
   return parts;
 }
 
-function shouldRenderReasoningFirst(message: Message | undefined): boolean {
-  if (!message) return false;
-  if (!Array.isArray(message.content)) return false;
-
-  const contentBlocks = message.content as unknown[];
-  let firstReasoningIdx = Number.POSITIVE_INFINITY;
-  let firstTextIdx = Number.POSITIVE_INFINITY;
-
-  for (let idx = 0; idx < contentBlocks.length; idx += 1) {
-    const block = contentBlocks[idx];
-    if (!block || typeof block !== "object") continue;
-    const record = block as Record<string, unknown>;
-
-    const type = record.type;
-    const isTextBlock = type === "text" || type === "output_text";
-    const isReasoningBlock =
-      isReasoningLikeType(type) ||
-      "reasoning" in record ||
-      "thinking" in record ||
-      "reasoning_content" in record;
-
-    if (isReasoningBlock && firstReasoningIdx === Number.POSITIVE_INFINITY) {
-      firstReasoningIdx = idx;
-    }
-    if (isTextBlock && firstTextIdx === Number.POSITIVE_INFINITY) {
-      firstTextIdx = idx;
-    }
-  }
-
-  if (firstReasoningIdx !== Number.POSITIVE_INFINITY && firstTextIdx !== Number.POSITIVE_INFINITY) {
-    return firstReasoningIdx <= firstTextIdx;
-  }
-
-  return firstReasoningIdx !== Number.POSITIVE_INFINITY;
-}
-
 function CustomComponent({
   message,
   thread,
@@ -453,21 +455,15 @@ export function AssistantMessage({
   const content = message?.content ?? [];
   const contentString = getContentString(content);
   const reasoningText = extractReasoningText(message);
-  const reasoningPreview = getReasoningPreview(reasoningText);
   const orderedContentParts = getOrderedContentParts(message);
+  const orderedTextParts = orderedContentParts.filter(
+    (part): part is Extract<OrderedContentPart, { kind: "text" }> =>
+      part.kind === "text",
+  );
+  const orderedIntermediateParts = orderedContentParts.filter(
+    (part): part is IntermediateContentPart => part.kind !== "text",
+  );
   const hasOrderedContentParts = orderedContentParts.length > 0;
-  const hasOrderedReasoning = orderedContentParts.some(
-    (part) => part.kind === "reasoning",
-  );
-  const hasInlineToolCalls = orderedContentParts.some(
-    (part) => part.kind === "tool_calls",
-  );
-  const renderReasoningFirst = shouldRenderReasoningFirst(message);
-  const [reasoningOrderLockedFirst, setReasoningOrderLockedFirst] = useState(false);
-  const [hideToolCalls] = useQueryState(
-    "hideToolCalls",
-    parseAsBoolean.withDefault(false),
-  );
 
   const thread = useStreamContext();
   const isLastMessage =
@@ -496,23 +492,29 @@ export function AssistantMessage({
   const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
 
-  useEffect(() => {
-    if (reasoningPreview.length > 0 && contentString.length === 0) {
-      setReasoningOrderLockedFirst(true);
-    }
-  }, [reasoningPreview, contentString]);
-
-  if (isToolResult && hideToolCalls) {
-    return null;
+  const fallbackToolCalls =
+    (hasToolCalls && toolCallsHaveContents && message.tool_calls) ||
+    (hasAnthropicToolCalls && anthropicStreamedToolCalls) ||
+    (hasToolCalls && message.tool_calls) ||
+    undefined;
+  const fallbackIntermediateParts: IntermediateContentPart[] = [];
+  if (reasoningText.trim().length > 0) {
+    fallbackIntermediateParts.push({
+      kind: "reasoning",
+      key: "fallback-reasoning",
+      text: reasoningText,
+    });
   }
-
-  const shouldRenderReasoningAboveText =
-    renderReasoningFirst || reasoningOrderLockedFirst;
-
-  const reasoningPreviewPanel =
-    reasoningPreview.length > 0 ? (
-      <ThinkingPanel text={reasoningText} />
-    ) : null;
+  if (fallbackToolCalls && fallbackToolCalls.length > 0) {
+    fallbackIntermediateParts.push({
+      kind: "tool_calls",
+      key: "fallback-tool-calls",
+      toolCalls: fallbackToolCalls,
+    });
+  }
+  const intermediateParts = hasOrderedContentParts
+    ? orderedIntermediateParts
+    : fallbackIntermediateParts;
 
   return (
     <div className="group mr-auto flex w-full items-start gap-2">
@@ -530,56 +532,24 @@ export function AssistantMessage({
           <>
             {hasOrderedContentParts ? (
               <>
-                {orderedContentParts.map((part) => {
-                  if (part.kind === "text") {
-                    return (
-                      <div
-                        key={part.key}
-                        className="py-1"
-                      >
-                        <MarkdownText>{part.text}</MarkdownText>
-                      </div>
-                    );
-                  }
-
-                  if (part.kind === "reasoning") {
-                    return <ThinkingPanel key={part.key} text={part.text} />;
-                  }
-
-                  return hideToolCalls ? null : (
-                    <ToolCalls
-                      key={part.key}
-                      toolCalls={part.toolCalls}
-                    />
-                  );
-                })}
-                {!hasOrderedReasoning && reasoningPreviewPanel}
+                {orderedTextParts.map((part) => (
+                  <div
+                    key={part.key}
+                    className="py-1"
+                  >
+                    <MarkdownText>{part.text}</MarkdownText>
+                  </div>
+                ))}
               </>
             ) : (
-              <>
-                {shouldRenderReasoningAboveText && reasoningPreviewPanel}
-                {contentString.length > 0 && (
-                  <div className="py-1">
-                    <MarkdownText>{contentString}</MarkdownText>
-                  </div>
-                )}
-                {!shouldRenderReasoningAboveText && reasoningPreviewPanel}
-              </>
+              contentString.length > 0 && (
+                <div className="py-1">
+                  <MarkdownText>{contentString}</MarkdownText>
+                </div>
+              )
             )}
 
-            {!hideToolCalls && !hasInlineToolCalls && (
-              <>
-                {(hasToolCalls && toolCallsHaveContents && (
-                  <ToolCalls toolCalls={message.tool_calls} />
-                )) ||
-                  (hasAnthropicToolCalls && (
-                    <ToolCalls toolCalls={anthropicStreamedToolCalls} />
-                  )) ||
-                  (hasToolCalls && (
-                    <ToolCalls toolCalls={message.tool_calls} />
-                  ))}
-              </>
-            )}
+            <IntermediateStepsPanel parts={intermediateParts} />
 
             {message && (
               <CustomComponent
