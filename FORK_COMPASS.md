@@ -46,6 +46,9 @@ Tracking anchor commits:
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-06: Refresh Question Crafter branding assets (logo SVG/PNG + React icon component) and add alternate icon source under `public/branding/`; history-row rename save/cancel controls are now compact icon actions for lower width. Files: `public/logo.svg`, `public/question-crafter-logo.svg`, `public/question-crafter-logo.png`, `public/branding/question-crafter-icon-option-1-collab.svg`, `src/components/icons/question-crafter.tsx`, `src/components/thread/history/index.tsx`, `FORK_COMPASS.md`.
+- 2026-02-06: Add manual thread naming on history rows (pencil icon with inline editor); persists names via `threads.update(...metadata.thread_title)` and prioritizes custom names in history labels. Also adds a clear `New` action in history headers (desktop + mobile sheet). Files: `src/components/thread/history/index.tsx`, `src/providers/Thread.tsx`, `src/lib/thread-metadata.ts`, `src/components/thread/index.tsx`, `README.md`, `FORK_COMPASS.md`.
+- 2026-02-06: Add thread history lazy loading in 20-thread batches with bottom-of-list scroll fetch and inline `Loading more history...` spinner indicator (desktop + mobile sheet). Files: `src/providers/Thread.tsx`, `src/components/thread/history/index.tsx`, `src/providers/Stream.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-06: Prevent intermediate artifact portal over-rendering by mounting intermediate artifact slot content only when open, and suppress benign React `#185` stream errors from showing as user-facing failure toasts. Files: `src/components/thread/messages/ai.tsx`, `src/components/thread/index.tsx`, `FORK_COMPASS.md`.
 - 2026-02-06: Rebrand in-app UI title/header/logo from `Agent Chat` to `Question Crafter` across setup, main thread header, and page metadata. Files: `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/app/layout.tsx`, `src/components/icons/question-crafter.tsx`, `public/logo.svg`.
 - 2026-02-06: Aggregate consecutive AI/tool intermediate content into a single `Intermediate Step` launcher per turn (instead of per message), with streaming header status + spinner (`thinking...` / `calling ...`) and ordered content preserved for tool calls/results and reasoning blocks. Files: `src/components/thread/messages/ai.tsx`, `README.md`, `FORK_COMPASS.md`.
@@ -152,6 +155,7 @@ Tracking anchor commits:
 - `src/components/thread/index.tsx`
 - `src/components/thread/history/index.tsx`
 - `src/hooks/use-thread-last-seen.ts`
+- `src/lib/thread-metadata.ts`
 - `src/lib/thread-activity.ts`
 - `src/components/thread/messages/tool-calls.tsx`
 - `src/components/thread/messages/human.tsx`
@@ -168,10 +172,14 @@ Tracking anchor commits:
 - Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
 - Benign React `#185` stream errors are filtered from the generic run-error toast path to avoid false failure alerts for users.
 - Header/setup branding now uses `Question Crafter` title text with the fork logo.
+- Thread history rows now include a contextual rename action (pencil icon with inline editor); saving writes `thread_title` metadata through the LangGraph SDK `threads.update(...)` API.
+- Rename inline editor uses compact icon actions (`check` / `close`) instead of text buttons to reduce row width.
+- History label resolution now prioritizes user-defined thread titles (`thread_title`, then `title`) before fallback preview text.
 - Thread history list is enabled and controlled by `THREAD_HISTORY_ENABLED`.
 - History search no longer gates by assistant/graph; the backend ownership filter scopes results per-user.
 - Thread history items show run-in-progress spinners and unseen completion dots using localStorage last-seen tracking.
 - History polling now uses a lighter `/threads/search` payload (`select` fields, no `values`), pauses when history is not visible, pauses while the tab is hidden, and avoids rerenders when thread signatures have not changed.
+- History list lazy-loads metadata in 20-thread batches on downward scroll and shows an inline `Loading more history...` spinner while the next batch fetches.
 
 ---
 
@@ -239,6 +247,7 @@ Use this as a jump list when editing or debugging:
 - `src/components/thread/messages/tool-calls.tsx`
 - `src/components/thread/history/index.tsx`
 - `src/hooks/use-thread-last-seen.ts`
+- `src/lib/thread-metadata.ts`
 - `src/lib/thread-activity.ts`
 
 **Config, build, deploy**
@@ -252,6 +261,12 @@ Use this as a jump list when editing or debugging:
 - `DEPLOYMENT_GUIDE.md`
 - `README.md`
 - `AGENTS.md`
+
+**Branding assets**
+- `public/logo.svg`
+- `public/question-crafter-logo.svg`
+- `public/question-crafter-logo.png`
+- `public/branding/question-crafter-icon-option-1-collab.svg`
 
 ---
 

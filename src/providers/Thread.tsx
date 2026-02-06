@@ -1,6 +1,6 @@
 import { getApiKey } from "@/lib/api-key";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
-import { Thread } from "@langchain/langgraph-sdk";
+import { Metadata, Thread } from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
 import {
   createContext,
@@ -14,7 +14,11 @@ import {
 import { createClient } from "./client";
 
 interface ThreadContextType {
-  getThreads: () => Promise<Thread[]>;
+  getThreads: (params?: { limit?: number; offset?: number }) => Promise<Thread[]>;
+  updateThread: (
+    threadId: string,
+    payload?: { metadata?: Metadata },
+  ) => Promise<Thread>;
   threads: Thread[];
   setThreads: Dispatch<SetStateAction<Thread[]>>;
   threadsLoading: boolean;
@@ -22,7 +26,7 @@ interface ThreadContextType {
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
-const THREAD_HISTORY_LIMIT = 20;
+export const THREAD_HISTORY_PAGE_SIZE = 20;
 const THREAD_HISTORY_SELECT = [
   "thread_id",
   "created_at",
@@ -39,24 +43,50 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
 
-  const getThreads = useCallback(async (): Promise<Thread[]> => {
-    if (!THREAD_HISTORY_ENABLED) return [];
-    const finalApiUrl = apiUrl || envApiUrl;
-    if (!finalApiUrl) return [];
-    const client = createClient(finalApiUrl, getApiKey() ?? undefined);
+  const getThreads = useCallback(
+    async (params?: { limit?: number; offset?: number }): Promise<Thread[]> => {
+      if (!THREAD_HISTORY_ENABLED) return [];
+      const finalApiUrl = apiUrl || envApiUrl;
+      if (!finalApiUrl) return [];
+      const client = createClient(finalApiUrl, getApiKey() ?? undefined);
 
-    const threads = await client.threads.search({
-      limit: THREAD_HISTORY_LIMIT,
-      sortBy: "updated_at",
-      sortOrder: "desc",
-      select: [...THREAD_HISTORY_SELECT],
-    });
+      const limit =
+        typeof params?.limit === "number" && params.limit > 0
+          ? params.limit
+          : THREAD_HISTORY_PAGE_SIZE;
+      const offset =
+        typeof params?.offset === "number" && params.offset >= 0
+          ? params.offset
+          : 0;
 
-    return threads;
-  }, [apiUrl, envApiUrl]);
+      const threads = await client.threads.search({
+        limit,
+        offset,
+        sortBy: "updated_at",
+        sortOrder: "desc",
+        select: [...THREAD_HISTORY_SELECT],
+      });
+
+      return threads;
+    },
+    [apiUrl, envApiUrl],
+  );
+
+  const updateThread = useCallback(
+    async (threadId: string, payload?: { metadata?: Metadata }) => {
+      const finalApiUrl = apiUrl || envApiUrl;
+      if (!finalApiUrl) {
+        throw new Error("Missing API URL. Cannot update thread.");
+      }
+      const client = createClient(finalApiUrl, getApiKey() ?? undefined);
+      return client.threads.update(threadId, payload);
+    },
+    [apiUrl, envApiUrl],
+  );
 
   const value = {
     getThreads,
+    updateThread,
     threads,
     setThreads,
     threadsLoading,

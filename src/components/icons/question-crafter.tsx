@@ -11,48 +11,114 @@ export function QuestionCrafterLogoSVG({
     <svg
       width={width}
       height={height}
-      viewBox="0 0 80 80"
+      viewBox="0 0 96 96"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       aria-hidden="true"
     >
+      <defs>
+        <linearGradient
+          id="question-crafter-logo-bg"
+          x1="8"
+          y1="8"
+          x2="88"
+          y2="88"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#0B4A58" />
+          <stop
+            offset="1"
+            stopColor="#0A3344"
+          />
+        </linearGradient>
+      </defs>
+
       <rect
-        x="4"
-        y="4"
-        width="72"
-        height="72"
+        x="6"
+        y="6"
+        width="84"
+        height="84"
+        rx="22"
+        fill="url(#question-crafter-logo-bg)"
+      />
+      <rect
+        x="14"
+        y="14"
+        width="68"
+        height="68"
         rx="18"
-        fill="#0B3D46"
+        fill="#0F5E72"
       />
-      <rect
-        x="10"
-        y="10"
-        width="60"
-        height="60"
-        rx="14"
-        fill="#106372"
-      />
-      <path
-        d="M25 20H55C61.0751 20 66 24.9249 66 31V45C66 51.0751 61.0751 56 55 56H41.8L30 65L33.3 56H25C18.9249 56 14 51.0751 14 45V31C14 24.9249 18.9249 20 25 20Z"
-        fill="#ECFEFF"
-      />
-      <circle
-        cx="41"
-        cy="38"
-        r="10"
-        stroke="#106372"
-        strokeWidth="4.5"
-      />
-      <path
-        d="M47.5 44.5L54 51"
-        stroke="#106372"
-        strokeWidth="4.5"
+
+      <line
+        x1="28"
+        y1="48"
+        x2="68"
+        y2="48"
+        stroke="#BDEFFF"
+        strokeWidth="4"
         strokeLinecap="round"
       />
+      <circle
+        cx="24"
+        cy="48"
+        r="6"
+        fill="#67F0C4"
+      />
+      <circle
+        cx="72"
+        cy="48"
+        r="6"
+        fill="#9CC9FF"
+      />
+
+      <rect
+        x="32"
+        y="24"
+        width="32"
+        height="48"
+        rx="10"
+        fill="#F8FDFF"
+      />
+      <rect
+        x="38"
+        y="34"
+        width="20"
+        height="3"
+        rx="1.5"
+        fill="#CBEFFE"
+      />
+      <rect
+        x="38"
+        y="40"
+        width="16"
+        height="3"
+        rx="1.5"
+        fill="#CBEFFE"
+      />
+      <rect
+        x="38"
+        y="46"
+        width="18"
+        height="3"
+        rx="1.5"
+        fill="#CBEFFE"
+      />
       <path
-        d="M58 16L60.2 21.8L66 24L60.2 26.2L58 32L55.8 26.2L50 24L55.8 21.8L58 16Z"
-        fill="#F59E0B"
+        d="M43.49 57.29C43.49 54.88 45.43 53.22 47.99 53.22C50.45 53.22 52.19 54.7 52.19 56.97C52.19 58.62 51.42 59.66 49.78 60.63C48.46 61.41 48.11 61.94 48.11 62.86V63.41H46.06V62.67C46.06 61.18 46.64 60.2 48.43 59.18C49.62 58.5 50.06 57.93 50.06 57.08C50.06 56 49.23 55.25 47.99 55.25C46.69 55.25 45.78 56.13 45.78 57.4V57.55H43.49V57.29ZM47.19 67.31C46.41 67.31 45.78 66.68 45.78 65.9C45.78 65.11 46.41 64.49 47.19 64.49C47.98 64.49 48.61 65.11 48.61 65.9C48.61 66.68 47.98 67.31 47.19 67.31Z"
+        fill="#0E5668"
+      />
+
+      <path
+        d="M63 58L74 47L80 53L69 64L62 65L63 58Z"
+        fill="#F6BC45"
+      />
+      <circle
+        cx="70.5"
+        cy="52.5"
+        r="2.1"
+        fill="#0E5668"
       />
     </svg>
   );

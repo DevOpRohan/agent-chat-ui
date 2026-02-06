@@ -14,13 +14,11 @@ import {
   ensureToolCallsHaveResponses,
 } from "@/lib/ensure-tool-responses";
 import { QuestionCrafterLogoSVG } from "../icons/question-crafter";
-import { TooltipIconButton } from "./tooltip-icon-button";
 import {
   ArrowDown,
   LoaderCircle,
   PanelRightOpen,
   PanelRightClose,
-  SquarePen,
   XIcon,
   Plus,
 } from "lucide-react";
@@ -467,7 +465,7 @@ export function Thread() {
             </div>
           )}
           {chatStarted && (
-            <div className="relative z-10 flex items-center justify-between gap-3 p-2">
+            <div className="relative z-10 flex items-center gap-3 p-2">
               <div className="relative flex items-center justify-start gap-2">
                 <div className="absolute left-0 z-10">
                   {(!chatHistoryOpen || !isLargeScreen) && (
@@ -504,18 +502,6 @@ export function Thread() {
                     Question Crafter
                   </span>
                 </motion.button>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <TooltipIconButton
-                  size="lg"
-                  className="p-4"
-                  tooltip="New thread"
-                  variant="ghost"
-                  onClick={() => setThreadId(null)}
-                >
-                  <SquarePen className="size-5" />
-                </TooltipIconButton>
               </div>
 
               <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />

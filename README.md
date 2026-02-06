@@ -52,7 +52,10 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > This fork rejects concurrent sends on the **same thread** while a run is active. The UI shows a warning toast and keeps the current draft so the user can retry after completion.
 
 > [!NOTE]
-> Thread history refresh uses lightweight thread search fields and pauses polling when the history panel is closed or the browser tab is hidden.
+> Thread history refresh uses lightweight thread search fields, lazy-loads history in 20-thread batches as you scroll (with a "Loading more history..." spinner), and pauses polling when the history panel is closed or the browser tab is hidden.
+
+> [!NOTE]
+> You can rename a thread directly from its history row (pencil icon on hover/active row). The UI writes `thread_title` metadata via `threads.update(...)`, and the custom name is shown in chat history.
 
 > [!NOTE]
 > If your model/provider emits `reasoning` content blocks, assistant messages now show a compact “Thinking” panel with the latest 500 characters.

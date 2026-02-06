@@ -31,7 +31,7 @@ import {
   isIapAuthMode,
 } from "@/lib/auth-token";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
-import { useThreads } from "./Thread";
+import { THREAD_HISTORY_PAGE_SIZE, useThreads } from "./Thread";
 import { toast } from "sonner";
 
 export type StateType = { messages: Message[]; ui?: UIMessage[] };
@@ -96,7 +96,7 @@ const StreamSession = ({
   isIapAuth: boolean;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { getThreads, setThreads } = useThreads();
+  const { getThreads, setThreads, threads } = useThreads();
   const [authHeader, setAuthHeader] = useState<string | undefined>(() =>
     isIapAuth ? getCachedAuthHeader() : undefined,
   );
@@ -157,7 +157,10 @@ const StreamSession = ({
       // Refetch threads list when thread ID changes.
       // Wait for some seconds before fetching so we're able to get the new thread that was created.
       if (THREAD_HISTORY_ENABLED) {
-        sleep().then(() => getThreads().then(setThreads).catch(console.error));
+        const historyLimit = Math.max(threads.length, THREAD_HISTORY_PAGE_SIZE);
+        sleep()
+          .then(() => getThreads({ limit: historyLimit }).then(setThreads))
+          .catch(console.error);
       }
     },
   });
