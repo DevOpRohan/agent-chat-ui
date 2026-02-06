@@ -57,6 +57,10 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > [!NOTE]
 > If your model/provider emits `reasoning` content blocks, assistant messages now show a compact “Thinking” panel with the latest 500 characters.
 
+> [!NOTE]
+> Intermediate reasoning/tool activity is now surfaced through a single `Intermediate Step` launcher in chat. Clicking it opens the right artifact pane with ordered thinking, tool calls, and tool results (including streaming/parallel tool-call updates).
+> While a run is still streaming, the `Intermediate Step` header shows live status and a spinner.
+
 ## Environment Variables
 
 You can bypass the initial setup form by setting the following environment variables:

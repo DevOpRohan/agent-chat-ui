@@ -18,7 +18,7 @@ import {
 import { useQueryState } from "nuqs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { LangGraphLogoSVG } from "@/components/icons/langgraph";
+import { QuestionCrafterLogoSVG } from "@/components/icons/question-crafter";
 import { Label } from "@/components/ui/label";
 import { ArrowRight } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -234,14 +234,14 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
         <div className="animate-in fade-in-0 zoom-in-95 bg-background flex max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="mt-14 flex flex-col gap-2 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <LangGraphLogoSVG className="h-7" />
+              <QuestionCrafterLogoSVG className="h-7" />
               <h1 className="text-xl font-semibold tracking-tight">
-                Agent Chat
+                Question Crafter
               </h1>
             </div>
             <p className="text-muted-foreground">
-              Welcome to Agent Chat! Before you get started, you need to enter
-              the URL of the deployment and the assistant / graph ID.
+              Welcome to Question Crafter! Before you get started, enter the
+              deployment URL and the assistant / graph ID.
             </p>
           </div>
           <form

@@ -19,6 +19,8 @@ import { ThreadView } from "../agent-inbox";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 import { useEffect, useRef, useState } from "react";
+import { LoaderCircle } from "lucide-react";
+import { DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses";
 
 const REASONING_PREVIEW_CHARS = 500;
 type OrderedContentPart =
@@ -230,63 +232,132 @@ function ThinkingPanel({ text }: { text: string }) {
   );
 }
 
-function IntermediateStepsPanel({
+function getIntermediateRunningStatus(
+  parts: IntermediateContentPart[],
+  isStreaming: boolean,
+): string | null {
+  if (!isStreaming || parts.length === 0) {
+    return null;
+  }
+
+  for (let idx = parts.length - 1; idx >= 0; idx -= 1) {
+    const part = parts[idx];
+    if (part.kind === "tool_calls") {
+      const toolNames = part.toolCalls
+        .map((toolCall) => toolCall.name?.trim())
+        .filter((name): name is string => !!name);
+
+      if (toolNames.length === 1) {
+        return `calling ${toolNames[0]}...`;
+      }
+
+      if (toolNames.length > 1) {
+        return `calling ${toolNames.length} tools...`;
+      }
+
+      return "calling tool...";
+    }
+
+    if (part.kind === "reasoning") {
+      return "thinking...";
+    }
+  }
+
+  return "thinking...";
+}
+
+function IntermediateStepContent({
   parts,
+}: {
+  parts: IntermediateContentPart[];
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      {parts.map((part) => {
+        if (part.kind === "reasoning") {
+          return (
+            <ThinkingPanel
+              key={part.key}
+              text={part.text}
+            />
+          );
+        }
+
+        return (
+          <div
+            key={part.key}
+            className="rounded-md border border-slate-200 bg-white p-2"
+          >
+            {part.kind === "tool_calls" ? (
+              <>
+                <p className="mb-2 text-xs font-medium text-slate-600">
+                  Tool Calls
+                </p>
+                <ToolCalls toolCalls={part.toolCalls} />
+              </>
+            ) : (
+              <>
+                <p className="mb-2 text-xs font-medium text-slate-600">
+                  Tool Result
+                </p>
+                <ToolResult message={part.toolResult} />
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function IntermediateStepsArtifactTrigger({
+  parts,
+  isStreaming,
   isLoading,
   showActions,
   actionContent,
   handleRegenerate,
 }: {
   parts: IntermediateContentPart[];
+  isStreaming: boolean;
   isLoading: boolean;
   showActions?: boolean;
   actionContent?: string;
   handleRegenerate?: () => void;
 }) {
+  const [IntermediateArtifactContent, intermediateArtifact] = useArtifact();
   if (parts.length === 0) return null;
 
-  return (
-    <details className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-sm text-slate-700">
-      <summary className="cursor-pointer select-none font-semibold text-slate-800">
-        Intermediate Steps ({parts.length})
-      </summary>
-      <div className="mt-3 flex flex-col gap-3">
-        {parts.map((part) => {
-          if (part.kind === "reasoning") {
-            return (
-              <ThinkingPanel
-                key={part.key}
-                text={part.text}
-              />
-            );
-          }
+  const runningStatus = getIntermediateRunningStatus(
+    parts,
+    isStreaming,
+  );
+  const statusLabel = runningStatus ?? "open details";
 
-          return (
-            <div
-              key={part.key}
-              className="rounded-md border border-slate-200 bg-white p-2"
-            >
-              {part.kind === "tool_calls" ? (
-                <>
-                  <p className="mb-2 text-xs font-medium text-slate-600">
-                    Tool Calls
-                  </p>
-                  <ToolCalls toolCalls={part.toolCalls} />
-                </>
-              ) : (
-                <>
-                  <p className="mb-2 text-xs font-medium text-slate-600">
-                    Tool Result
-                  </p>
-                  <ToolResult message={part.toolResult} />
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => intermediateArtifact.setOpen(true)}
+        className="w-full rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-left transition-colors hover:bg-slate-100"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+              {runningStatus ? (
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin text-slate-600" />
+              ) : null}
+              Intermediate Step
+            </span>
+            <span className="truncate text-xs font-medium text-slate-600">
+              {statusLabel}
+            </span>
+          </div>
+          <span className="shrink-0 text-xs text-slate-500">{parts.length}</span>
+        </div>
+      </button>
       {showActions ? (
-        <div className="mt-3 border-t border-slate-200 pt-2">
+        <div className="mt-2">
           <CommandBar
             content={actionContent ?? ""}
             isLoading={isLoading}
@@ -295,7 +366,32 @@ function IntermediateStepsPanel({
           />
         </div>
       ) : null}
-    </details>
+
+      <IntermediateArtifactContent
+        title={
+          <div className="flex items-center gap-1.5 truncate font-semibold text-slate-900">
+            {runningStatus ? (
+              <LoaderCircle className="h-4 w-4 animate-spin text-slate-600" />
+            ) : null}
+            {runningStatus ? `Intermediate Step: ${runningStatus}` : "Intermediate Step"}
+          </div>
+        }
+      >
+        <div className="flex min-h-full flex-col">
+          <div className="border-b border-slate-200 px-4 py-3">
+            <p className="text-base font-semibold text-slate-900">Intermediate Step</p>
+            <p className="mt-0.5 text-xs text-slate-600">
+              {runningStatus
+                ? runningStatus
+                : "Reasoning, tool calls, and tool responses for this assistant turn."}
+            </p>
+          </div>
+          <div className="p-4">
+            <IntermediateStepContent parts={parts} />
+          </div>
+        </div>
+      </IntermediateArtifactContent>
+    </>
   );
 }
 
@@ -538,6 +634,116 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
+function isAiOrToolMessage(message: Message | undefined): boolean {
+  return message?.type === "ai" || message?.type === "tool";
+}
+
+function withPartKeyPrefix(
+  parts: IntermediateContentPart[],
+  keyPrefix: string,
+): IntermediateContentPart[] {
+  return parts.map((part, idx) => ({
+    ...part,
+    key: `${keyPrefix}-${idx}-${part.key}`,
+  }));
+}
+
+function getFallbackIntermediateParts(
+  message: Message,
+  keyPrefix: string,
+): IntermediateContentPart[] {
+  const reasoningText = extractReasoningText(message);
+  const content = message.content ?? [];
+  const anthropicStreamedToolCalls = Array.isArray(content)
+    ? parseAnthropicStreamedToolCalls(content as MessageContentComplex[])
+    : undefined;
+
+  const aiMessage = message as AIMessage;
+  const messageToolCalls = Array.isArray(aiMessage.tool_calls)
+    ? aiMessage.tool_calls
+    : [];
+  const hasToolCalls = messageToolCalls.length > 0;
+  const toolCallsHaveContents =
+    hasToolCalls &&
+    messageToolCalls.some((tc) => tc.args && Object.keys(tc.args).length > 0);
+
+  const fallbackToolCalls =
+    (hasToolCalls && toolCallsHaveContents && messageToolCalls) ||
+    (anthropicStreamedToolCalls && anthropicStreamedToolCalls.length > 0
+      ? anthropicStreamedToolCalls
+      : undefined) ||
+    (hasToolCalls ? messageToolCalls : undefined);
+
+  const fallbackIntermediateParts: IntermediateContentPart[] = [];
+  if (reasoningText.trim().length > 0) {
+    fallbackIntermediateParts.push({
+      kind: "reasoning",
+      key: "fallback-reasoning",
+      text: reasoningText,
+    });
+  }
+  if (fallbackToolCalls && fallbackToolCalls.length > 0) {
+    fallbackIntermediateParts.push({
+      kind: "tool_calls",
+      key: "fallback-tool-calls",
+      toolCalls: fallbackToolCalls,
+    });
+  }
+
+  return withPartKeyPrefix(fallbackIntermediateParts, keyPrefix);
+}
+
+function getIntermediatePartsFromMessage(
+  message: Message | undefined,
+  keyPrefix: string,
+): IntermediateContentPart[] {
+  if (!message) return [];
+
+  if (message.type === "tool") {
+    return withPartKeyPrefix(
+      [
+        {
+          kind: "tool_result",
+          key: `tool-result-${message.id ?? "latest"}`,
+          toolResult: message as ToolMessage,
+        },
+      ],
+      keyPrefix,
+    );
+  }
+
+  if (message.type !== "ai") {
+    return [];
+  }
+
+  const orderedContentParts = getOrderedContentParts(message);
+  if (orderedContentParts.length > 0) {
+    const orderedSegments = groupOrderedContentParts(orderedContentParts);
+    const orderedIntermediateParts = orderedSegments.flatMap((segment) =>
+      segment.kind === "intermediate" ? segment.parts : [],
+    );
+    return withPartKeyPrefix(orderedIntermediateParts, keyPrefix);
+  }
+
+  return getFallbackIntermediateParts(message, keyPrefix);
+}
+
+function messageHasRenderableText(message: Message | undefined): boolean {
+  if (!message || message.type !== "ai") return false;
+
+  const orderedContentParts = getOrderedContentParts(message);
+  const hasOrderedText = orderedContentParts.some(
+    (part) => part.kind === "text" && part.text.trim().length > 0,
+  );
+  if (hasOrderedText) return true;
+
+  return getContentString(message.content).trim().length > 0;
+}
+
+function getRenderableMessages(messages: Message[]): Message[] {
+  return messages.filter((message) => !message.id?.startsWith(DO_NOT_RENDER_ID_PREFIX));
+}
+
 interface InterruptProps {
   interrupt?: unknown;
   isLastMessage: boolean;
@@ -578,152 +784,123 @@ export function AssistantMessage({
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
 }) {
-  const content = message?.content ?? [];
-  const contentString = getContentString(content);
-  const reasoningText = extractReasoningText(message);
-  const orderedContentParts = getOrderedContentParts(message);
-  const orderedSegments = groupOrderedContentParts(orderedContentParts);
-  const hasOrderedContentParts = orderedContentParts.length > 0;
-
   const thread = useStreamContext();
+  const renderedMessages = getRenderableMessages(thread.messages);
+  const currentMessageIndex = message?.id
+    ? renderedMessages.findIndex((threadMessage) => threadMessage.id === message.id)
+    : -1;
   const isLastMessage =
-    thread.messages[thread.messages.length - 1].id === message?.id;
-  const hasNoAIOrToolMessages = !thread.messages.find(
-    (m) => m.type === "ai" || m.type === "tool",
-  );
+    currentMessageIndex >= 0 && currentMessageIndex === renderedMessages.length - 1;
+  const hasNoAIOrToolMessages = !renderedMessages.find((m) => isAiOrToolMessage(m));
   const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const threadInterrupt = thread.interrupt;
-
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
-  const anthropicStreamedToolCalls = Array.isArray(content)
-    ? parseAnthropicStreamedToolCalls(content)
-    : undefined;
 
-  const hasToolCalls =
-    message &&
-    "tool_calls" in message &&
-    message.tool_calls &&
-    message.tool_calls.length > 0;
-  const toolCallsHaveContents =
-    hasToolCalls &&
-    message.tool_calls?.some(
-      (tc) => tc.args && Object.keys(tc.args).length > 0,
-    );
-  const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
+  const content = message?.content ?? [];
+  const contentString = getContentString(content);
+  const orderedContentParts = getOrderedContentParts(message);
+  const orderedSegments = groupOrderedContentParts(orderedContentParts);
   const isToolResult = message?.type === "tool";
-
-  const fallbackToolCalls =
-    (hasToolCalls && toolCallsHaveContents && message.tool_calls) ||
-    (hasAnthropicToolCalls && anthropicStreamedToolCalls) ||
-    (hasToolCalls && message.tool_calls) ||
-    undefined;
-  const fallbackIntermediateParts: IntermediateContentPart[] = [];
-  if (reasoningText.trim().length > 0) {
-    fallbackIntermediateParts.push({
-      kind: "reasoning",
-      key: "fallback-reasoning",
-      text: reasoningText,
-    });
-  }
-  if (fallbackToolCalls && fallbackToolCalls.length > 0) {
-    fallbackIntermediateParts.push({
-      kind: "tool_calls",
-      key: "fallback-tool-calls",
-      toolCalls: fallbackToolCalls,
-    });
-  }
-  const fallbackSegments: OrderedRenderSegment[] = [];
-  if (contentString.length > 0) {
-    fallbackSegments.push({
-      kind: "text",
-      key: "fallback-text",
-      text: contentString,
-    });
-  }
-  if (fallbackIntermediateParts.length > 0) {
-    fallbackSegments.push({
-      kind: "intermediate",
-      key: "fallback-intermediate",
-      parts: fallbackIntermediateParts,
-    });
-  }
-  const renderSegments = hasOrderedContentParts
-    ? orderedSegments
-    : fallbackSegments;
-  const flattenedIntermediateParts = renderSegments.flatMap((segment) =>
-    segment.kind === "intermediate" ? segment.parts : [],
+  const currentMessageIntermediateParts = getIntermediatePartsFromMessage(
+    message,
+    message?.id ?? "current",
   );
-  const hasRenderedText = renderSegments.some(
-    (segment) => segment.kind === "text" && segment.text.trim().length > 0,
-  );
-  const shouldRenderInlineActionsForIntermediate =
-    isLastMessage && !hasRenderedText && flattenedIntermediateParts.length > 0;
-  const fallbackCommandContent = getIntermediateCopyText(flattenedIntermediateParts);
+  const fallbackCommandContent = getIntermediateCopyText(currentMessageIntermediateParts);
   const commandContent =
     contentString.trim().length > 0 ? contentString : fallbackCommandContent;
-  const toolResultParts: IntermediateContentPart[] =
-    isToolResult && message
-      ? [
-          {
-            kind: "tool_result",
-            key: `tool-result-${message.id ?? "latest"}`,
-            toolResult: message as ToolMessage,
-          },
-        ]
+
+  const textSegments: { key: string; text: string }[] =
+    orderedContentParts.length > 0
+      ? orderedSegments
+          .filter(
+            (segment): segment is Extract<OrderedRenderSegment, { kind: "text" }> =>
+              segment.kind === "text",
+          )
+          .map((segment) => ({ key: segment.key, text: segment.text }))
+      : contentString.trim().length > 0
+        ? [{ key: "fallback-text", text: contentString }]
+        : [];
+
+  let groupStartIndex = -1;
+  let groupEndIndex = -1;
+  if (currentMessageIndex >= 0 && isAiOrToolMessage(renderedMessages[currentMessageIndex])) {
+    groupStartIndex = currentMessageIndex;
+    groupEndIndex = currentMessageIndex;
+    while (
+      groupStartIndex > 0 &&
+      isAiOrToolMessage(renderedMessages[groupStartIndex - 1])
+    ) {
+      groupStartIndex -= 1;
+    }
+    while (
+      groupEndIndex < renderedMessages.length - 1 &&
+      isAiOrToolMessage(renderedMessages[groupEndIndex + 1])
+    ) {
+      groupEndIndex += 1;
+    }
+  }
+
+  const groupedMessages =
+    groupStartIndex >= 0 && groupEndIndex >= groupStartIndex
+      ? renderedMessages.slice(groupStartIndex, groupEndIndex + 1)
       : [];
-  const toolResultCopyContent = getIntermediateCopyText(toolResultParts);
+  const groupedMessageParts = groupedMessages.map((groupMessage, idx) => ({
+    message: groupMessage,
+    parts: getIntermediatePartsFromMessage(
+      groupMessage,
+      groupMessage.id ?? `group-${groupStartIndex + idx}`,
+    ),
+  }));
+  const groupedIntermediateParts = groupedMessageParts.flatMap(
+    (groupMessage) => groupMessage.parts,
+  );
+  const firstGroupMessageWithIntermediateId = groupedMessageParts.find(
+    (groupMessage) => groupMessage.parts.length > 0,
+  )?.message.id;
+  const shouldRenderGroupIntermediateTrigger =
+    !!message?.id &&
+    firstGroupMessageWithIntermediateId != null &&
+    message.id === firstGroupMessageWithIntermediateId;
+  const isCurrentGroupAtThreadTail =
+    groupEndIndex >= 0 && groupEndIndex === renderedMessages.length - 1;
+  const isGroupStreaming =
+    isLoading &&
+    isCurrentGroupAtThreadTail &&
+    groupedIntermediateParts.length > 0;
+  const groupHasRenderableText = groupedMessages.some((groupMessage) =>
+    messageHasRenderableText(groupMessage),
+  );
+  const shouldRenderInlineActionsForIntermediate =
+    shouldRenderGroupIntermediateTrigger &&
+    isCurrentGroupAtThreadTail &&
+    !groupHasRenderableText &&
+    groupedIntermediateParts.length > 0;
+  const groupedIntermediateCopyContent = getIntermediateCopyText(groupedIntermediateParts);
 
   return (
     <div className="group mr-auto flex w-full items-start gap-2">
       <div className="flex w-full flex-col gap-2">
-        {isToolResult ? (
-          <>
-            <IntermediateStepsPanel
-              parts={toolResultParts}
-              isLoading={isLoading}
-              showActions={isLastMessage}
-              actionContent={
-                toolResultCopyContent.length > 0
-                  ? toolResultCopyContent
-                  : contentString
-              }
-              handleRegenerate={() => handleRegenerate(parentCheckpoint)}
-            />
-            <Interrupt
-              interrupt={threadInterrupt}
-              isLastMessage={isLastMessage}
-              hasNoAIOrToolMessages={hasNoAIOrToolMessages}
-            />
-          </>
-        ) : (
-          <>
-            {renderSegments.map((segment, idx) => {
-              if (segment.kind === "text") {
-                return (
-                  <div
-                    key={segment.key}
-                    className="py-1"
-                  >
-                    <MarkdownText>{segment.text}</MarkdownText>
-                  </div>
-                );
-              }
+        {shouldRenderGroupIntermediateTrigger ? (
+          <IntermediateStepsArtifactTrigger
+            parts={groupedIntermediateParts}
+            isStreaming={isGroupStreaming}
+            isLoading={isLoading}
+            showActions={shouldRenderInlineActionsForIntermediate}
+            actionContent={groupedIntermediateCopyContent}
+            handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+          />
+        ) : null}
 
-              const isLastIntermediateSegment = idx === renderSegments.length - 1;
-              return (
-                <IntermediateStepsPanel
-                  key={segment.key}
-                  parts={segment.parts}
-                  isLoading={isLoading}
-                  showActions={
-                    shouldRenderInlineActionsForIntermediate &&
-                    isLastIntermediateSegment
-                  }
-                  actionContent={getIntermediateCopyText(segment.parts)}
-                  handleRegenerate={() => handleRegenerate(parentCheckpoint)}
-                />
-              );
-            })}
+        {!isToolResult ? (
+          <>
+            {textSegments.map((segment) => (
+              <div
+                key={segment.key}
+                className="py-1"
+              >
+                <MarkdownText>{segment.text}</MarkdownText>
+              </div>
+            ))}
 
             {message && (
               <CustomComponent
@@ -731,11 +908,13 @@ export function AssistantMessage({
                 thread={thread}
               />
             )}
+
             <Interrupt
               interrupt={threadInterrupt}
               isLastMessage={isLastMessage}
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
             />
+
             <div
               className={cn(
                 "mr-auto flex items-center gap-2 transition-opacity",
@@ -757,6 +936,12 @@ export function AssistantMessage({
               />
             </div>
           </>
+        ) : (
+          <Interrupt
+            interrupt={threadInterrupt}
+            isLastMessage={isLastMessage}
+            hasNoAIOrToolMessages={hasNoAIOrToolMessages}
+          />
         )}
       </div>
     </div>

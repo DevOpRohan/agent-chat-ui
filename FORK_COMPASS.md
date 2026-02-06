@@ -46,6 +46,8 @@ Tracking anchor commits:
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-06: Rebrand in-app UI title/header/logo from `Agent Chat` to `Question Crafter` across setup, main thread header, and page metadata. Files: `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/app/layout.tsx`, `src/components/icons/question-crafter.tsx`, `public/logo.svg`.
+- 2026-02-06: Aggregate consecutive AI/tool intermediate content into a single `Intermediate Step` launcher per turn (instead of per message), with streaming header status + spinner (`thinking...` / `calling ...`) and ordered content preserved for tool calls/results and reasoning blocks. Files: `src/components/thread/messages/ai.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-06: Add assistant-message reasoning preview UI. When `reasoning` content blocks are present, the chat shows a compact “Thinking” panel with the latest 500 characters (stream-updating as content updates). Files: `src/components/thread/messages/ai.tsx`, `README.md`.
 - 2026-02-06: Optimize thread history refresh path: `threads.search` now requests a lightweight selected field set (no `values`), thread labels are read from thread metadata preview, polling pauses when the history panel is closed or the tab is hidden, and redundant thread-list rerenders are skipped when signatures are unchanged. Files: `src/providers/Thread.tsx`, `src/components/thread/history/index.tsx`, `src/components/thread/index.tsx`.
 - 2026-02-06: Reject same-thread concurrent sends with explicit toast UX and backend-safe run policy (`multitaskStrategy: "reject"` on all run-creating submits). Added preflight thread busy check in composer and new submit-guard Playwright coverage. Files: `src/components/thread/index.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/agent-inbox/components/thread-actions-view.tsx`, `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`, `tests/submit-guard.spec.ts`, `tests/history-spinner-qa.spec.ts`, `README.md`, `FORK_COMPASS.md`.
@@ -161,6 +163,9 @@ Tracking anchor commits:
 - Composer now rejects same-thread sends while the thread is still running and shows a warning toast; draft text/files are preserved for retry.
 - Conflict-like run errors (busy/conflict/409) surface with a dedicated “active run” toast instead of a generic error message.
 - Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
+- Intermediate reasoning/tool content now routes through one `Intermediate Step` launcher in the chat message area and renders full ordered details in the right artifact pane, including tool calls, tool results, and streaming status text.
+- Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
+- Header/setup branding now uses `Question Crafter` title text with the fork logo.
 - Thread history list is enabled and controlled by `THREAD_HISTORY_ENABLED`.
 - History search no longer gates by assistant/graph; the backend ownership filter scopes results per-user.
 - Thread history items show run-in-progress spinners and unseen completion dots using localStorage last-seen tracking.
