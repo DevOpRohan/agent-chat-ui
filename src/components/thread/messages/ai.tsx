@@ -878,6 +878,23 @@ export function AssistantMessage({
     !groupHasRenderableText &&
     groupedIntermediateParts.length > 0;
   const groupedIntermediateCopyContent = getIntermediateCopyText(groupedIntermediateParts);
+  const hasCustomComponentsForMessage =
+    !!message &&
+    !!thread.values.ui?.some((ui) => ui.metadata?.message_id === message.id);
+  const shouldRenderInterrupt =
+    !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
+  const shouldHideGroupedPlaceholderMessage =
+    !!message &&
+    isAiOrToolMessage(message) &&
+    !shouldRenderGroupIntermediateTrigger &&
+    textSegments.length === 0 &&
+    !hasCustomComponentsForMessage &&
+    !shouldRenderInterrupt;
+  const shouldRenderMessageCommandBar = textSegments.length > 0;
+
+  if (shouldHideGroupedPlaceholderMessage) {
+    return null;
+  }
 
   return (
     <div className="group mr-auto flex w-full items-start gap-2">
@@ -917,26 +934,27 @@ export function AssistantMessage({
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
             />
 
-            <div
-              className={cn(
-                "mr-auto flex items-center gap-2 transition-opacity",
-                "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
-                shouldRenderInlineActionsForIntermediate && "hidden",
-              )}
-            >
-              <BranchSwitcher
-                branch={meta?.branch}
-                branchOptions={meta?.branchOptions}
-                onSelect={(branch) => thread.setBranch(branch)}
-                isLoading={isLoading}
-              />
-              <CommandBar
-                content={commandContent}
-                isLoading={isLoading}
-                isAiMessage={true}
-                handleRegenerate={() => handleRegenerate(parentCheckpoint)}
-              />
-            </div>
+            {shouldRenderMessageCommandBar ? (
+              <div
+                className={cn(
+                  "mr-auto flex items-center gap-2 transition-opacity",
+                  "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
+                )}
+              >
+                <BranchSwitcher
+                  branch={meta?.branch}
+                  branchOptions={meta?.branchOptions}
+                  onSelect={(branch) => thread.setBranch(branch)}
+                  isLoading={isLoading}
+                />
+                <CommandBar
+                  content={commandContent}
+                  isLoading={isLoading}
+                  isAiMessage={true}
+                  handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+                />
+              </div>
+            ) : null}
           </>
         ) : (
           <Interrupt
