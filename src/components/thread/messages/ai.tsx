@@ -1,6 +1,11 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
 import { useStreamContext } from "@/providers/Stream";
-import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
+import {
+  AIMessage,
+  Checkpoint,
+  Message,
+  ToolMessage,
+} from "@langchain/langgraph-sdk";
 import { getContentString } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
@@ -31,8 +36,24 @@ type OrderedContentPart =
       kind: "tool_calls";
       key: string;
       toolCalls: NonNullable<AIMessage["tool_calls"]>;
+    }
+  | {
+      kind: "tool_result";
+      key: string;
+      toolResult: ToolMessage;
     };
 type IntermediateContentPart = Exclude<OrderedContentPart, { kind: "text" }>;
+type OrderedRenderSegment =
+  | {
+      kind: "text";
+      key: string;
+      text: string;
+    }
+  | {
+      kind: "intermediate";
+      key: string;
+      parts: IntermediateContentPart[];
+    };
 
 function isReasoningLikeType(value: unknown): boolean {
   if (typeof value !== "string") return false;
@@ -211,8 +232,16 @@ function ThinkingPanel({ text }: { text: string }) {
 
 function IntermediateStepsPanel({
   parts,
+  isLoading,
+  showActions,
+  actionContent,
+  handleRegenerate,
 }: {
   parts: IntermediateContentPart[];
+  isLoading: boolean;
+  showActions?: boolean;
+  actionContent?: string;
+  handleRegenerate?: () => void;
 }) {
   if (parts.length === 0) return null;
 
@@ -237,12 +266,35 @@ function IntermediateStepsPanel({
               key={part.key}
               className="rounded-md border border-slate-200 bg-white p-2"
             >
-              <p className="mb-2 text-xs font-medium text-slate-600">Tool Calls</p>
-              <ToolCalls toolCalls={part.toolCalls} />
+              {part.kind === "tool_calls" ? (
+                <>
+                  <p className="mb-2 text-xs font-medium text-slate-600">
+                    Tool Calls
+                  </p>
+                  <ToolCalls toolCalls={part.toolCalls} />
+                </>
+              ) : (
+                <>
+                  <p className="mb-2 text-xs font-medium text-slate-600">
+                    Tool Result
+                  </p>
+                  <ToolResult message={part.toolResult} />
+                </>
+              )}
             </div>
           );
         })}
       </div>
+      {showActions ? (
+        <div className="mt-3 border-t border-slate-200 pt-2">
+          <CommandBar
+            content={actionContent ?? ""}
+            isLoading={isLoading}
+            isAiMessage={true}
+            handleRegenerate={handleRegenerate}
+          />
+        </div>
+      ) : null}
     </details>
   );
 }
@@ -360,6 +412,80 @@ function getOrderedContentParts(message: Message | undefined): OrderedContentPar
   return parts;
 }
 
+function groupOrderedContentParts(
+  parts: OrderedContentPart[],
+): OrderedRenderSegment[] {
+  const segments: OrderedRenderSegment[] = [];
+  let intermediateBuffer: IntermediateContentPart[] = [];
+
+  const flushIntermediate = () => {
+    if (intermediateBuffer.length === 0) return;
+    segments.push({
+      kind: "intermediate",
+      key: `intermediate-${segments.length}`,
+      parts: intermediateBuffer,
+    });
+    intermediateBuffer = [];
+  };
+
+  for (const part of parts) {
+    if (part.kind === "text") {
+      flushIntermediate();
+      segments.push({
+        kind: "text",
+        key: part.key,
+        text: part.text,
+      });
+      continue;
+    }
+
+    intermediateBuffer.push(part);
+  }
+
+  flushIntermediate();
+  return segments;
+}
+
+function stringifyToolCall(
+  toolCall: NonNullable<AIMessage["tool_calls"]>[number],
+): string {
+  const header = `Tool: ${toolCall.name}${toolCall.id ? ` (${toolCall.id})` : ""}`;
+  const args = Object.keys(toolCall.args ?? {}).length
+    ? JSON.stringify(toolCall.args, null, 2)
+    : "{}";
+  return `${header}\n${args}`;
+}
+
+function getIntermediateCopyText(parts: IntermediateContentPart[]): string {
+  const chunks: string[] = [];
+  for (const part of parts) {
+    if (part.kind === "reasoning") {
+      if (part.text.trim().length > 0) {
+        chunks.push(part.text.trim());
+      }
+      continue;
+    }
+
+    if (part.kind === "tool_calls") {
+      if (part.toolCalls.length > 0) {
+        chunks.push(part.toolCalls.map((tc) => stringifyToolCall(tc)).join("\n\n"));
+      }
+      continue;
+    }
+
+    const toolContent = part.toolResult.content;
+    if (typeof toolContent === "string") {
+      if (toolContent.trim().length > 0) {
+        chunks.push(toolContent.trim());
+      }
+    } else if (Array.isArray(toolContent) && toolContent.length > 0) {
+      chunks.push(JSON.stringify(toolContent, null, 2));
+    }
+  }
+
+  return chunks.join("\n\n");
+}
+
 function CustomComponent({
   message,
   thread,
@@ -456,13 +582,7 @@ export function AssistantMessage({
   const contentString = getContentString(content);
   const reasoningText = extractReasoningText(message);
   const orderedContentParts = getOrderedContentParts(message);
-  const orderedTextParts = orderedContentParts.filter(
-    (part): part is Extract<OrderedContentPart, { kind: "text" }> =>
-      part.kind === "text",
-  );
-  const orderedIntermediateParts = orderedContentParts.filter(
-    (part): part is IntermediateContentPart => part.kind !== "text",
-  );
+  const orderedSegments = groupOrderedContentParts(orderedContentParts);
   const hasOrderedContentParts = orderedContentParts.length > 0;
 
   const thread = useStreamContext();
@@ -512,16 +632,63 @@ export function AssistantMessage({
       toolCalls: fallbackToolCalls,
     });
   }
-  const intermediateParts = hasOrderedContentParts
-    ? orderedIntermediateParts
-    : fallbackIntermediateParts;
+  const fallbackSegments: OrderedRenderSegment[] = [];
+  if (contentString.length > 0) {
+    fallbackSegments.push({
+      kind: "text",
+      key: "fallback-text",
+      text: contentString,
+    });
+  }
+  if (fallbackIntermediateParts.length > 0) {
+    fallbackSegments.push({
+      kind: "intermediate",
+      key: "fallback-intermediate",
+      parts: fallbackIntermediateParts,
+    });
+  }
+  const renderSegments = hasOrderedContentParts
+    ? orderedSegments
+    : fallbackSegments;
+  const flattenedIntermediateParts = renderSegments.flatMap((segment) =>
+    segment.kind === "intermediate" ? segment.parts : [],
+  );
+  const hasRenderedText = renderSegments.some(
+    (segment) => segment.kind === "text" && segment.text.trim().length > 0,
+  );
+  const shouldRenderInlineActionsForIntermediate =
+    isLastMessage && !hasRenderedText && flattenedIntermediateParts.length > 0;
+  const fallbackCommandContent = getIntermediateCopyText(flattenedIntermediateParts);
+  const commandContent =
+    contentString.trim().length > 0 ? contentString : fallbackCommandContent;
+  const toolResultParts: IntermediateContentPart[] =
+    isToolResult && message
+      ? [
+          {
+            kind: "tool_result",
+            key: `tool-result-${message.id ?? "latest"}`,
+            toolResult: message as ToolMessage,
+          },
+        ]
+      : [];
+  const toolResultCopyContent = getIntermediateCopyText(toolResultParts);
 
   return (
     <div className="group mr-auto flex w-full items-start gap-2">
       <div className="flex w-full flex-col gap-2">
         {isToolResult ? (
           <>
-            <ToolResult message={message} />
+            <IntermediateStepsPanel
+              parts={toolResultParts}
+              isLoading={isLoading}
+              showActions={isLastMessage}
+              actionContent={
+                toolResultCopyContent.length > 0
+                  ? toolResultCopyContent
+                  : contentString
+              }
+              handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+            />
             <Interrupt
               interrupt={threadInterrupt}
               isLastMessage={isLastMessage}
@@ -530,26 +697,33 @@ export function AssistantMessage({
           </>
         ) : (
           <>
-            {hasOrderedContentParts ? (
-              <>
-                {orderedTextParts.map((part) => (
+            {renderSegments.map((segment, idx) => {
+              if (segment.kind === "text") {
+                return (
                   <div
-                    key={part.key}
+                    key={segment.key}
                     className="py-1"
                   >
-                    <MarkdownText>{part.text}</MarkdownText>
+                    <MarkdownText>{segment.text}</MarkdownText>
                   </div>
-                ))}
-              </>
-            ) : (
-              contentString.length > 0 && (
-                <div className="py-1">
-                  <MarkdownText>{contentString}</MarkdownText>
-                </div>
-              )
-            )}
+                );
+              }
 
-            <IntermediateStepsPanel parts={intermediateParts} />
+              const isLastIntermediateSegment = idx === renderSegments.length - 1;
+              return (
+                <IntermediateStepsPanel
+                  key={segment.key}
+                  parts={segment.parts}
+                  isLoading={isLoading}
+                  showActions={
+                    shouldRenderInlineActionsForIntermediate &&
+                    isLastIntermediateSegment
+                  }
+                  actionContent={getIntermediateCopyText(segment.parts)}
+                  handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+                />
+              );
+            })}
 
             {message && (
               <CustomComponent
@@ -566,6 +740,7 @@ export function AssistantMessage({
               className={cn(
                 "mr-auto flex items-center gap-2 transition-opacity",
                 "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
+                shouldRenderInlineActionsForIntermediate && "hidden",
               )}
             >
               <BranchSwitcher
@@ -575,7 +750,7 @@ export function AssistantMessage({
                 isLoading={isLoading}
               />
               <CommandBar
-                content={contentString}
+                content={commandContent}
                 isLoading={isLoading}
                 isAiMessage={true}
                 handleRegenerate={() => handleRegenerate(parentCheckpoint)}
