@@ -35,18 +35,18 @@ Recent post-sync changes (after 2026-01-22) include **re-enabling thread history
 
 ## 2) Diff Snapshot (Upstream vs Fork)
 - **Upstream status:** 0 commits behind
-- **Fork status:** 35 commits ahead
-- **Files changed vs upstream:** 48
-- **Net diff vs upstream:** +4194 / -519 lines
+- **Fork status:** 40 commits ahead
+- **Files changed vs upstream:** 50
+- **Net diff vs upstream:** +4788 / -585 lines
 
 Tracking anchor commits:
-- **Fork HEAD:** `55ddaac`
+- **Fork HEAD:** `1d0a8ec`
 - **Upstream main:** `1a0e8af`
 
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
-- 2026-02-06: Refresh Question Crafter branding assets (logo SVG/PNG + React icon component) and add alternate icon source under `public/branding/`; history-row rename save/cancel controls are now compact icon actions for lower width. Files: `public/logo.svg`, `public/question-crafter-logo.svg`, `public/question-crafter-logo.png`, `public/branding/question-crafter-icon-option-1-collab.svg`, `src/components/icons/question-crafter.tsx`, `src/components/thread/history/index.tsx`, `FORK_COMPASS.md`.
+- 2026-02-06: Refresh Question Crafter branding assets to the selected balanced co-author mark and simplify the icon by removing the outer nested containers (inner symbol only). Also add alternate icon source under `public/branding/`; history-row rename save/cancel controls are compact icon actions for lower width. Files: `public/logo.svg`, `public/question-crafter-logo.svg`, `public/question-crafter-logo.png`, `public/branding/question-crafter-icon-option-1-collab.svg`, `src/components/icons/question-crafter.tsx`, `src/components/thread/history/index.tsx`, `FORK_COMPASS.md`.
 - 2026-02-06: Add manual thread naming on history rows (pencil icon with inline editor); persists names via `threads.update(...metadata.thread_title)` and prioritizes custom names in history labels. Also adds a clear `New` action in history headers (desktop + mobile sheet). Files: `src/components/thread/history/index.tsx`, `src/providers/Thread.tsx`, `src/lib/thread-metadata.ts`, `src/components/thread/index.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-06: Add thread history lazy loading in 20-thread batches with bottom-of-list scroll fetch and inline `Loading more history...` spinner indicator (desktop + mobile sheet). Files: `src/providers/Thread.tsx`, `src/components/thread/history/index.tsx`, `src/providers/Stream.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-06: Prevent intermediate artifact portal over-rendering by mounting intermediate artifact slot content only when open, and suppress benign React `#185` stream errors from showing as user-facing failure toasts. Files: `src/components/thread/messages/ai.tsx`, `src/components/thread/index.tsx`, `FORK_COMPASS.md`.
@@ -272,7 +272,26 @@ Use this as a jump list when editing or debugging:
 
 ## 5) Fork-only Commit Log
 Commits unique to this fork (upstream/main..HEAD):
+- `1d0a8ec` feat(ui): move thread actions to history and refresh branding
+- `f35cea4` fix(ui): stop intermediate spinner when final text starts
+- `3e924cd` fix(ui): remove extra gap under intermediate step blocks
+- `8afba89` fix: reduce intermediate artifact churn and ignore benign react 185 toast
+- `e31c75a` docs: refresh fork compass snapshot and commit log
 - `55ddaac` feat(ui): aggregate intermediate steps and rebrand to Question Crafter
+- `837bd7f` fix: align intermediate steps ordering and tool-result actions
+- `4702da1` feat: group reasoning and tool calls under intermediate steps
+- `dae70b2` fix: guard regenerate while thread is running
+- `e3e5984` feat: add scrollable thinking panel with sticky bottom
+- `2997990` fix: preserve interleaved reasoning and tool call order
+- `1b3fdb4` fix: parse reasoning summary blocks for thinking preview
+- `030d8cc` fix: reject concurrent thread sends and harden stream UX
+- `3ab7f0e` feat: improve thread run UX and add playwright QA coverage
+- `df0fb50` fix: reconnect stream on mount
+- `e66f66b` Revert "docs: update develop LangGraph URL"
+- `9815ffa` docs: update develop LangGraph URL
+- `eea6103` feat: add IAP auth and direct LangGraph calls
+- `209bdf9` test: add Playwright e2e setup
+- `3f29185` chore: update fork compass and clean build artifacts
 - `fbd3d13` fix: remove stream auto-reconnect
 - `645cbdb` Updated Deployment
 - `7e75347` fix: stream auto-reconnect on page refresh
@@ -281,7 +300,7 @@ Commits unique to this fork (upstream/main..HEAD):
 - `2934dfd` docs: consolidate fork customization notes
 - `b73a84a` chore: remove stream health polling
 - `659c943` Merge upstream/main: SDK 1.0 + upstream fixes
-- `93be0c5` feat: add stream health polling for stale connection detection (later removed)
+- `93be0c5` feat: add stream health polling for stale connection detection
 - `faafbf2` improve tool call formatting
 - `9087615` Make agent recursion limit configurable
 - `9d6c559` Ensure thread submissions continue on disconnect
