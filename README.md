@@ -95,6 +95,29 @@ When these environment variables are set, the application will use them instead 
 - Fork customization guide (includes upload refactor details): `FORK_COMPASS.md`
 - Build, push, and Cloud Run deployment: `DEPLOYMENT_GUIDE.md`
 
+## E2E Testing (Playwright)
+
+Run all E2E tests:
+
+```bash
+pnpm test:e2e
+```
+
+Run QA spinner-focused E2E tests:
+
+```bash
+pnpm test:e2e:qa
+```
+
+For IAP-protected environments, use one manual login session for the full run:
+
+```bash
+pnpm test:e2e:manual
+pnpm test:e2e:qa:manual
+```
+
+When manual mode is on, Playwright pauses once in setup. Complete login in the opened browser and click **Resume** in Playwright Inspector. The saved auth state is reused for the remaining tests in that run.
+
 ## Hiding Messages in the Chat
 
 You can control the visibility of messages within the Agent Chat UI in two main ways:

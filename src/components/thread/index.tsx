@@ -31,15 +31,10 @@ import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
-import { GitHubSVG } from "../icons/github";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
+import { markThreadSeen } from "@/lib/thread-activity";
+import { useThreadBusy } from "@/hooks/use-thread-busy";
 import {
   useArtifactOpen,
   ArtifactContent,
@@ -88,30 +83,6 @@ function ScrollToBottom(props: { className?: string }) {
   );
 }
 
-function OpenGitHubRepo() {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <a
-            href="https://github.com/langchain-ai/agent-chat-ui"
-            target="_blank"
-            className="flex items-center justify-center"
-          >
-            <GitHubSVG
-              width="24"
-              height="24"
-            />
-          </a>
-        </TooltipTrigger>
-        <TooltipContent side="left">
-          <p>Open GitHub repo</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
 export function Thread() {
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
@@ -143,6 +114,10 @@ export function Thread() {
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
+  const { markBusy } = useThreadBusy();
+  const [loadingThreadId, setLoadingThreadId] = useState<string | null>(null);
+  const isCurrentThreadLoading =
+    !!threadId && isLoading && loadingThreadId === threadId;
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -153,6 +128,21 @@ export function Thread() {
     closeArtifact();
     setArtifactContext({});
   };
+
+  useEffect(() => {
+    if (!isLoading) {
+      if (loadingThreadId) {
+        markBusy(loadingThreadId, false);
+        setLoadingThreadId(null);
+      }
+      return;
+    }
+
+    if (!loadingThreadId && threadId) {
+      setLoadingThreadId(threadId);
+      markBusy(threadId, true);
+    }
+  }, [isLoading, loadingThreadId, markBusy, threadId]);
 
   useEffect(() => {
     if (!stream.error) {
@@ -193,12 +183,24 @@ export function Thread() {
       setFirstTokenReceived(true);
     }
 
+    if (threadId && messages.length !== prevMessageLength.current) {
+      markThreadSeen(threadId, Date.now());
+    }
+
     prevMessageLength.current = messages.length;
-  }, [messages]);
+  }, [messages, threadId]);
+
+  useEffect(() => {
+    if (!threadId) return;
+    markThreadSeen(threadId, Date.now());
+  }, [threadId]);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading)
+    if (
+      (input.trim().length === 0 && contentBlocks.length === 0) ||
+      isLoading
+    )
       return;
     setFirstTokenReceived(false);
 
@@ -240,6 +242,11 @@ export function Thread() {
     const context =
       Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
 
+    if (threadId) {
+      setLoadingThreadId(threadId);
+      markBusy(threadId, true);
+    }
+
     stream.submit(
       { messages: [...toolMessages, newHumanMessage], context },
       {
@@ -272,6 +279,10 @@ export function Thread() {
     // Do this so the loading state is correct
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
+    if (threadId) {
+      setLoadingThreadId(threadId);
+      markBusy(threadId, true);
+    }
     stream.submit(undefined, {
       config: {
         recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
@@ -359,9 +370,6 @@ export function Thread() {
                   </Button>
                 )}
               </div>
-              <div className="absolute top-2 right-4 flex items-center">
-                <OpenGitHubRepo />
-              </div>
             </div>
           )}
           {chatStarted && (
@@ -405,9 +413,6 @@ export function Thread() {
               </div>
 
               <div className="flex items-center gap-4">
-                <div className="flex items-center">
-                  <OpenGitHubRepo />
-                </div>
                 <TooltipIconButton
                   size="lg"
                   className="p-4"
@@ -461,7 +466,7 @@ export function Thread() {
                       handleRegenerate={handleRegenerate}
                     />
                   )}
-                  {isLoading && !firstTokenReceived && (
+                  {isCurrentThreadLoading && !firstTokenReceived && (
                     <AssistantMessageLoading />
                   )}
                 </>
@@ -561,7 +566,7 @@ export function Thread() {
                           className="hidden"
                           disabled={isUploading}
                         />
-                        {stream.isLoading ? (
+                        {isCurrentThreadLoading ? (
                           <Button
                             key="stop"
                             onClick={() => stream.stop()}

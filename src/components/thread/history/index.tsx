@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { useThreads } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 
 import { getContentString } from "../utils";
@@ -13,18 +13,51 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PanelRightOpen, PanelRightClose } from "lucide-react";
+import { LoaderCircle, PanelRightOpen, PanelRightClose } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useThreadLastSeen } from "@/hooks/use-thread-last-seen";
+import { useThreadBusy } from "@/hooks/use-thread-busy";
+
+const POLL_INTERVAL_IDLE_MS = 8000;
+const POLL_INTERVAL_ACTIVE_MS = 3000;
+
+function getThreadUpdatedAtMs(thread: Thread): number | null {
+  const updatedAt = (
+    thread as Thread & { updated_at?: string | number | Date | null }
+  ).updated_at;
+  if (!updatedAt) return null;
+  if (typeof updatedAt === "number") {
+    return Number.isFinite(updatedAt) ? updatedAt : null;
+  }
+  if (Object.prototype.toString.call(updatedAt) === "[object Date]") {
+    return (updatedAt as Date).getTime();
+  }
+  if (typeof updatedAt === "string") {
+    const parsed = Date.parse(updatedAt);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
 
 function ThreadList({
   threads,
+  currentThreadId,
+  setThreadId,
+  lastSeenByThreadId,
+  baselineMs,
+  busyByThreadId,
+  markSeen,
   onThreadClick,
 }: {
   threads: Thread[];
+  currentThreadId: string | null;
+  setThreadId: (value: string | null) => void;
+  lastSeenByThreadId: Record<string, number>;
+  baselineMs: number;
+  busyByThreadId: Record<string, boolean>;
+  markSeen: (threadId: string, updatedAtMs?: number) => void;
   onThreadClick?: (threadId: string) => void;
 }) {
-  const [threadId, setThreadId] = useQueryState("threadId");
-
   return (
     <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
       {threads.map((t) => {
@@ -39,6 +72,40 @@ function ThreadList({
           const firstMessage = t.values.messages[0];
           itemText = getContentString(firstMessage.content);
         }
+        const updatedAtMs = getThreadUpdatedAtMs(t);
+        const lastSeenMs = lastSeenByThreadId[t.thread_id] ?? baselineMs;
+        const isBusy = busyByThreadId[t.thread_id] || t.status === "busy";
+        const isActive = t.thread_id === currentThreadId;
+        const isUnseen =
+          !isBusy &&
+          updatedAtMs !== null &&
+          updatedAtMs > lastSeenMs &&
+          !isActive;
+        const indicator = isBusy ? (
+          <span
+            className="flex h-4 w-4 items-center justify-center"
+            role="img"
+            aria-label="Thread running"
+          >
+            <LoaderCircle
+              className="size-3 animate-spin text-slate-500"
+              aria-hidden="true"
+            />
+          </span>
+        ) : isUnseen ? (
+          <span
+            className="flex h-4 w-4 items-center justify-center"
+            role="img"
+            aria-label="New activity"
+          >
+            <span className="size-2 rounded-full bg-emerald-500" />
+          </span>
+        ) : (
+          <span
+            className="flex h-4 w-4 items-center justify-center"
+            aria-hidden="true"
+          />
+        );
         return (
           <div
             key={t.thread_id}
@@ -46,15 +113,23 @@ function ThreadList({
           >
             <Button
               variant="ghost"
-              className="w-[280px] items-start justify-start text-left font-normal"
+              data-thread-id={t.thread_id}
+              data-thread-active={isActive ? "true" : "false"}
+              className={`w-[280px] items-center justify-start gap-2 text-left font-normal ${
+                isActive ? "bg-slate-200 text-slate-900 hover:bg-slate-200" : ""
+              }`}
               onClick={(e) => {
                 e.preventDefault();
+                markSeen(t.thread_id, updatedAtMs ?? undefined);
                 onThreadClick?.(t.thread_id);
-                if (t.thread_id === threadId) return;
+                if (t.thread_id === currentThreadId) return;
                 setThreadId(t.thread_id);
               }}
             >
-              <p className="truncate text-ellipsis">{itemText}</p>
+              {indicator}
+              <p className="min-w-0 flex-1 truncate text-ellipsis">
+                {itemText}
+              </p>
             </Button>
           </div>
         );
@@ -78,6 +153,8 @@ function ThreadHistoryLoading() {
 
 export default function ThreadHistory() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
+  const [threadId, setThreadId] = useQueryState("threadId");
+  const currentThreadId = threadId ?? null;
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
@@ -85,17 +162,109 @@ export default function ThreadHistory() {
 
   const { getThreads, threads, setThreads, threadsLoading, setThreadsLoading } =
     useThreads();
+  const { lastSeenByThreadId, baselineMs, markSeen } = useThreadLastSeen();
+  const { busyByThreadId, markBusy } = useThreadBusy();
   const historyDisabled = !THREAD_HISTORY_ENABLED;
+  const isHistoryVisible =
+    !historyDisabled && (isLargeScreen || !!chatHistoryOpen);
+
+  const hasLoadedRef = useRef(false);
+  const refreshThreads = useCallback(
+    async (withLoading: boolean) => {
+      if (historyDisabled) return;
+      if (typeof window === "undefined") return;
+      if (withLoading) setThreadsLoading(true);
+      try {
+        const nextThreads = await getThreads();
+        setThreads(nextThreads);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (withLoading) setThreadsLoading(false);
+      }
+    },
+    [getThreads, historyDisabled, setThreads, setThreadsLoading],
+  );
+
+  const hasBusyThread = useMemo(
+    () =>
+      threads.some(
+        (thread) => busyByThreadId[thread.thread_id] || thread.status === "busy",
+      ),
+    [threads, busyByThreadId],
+  );
+
+  const hasUnseenThread = useMemo(() => {
+    return threads.some((thread) => {
+      const isBusy = busyByThreadId[thread.thread_id] || thread.status === "busy";
+      if (isBusy) return false;
+      if (thread.thread_id === currentThreadId) return false;
+      const updatedAtMs = getThreadUpdatedAtMs(thread);
+      if (updatedAtMs === null) return false;
+      const lastSeenMs =
+        lastSeenByThreadId[thread.thread_id] ?? baselineMs;
+      return updatedAtMs > lastSeenMs;
+    });
+  }, [threads, currentThreadId, lastSeenByThreadId, baselineMs, busyByThreadId]);
 
   useEffect(() => {
+    for (const thread of threads) {
+      if (thread.status !== "busy" && busyByThreadId[thread.thread_id]) {
+        markBusy(thread.thread_id, false);
+      }
+    }
+  }, [threads, busyByThreadId, markBusy]);
+
+  const pollIntervalMs = useMemo(
+    () =>
+      hasBusyThread || hasUnseenThread
+        ? POLL_INTERVAL_ACTIVE_MS
+        : POLL_INTERVAL_IDLE_MS,
+    [hasBusyThread, hasUnseenThread],
+  );
+
+  useEffect(() => {
+    if (!isHistoryVisible) return;
+    refreshThreads(!hasLoadedRef.current);
+    hasLoadedRef.current = true;
+  }, [isHistoryVisible, refreshThreads]);
+
+  useEffect(() => {
+    if (!isHistoryVisible) return;
     if (historyDisabled) return;
-    if (typeof window === "undefined") return;
-    setThreadsLoading(true);
-    getThreads()
-      .then(setThreads)
-      .catch(console.error)
-      .finally(() => setThreadsLoading(false));
-  }, [getThreads, historyDisabled, setThreads, setThreadsLoading]);
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const tick = async () => {
+      if (cancelled) return;
+      await refreshThreads(false);
+      if (cancelled) return;
+      timeoutId = window.setTimeout(tick, pollIntervalMs);
+    };
+
+    timeoutId = window.setTimeout(tick, pollIntervalMs);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [historyDisabled, isHistoryVisible, pollIntervalMs, refreshThreads]);
+
+  useEffect(() => {
+    if (!currentThreadId) return;
+    const currentThread = threads.find(
+      (thread) => thread.thread_id === currentThreadId,
+    );
+    if (!currentThread) return;
+    const updatedAtMs = getThreadUpdatedAtMs(currentThread);
+    if (updatedAtMs === null) return;
+    const lastSeenMs = lastSeenByThreadId[currentThreadId] ?? baselineMs;
+    if (updatedAtMs > lastSeenMs) {
+      markSeen(currentThreadId, updatedAtMs);
+    }
+  }, [currentThreadId, threads, lastSeenByThreadId, baselineMs, markSeen]);
 
   return (
     <>
@@ -113,7 +282,7 @@ export default function ThreadHistory() {
             )}
           </Button>
           <h1 className="text-xl font-semibold tracking-tight">
-            Thread History
+            Chat History
           </h1>
         </div>
         {historyDisabled ? (
@@ -123,7 +292,15 @@ export default function ThreadHistory() {
         ) : threadsLoading ? (
           <ThreadHistoryLoading />
         ) : (
-          <ThreadList threads={threads} />
+          <ThreadList
+            threads={threads}
+            currentThreadId={currentThreadId}
+            setThreadId={setThreadId}
+            lastSeenByThreadId={lastSeenByThreadId}
+            baselineMs={baselineMs}
+            busyByThreadId={busyByThreadId}
+            markSeen={markSeen}
+          />
         )}
       </div>
       <div className="lg:hidden">
@@ -139,7 +316,7 @@ export default function ThreadHistory() {
             className="flex lg:hidden"
           >
             <SheetHeader>
-              <SheetTitle>Thread History</SheetTitle>
+              <SheetTitle>Chat History</SheetTitle>
             </SheetHeader>
             {historyDisabled ? (
               <div className="px-1 text-sm text-slate-500">
@@ -148,6 +325,12 @@ export default function ThreadHistory() {
             ) : (
               <ThreadList
                 threads={threads}
+                currentThreadId={currentThreadId}
+                setThreadId={setThreadId}
+                lastSeenByThreadId={lastSeenByThreadId}
+                baselineMs={baselineMs}
+                busyByThreadId={busyByThreadId}
+                markSeen={markSeen}
                 onThreadClick={() => setChatHistoryOpen((o) => !o)}
               />
             )}

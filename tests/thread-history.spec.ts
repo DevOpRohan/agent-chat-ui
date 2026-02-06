@@ -6,10 +6,6 @@ test("thread history lists new thread", async ({ page }) => {
 
   await page.goto("/");
 
-  if (process.env.PLAYWRIGHT_MANUAL_LOGIN === "1") {
-    await page.pause();
-  }
-
   const input = page.getByPlaceholder("Type your message...");
   await expect(input).toBeVisible({ timeout: 60_000 });
 
@@ -19,7 +15,7 @@ test("thread history lists new thread", async ({ page }) => {
   const cancelButton = page.getByRole("button", { name: "Cancel" });
   await expect(cancelButton).toBeVisible({ timeout: 60_000 });
 
-  const historyHeading = page.getByRole("heading", { name: "Thread History" });
+  const historyHeading = page.getByRole("heading", { name: "Chat History" });
   await expect(historyHeading).toBeVisible({ timeout: 60_000 });
 
   const historyPanel = page.locator("div", { has: historyHeading });

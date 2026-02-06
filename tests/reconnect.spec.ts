@@ -7,10 +7,6 @@ test("refresh resumes or keeps run active", async ({ page }) => {
 
   await page.goto("/");
 
-  if (process.env.PLAYWRIGHT_MANUAL_LOGIN === "1") {
-    await page.pause();
-  }
-
   const input = page.getByPlaceholder("Type your message...");
   await expect(input).toBeVisible({ timeout: 60_000 });
 

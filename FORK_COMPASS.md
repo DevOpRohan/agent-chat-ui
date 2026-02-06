@@ -1,6 +1,6 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-02-03_  
+_Last updated: 2026-02-06_  
 _Branch: main_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
@@ -46,6 +46,11 @@ Tracking anchor commits:
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-06: Add Playwright one-time manual auth setup and QA spinner-focused E2E coverage for history/cancel synchronization and inactive-thread behavior. Files: `playwright.config.ts`, `tests/auth.setup.ts`, `tests/history-spinner-qa.spec.ts`, `tests/thread-history.spec.ts`, `tests/reconnect.spec.ts`, `package.json`, `README.md`.
+- 2026-02-05: Add thread history activity indicators (busy spinner + unseen completion dot) with localStorage last-seen tracking and light polling. Files: `src/components/thread/history/index.tsx`, `src/hooks/use-thread-last-seen.ts`, `src/lib/thread-activity.ts`, `src/components/thread/index.tsx`.
+- 2026-02-05: Reduce thread history fetch limit from 100 to 20 for faster loads. Files: `src/providers/Thread.tsx`, `FORK_COMPASS.md`.
+- 2026-02-05: Highlight the active thread in history with a darker background. Files: `src/components/thread/history/index.tsx`, `FORK_COMPASS.md`.
+- 2026-02-06: Sync history busy spinner with local run state and scope cancel/loading UI to the run-owning thread during rapid thread switches. Files: `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `src/hooks/use-thread-busy.ts`, `src/lib/thread-activity.ts`, `FORK_COMPASS.md`.
 - 2026-02-03: Re-enable thread history list now that ownership is enforced. Files: `src/lib/constants.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-03: Thread history search now relies on owner filtering only (no assistant/graph gating). Files: `src/providers/Thread.tsx`, `FORK_COMPASS.md`.
 - 2026-02-03: Add IAP-backed auth token endpoint + client token cache; remove API passthrough; update docs.
@@ -138,6 +143,9 @@ Tracking anchor commits:
 **Primary files:**
 - `src/hooks/use-file-upload.tsx`
 - `src/components/thread/index.tsx`
+- `src/components/thread/history/index.tsx`
+- `src/hooks/use-thread-last-seen.ts`
+- `src/lib/thread-activity.ts`
 - `src/components/thread/messages/tool-calls.tsx`
 - `src/components/thread/messages/human.tsx`
 
@@ -148,6 +156,7 @@ Tracking anchor commits:
 - Human message bubble alignment adjusted (removed `text-right`).
 - Thread history list is enabled and controlled by `THREAD_HISTORY_ENABLED`.
 - History search no longer gates by assistant/graph; the backend ownership filter scopes results per-user.
+- Thread history items show run-in-progress spinners and unseen completion dots using localStorage last-seen tracking plus light polling for status refreshes.
 
 ---
 
@@ -214,6 +223,8 @@ Use this as a jump list when editing or debugging:
 **UI formatting tweaks**
 - `src/components/thread/messages/tool-calls.tsx`
 - `src/components/thread/history/index.tsx`
+- `src/hooks/use-thread-last-seen.ts`
+- `src/lib/thread-activity.ts`
 
 **Config, build, deploy**
 - `next.config.mjs`

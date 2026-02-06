@@ -37,7 +37,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     if (!finalApiUrl) return [];
     const client = createClient(finalApiUrl, getApiKey() ?? undefined);
 
-    const threads = await client.threads.search({ limit: 100 });
+    const threads = await client.threads.search({ limit: 20 });
 
     return threads;
   }, [apiUrl, envApiUrl]);
