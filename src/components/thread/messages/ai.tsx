@@ -14,7 +14,7 @@ import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const REASONING_PREVIEW_CHARS = 500;
 type OrderedContentPart =
@@ -157,6 +157,56 @@ function extractReasoningText(message: Message | undefined): string {
 function getReasoningPreview(text: string): string {
   if (text.length <= REASONING_PREVIEW_CHARS) return text;
   return text.slice(-REASONING_PREVIEW_CHARS);
+}
+
+function ThinkingPanel({ text }: { text: string }) {
+  const previewText = getReasoningPreview(text);
+  const contentRef = useRef<HTMLPreElement | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [stickToBottom, setStickToBottom] = useState(true);
+
+  const scrollToBottom = () => {
+    const el = contentRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  };
+
+  useEffect(() => {
+    if (!isOpen || !stickToBottom) return;
+    scrollToBottom();
+  }, [previewText, isOpen, stickToBottom]);
+
+  const handleScroll = () => {
+    const el = contentRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setStickToBottom(distanceToBottom <= 20);
+  };
+
+  return (
+    <details
+      className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+      onToggle={(event) => {
+        const opened = (event.currentTarget as HTMLDetailsElement).open;
+        setIsOpen(opened);
+        if (opened) {
+          setStickToBottom(true);
+          window.requestAnimationFrame(scrollToBottom);
+        }
+      }}
+    >
+      <summary className="cursor-pointer select-none font-medium text-slate-700">
+        Thinking (latest {REASONING_PREVIEW_CHARS} chars)
+      </summary>
+      <pre
+        ref={contentRef}
+        onScroll={handleScroll}
+        className="mt-2 max-h-48 overflow-y-auto pr-2 whitespace-pre-wrap break-words text-xs leading-relaxed [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-slate-100"
+      >
+        {previewText}
+      </pre>
+    </details>
+  );
 }
 
 function isToolCallLikeType(value: unknown): boolean {
@@ -461,14 +511,7 @@ export function AssistantMessage({
 
   const reasoningPreviewPanel =
     reasoningPreview.length > 0 ? (
-      <details className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-        <summary className="cursor-pointer select-none font-medium text-slate-700">
-          Thinking (latest {REASONING_PREVIEW_CHARS} chars)
-        </summary>
-        <pre className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed">
-          {reasoningPreview}
-        </pre>
-      </details>
+      <ThinkingPanel text={reasoningText} />
     ) : null;
 
   return (
@@ -500,20 +543,7 @@ export function AssistantMessage({
                   }
 
                   if (part.kind === "reasoning") {
-                    const partReasoningPreview = getReasoningPreview(part.text);
-                    return (
-                      <details
-                        key={part.key}
-                        className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
-                      >
-                        <summary className="cursor-pointer select-none font-medium text-slate-700">
-                          Thinking (latest {REASONING_PREVIEW_CHARS} chars)
-                        </summary>
-                        <pre className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed">
-                          {partReasoningPreview}
-                        </pre>
-                      </details>
-                    );
+                    return <ThinkingPanel key={part.key} text={part.text} />;
                   }
 
                   return hideToolCalls ? null : (
