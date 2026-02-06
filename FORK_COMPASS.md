@@ -35,12 +35,12 @@ Recent post-sync changes (after 2026-01-22) include **re-enabling thread history
 
 ## 2) Diff Snapshot (Upstream vs Fork)
 - **Upstream status:** 0 commits behind
-- **Fork status:** 20 commits ahead
-- **Files changed vs upstream:** 25
-- **Net diff vs upstream:** +1873 / -190 lines
+- **Fork status:** 35 commits ahead
+- **Files changed vs upstream:** 48
+- **Net diff vs upstream:** +4194 / -519 lines
 
 Tracking anchor commits:
-- **Fork HEAD:** `fbd3d13`
+- **Fork HEAD:** `55ddaac`
 - **Upstream main:** `1a0e8af`
 
 ---
@@ -255,6 +255,7 @@ Use this as a jump list when editing or debugging:
 
 ## 5) Fork-only Commit Log
 Commits unique to this fork (upstream/main..HEAD):
+- `55ddaac` feat(ui): aggregate intermediate steps and rebrand to Question Crafter
 - `fbd3d13` fix: remove stream auto-reconnect
 - `645cbdb` Updated Deployment
 - `7e75347` fix: stream auto-reconnect on page refresh
