@@ -46,6 +46,7 @@ Tracking anchor commits:
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-06: Prevent intermediate artifact portal over-rendering by mounting intermediate artifact slot content only when open, and suppress benign React `#185` stream errors from showing as user-facing failure toasts. Files: `src/components/thread/messages/ai.tsx`, `src/components/thread/index.tsx`, `FORK_COMPASS.md`.
 - 2026-02-06: Rebrand in-app UI title/header/logo from `Agent Chat` to `Question Crafter` across setup, main thread header, and page metadata. Files: `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/app/layout.tsx`, `src/components/icons/question-crafter.tsx`, `public/logo.svg`.
 - 2026-02-06: Aggregate consecutive AI/tool intermediate content into a single `Intermediate Step` launcher per turn (instead of per message), with streaming header status + spinner (`thinking...` / `calling ...`) and ordered content preserved for tool calls/results and reasoning blocks. Files: `src/components/thread/messages/ai.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-06: Add assistant-message reasoning preview UI. When `reasoning` content blocks are present, the chat shows a compact “Thinking” panel with the latest 500 characters (stream-updating as content updates). Files: `src/components/thread/messages/ai.tsx`, `README.md`.
@@ -165,6 +166,7 @@ Tracking anchor commits:
 - Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
 - Intermediate reasoning/tool content now routes through one `Intermediate Step` launcher in the chat message area and renders full ordered details in the right artifact pane, including tool calls, tool results, and streaming status text.
 - Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
+- Benign React `#185` stream errors are filtered from the generic run-error toast path to avoid false failure alerts for users.
 - Header/setup branding now uses `Question Crafter` title text with the fork logo.
 - Thread history list is enabled and controlled by `THREAD_HISTORY_ENABLED`.
 - History search no longer gates by assistant/graph; the backend ownership filter scopes results per-user.

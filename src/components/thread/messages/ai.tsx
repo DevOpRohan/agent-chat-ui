@@ -367,30 +367,32 @@ function IntermediateStepsArtifactTrigger({
         </div>
       ) : null}
 
-      <IntermediateArtifactContent
-        title={
-          <div className="flex items-center gap-1.5 truncate font-semibold text-slate-900">
-            {runningStatus ? (
-              <LoaderCircle className="h-4 w-4 animate-spin text-slate-600" />
-            ) : null}
-            {runningStatus ? `Intermediate Step: ${runningStatus}` : "Intermediate Step"}
+      {intermediateArtifact.open ? (
+        <IntermediateArtifactContent
+          title={
+            <div className="flex items-center gap-1.5 truncate font-semibold text-slate-900">
+              {runningStatus ? (
+                <LoaderCircle className="h-4 w-4 animate-spin text-slate-600" />
+              ) : null}
+              {runningStatus ? `Intermediate Step: ${runningStatus}` : "Intermediate Step"}
+            </div>
+          }
+        >
+          <div className="flex min-h-full flex-col">
+            <div className="border-b border-slate-200 px-4 py-3">
+              <p className="text-base font-semibold text-slate-900">Intermediate Step</p>
+              <p className="mt-0.5 text-xs text-slate-600">
+                {runningStatus
+                  ? runningStatus
+                  : "Reasoning, tool calls, and tool responses for this assistant turn."}
+              </p>
+            </div>
+            <div className="p-4">
+              <IntermediateStepContent parts={parts} />
+            </div>
           </div>
-        }
-      >
-        <div className="flex min-h-full flex-col">
-          <div className="border-b border-slate-200 px-4 py-3">
-            <p className="text-base font-semibold text-slate-900">Intermediate Step</p>
-            <p className="mt-0.5 text-xs text-slate-600">
-              {runningStatus
-                ? runningStatus
-                : "Reasoning, tool calls, and tool responses for this assistant turn."}
-            </p>
-          </div>
-          <div className="p-4">
-            <IntermediateStepContent parts={parts} />
-          </div>
-        </div>
-      </IntermediateArtifactContent>
+        </IntermediateArtifactContent>
+      ) : null}
     </>
   );
 }

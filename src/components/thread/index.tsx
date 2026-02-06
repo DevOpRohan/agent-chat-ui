@@ -58,6 +58,14 @@ function isThreadConflictError(message: string): boolean {
   );
 }
 
+function isBenignReact185Error(message: string): boolean {
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes("minified react error #185") ||
+    lowered.includes("/errors/185")
+  );
+}
+
 function showThreadRunningToast() {
   toast("Thread is still running", {
     description:
@@ -195,6 +203,10 @@ export function Thread() {
 
       // Message is defined, and it has not been logged yet. Save it, and send the error
       lastError.current = message;
+      if (isBenignReact185Error(message)) {
+        console.warn("Ignoring benign React #185 stream error", message);
+        return;
+      }
       if (isThreadConflictError(message)) {
         toast("Thread already has an active run", {
           description:
