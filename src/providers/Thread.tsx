@@ -22,6 +22,14 @@ interface ThreadContextType {
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
+const THREAD_HISTORY_LIMIT = 20;
+const THREAD_HISTORY_SELECT = [
+  "thread_id",
+  "created_at",
+  "updated_at",
+  "status",
+  "metadata",
+] as const;
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
@@ -37,7 +45,12 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     if (!finalApiUrl) return [];
     const client = createClient(finalApiUrl, getApiKey() ?? undefined);
 
-    const threads = await client.threads.search({ limit: 20 });
+    const threads = await client.threads.search({
+      limit: THREAD_HISTORY_LIMIT,
+      sortBy: "updated_at",
+      sortOrder: "desc",
+      select: [...THREAD_HISTORY_SELECT],
+    });
 
     return threads;
   }, [apiUrl, envApiUrl]);

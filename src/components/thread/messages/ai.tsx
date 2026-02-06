@@ -15,6 +15,100 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 
+const REASONING_PREVIEW_CHARS = 500;
+
+function extractReasoningTextFromThinkTags(text: string): string[] {
+  const matches: string[] = [];
+  const patterns = [
+    /<think>([\s\S]*?)<\/think>/gi,
+    /<thinking>([\s\S]*?)<\/thinking>/gi,
+  ];
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const candidate = match[1]?.trim();
+      if (candidate) {
+        matches.push(candidate);
+      }
+    }
+  }
+
+  return matches;
+}
+
+function readReasoningValue(value: unknown): string[] {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => readReasoningValue(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  const fieldsToCheck = [
+    record.reasoning,
+    record.thinking,
+    record.summary,
+    record.text,
+    record.content,
+    record.reasoning_content,
+  ];
+
+  return fieldsToCheck.flatMap((field) => readReasoningValue(field));
+}
+
+function extractReasoningText(message: Message | undefined): string {
+  if (!message) return "";
+
+  const collected: string[] = [];
+
+  if (Array.isArray(message.content)) {
+    const contentBlocks = message.content as unknown[];
+    for (const block of contentBlocks) {
+      if (!block || typeof block !== "object") continue;
+      const record = block as Record<string, unknown>;
+      if (record.type === "reasoning" || record.type === "thinking") {
+        collected.push(...readReasoningValue(record.reasoning ?? record.thinking));
+      }
+    }
+  }
+
+  const contentText = getContentString(message.content);
+  if (contentText) {
+    collected.push(...extractReasoningTextFromThinkTags(contentText));
+  }
+
+  collected.push(
+    ...readReasoningValue(message.additional_kwargs?.reasoning),
+    ...readReasoningValue(message.additional_kwargs?.reasoning_content),
+    ...readReasoningValue(message.additional_kwargs?.thinking),
+    ...readReasoningValue(message.response_metadata?.reasoning),
+    ...readReasoningValue(message.response_metadata?.reasoning_content),
+  );
+
+  const uniqueReasoning = Array.from(
+    new Set(
+      collected
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0),
+    ),
+  );
+
+  return uniqueReasoning.join("\n\n");
+}
+
+function getReasoningPreview(text: string): string {
+  if (text.length <= REASONING_PREVIEW_CHARS) return text;
+  return text.slice(-REASONING_PREVIEW_CHARS);
+}
+
 function CustomComponent({
   message,
   thread,
@@ -109,6 +203,8 @@ export function AssistantMessage({
 }) {
   const content = message?.content ?? [];
   const contentString = getContentString(content);
+  const reasoningText = extractReasoningText(message);
+  const reasoningPreview = getReasoningPreview(reasoningText);
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
@@ -163,6 +259,16 @@ export function AssistantMessage({
               <div className="py-1">
                 <MarkdownText>{contentString}</MarkdownText>
               </div>
+            )}
+            {reasoningPreview.length > 0 && (
+              <details className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <summary className="cursor-pointer select-none font-medium text-slate-700">
+                  Thinking (latest {REASONING_PREVIEW_CHARS} chars)
+                </summary>
+                <pre className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed">
+                  {reasoningPreview}
+                </pre>
+              </details>
             )}
 
             {!hideToolCalls && (

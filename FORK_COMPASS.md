@@ -46,6 +46,9 @@ Tracking anchor commits:
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-06: Add assistant-message reasoning preview UI. When `reasoning` content blocks are present, the chat shows a compact “Thinking” panel with the latest 500 characters (stream-updating as content updates). Files: `src/components/thread/messages/ai.tsx`, `README.md`.
+- 2026-02-06: Optimize thread history refresh path: `threads.search` now requests a lightweight selected field set (no `values`), thread labels are read from thread metadata preview, polling pauses when the history panel is closed or the tab is hidden, and redundant thread-list rerenders are skipped when signatures are unchanged. Files: `src/providers/Thread.tsx`, `src/components/thread/history/index.tsx`, `src/components/thread/index.tsx`.
+- 2026-02-06: Reject same-thread concurrent sends with explicit toast UX and backend-safe run policy (`multitaskStrategy: "reject"` on all run-creating submits). Added preflight thread busy check in composer and new submit-guard Playwright coverage. Files: `src/components/thread/index.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/agent-inbox/components/thread-actions-view.tsx`, `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`, `tests/submit-guard.spec.ts`, `tests/history-spinner-qa.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-06: Add Playwright one-time manual auth setup and QA spinner-focused E2E coverage for history/cancel synchronization and inactive-thread behavior. Files: `playwright.config.ts`, `tests/auth.setup.ts`, `tests/history-spinner-qa.spec.ts`, `tests/thread-history.spec.ts`, `tests/reconnect.spec.ts`, `package.json`, `README.md`.
 - 2026-02-05: Add thread history activity indicators (busy spinner + unseen completion dot) with localStorage last-seen tracking and light polling. Files: `src/components/thread/history/index.tsx`, `src/hooks/use-thread-last-seen.ts`, `src/lib/thread-activity.ts`, `src/components/thread/index.tsx`.
 - 2026-02-05: Reduce thread history fetch limit from 100 to 20 for faster loads. Files: `src/providers/Thread.tsx`, `FORK_COMPASS.md`.
@@ -133,6 +136,7 @@ Tracking anchor commits:
 - `DEFAULT_AGENT_RECURSION_LIMIT` is read from `NEXT_PUBLIC_AGENT_RECURSION_LIMIT` (fallback 50).
 - All `thread.submit` calls include:
   - `config: { recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT }`
+  - `multitaskStrategy: "reject"`
   - `onDisconnect: "continue"`
 
 ---
@@ -154,9 +158,13 @@ Tracking anchor commits:
 - Upload label shows spinner + “Uploading...”
 - Tool call results render in scrollable `<pre>` blocks with prettier JSON formatting.
 - Human message bubble alignment adjusted (removed `text-right`).
+- Composer now rejects same-thread sends while the thread is still running and shows a warning toast; draft text/files are preserved for retry.
+- Conflict-like run errors (busy/conflict/409) surface with a dedicated “active run” toast instead of a generic error message.
+- Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
 - Thread history list is enabled and controlled by `THREAD_HISTORY_ENABLED`.
 - History search no longer gates by assistant/graph; the backend ownership filter scopes results per-user.
-- Thread history items show run-in-progress spinners and unseen completion dots using localStorage last-seen tracking plus light polling for status refreshes.
+- Thread history items show run-in-progress spinners and unseen completion dots using localStorage last-seen tracking.
+- History polling now uses a lighter `/threads/search` payload (`select` fields, no `values`), pauses when history is not visible, pauses while the tab is hidden, and avoids rerenders when thread signatures have not changed.
 
 ---
 

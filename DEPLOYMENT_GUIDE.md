@@ -170,7 +170,9 @@ docker buildx build \
 
 ### Develop Build
 
-For the develop environment, use the staging LangGraph URL:
+For the develop environment, use this LangGraph URL:
+
+- `https://ht-giving-pickup-82-5383ffe79596502784b9eede7fffa087.us.langgraph.app`
 
 ```bash
 IMAGE=gcr.io/cerebryai/question_crafter_agent_ui
@@ -180,7 +182,7 @@ docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t "$IMAGE:develop" \
   -t "$IMAGE:develop-$TS" \
-  --build-arg NEXT_PUBLIC_API_URL=https://questioncrafter-a13b34cfbfc25c1084843165f9c71db7.us.langgraph.app \
+  --build-arg NEXT_PUBLIC_API_URL=https://ht-giving-pickup-82-5383ffe79596502784b9eede7fffa087.us.langgraph.app \
   --build-arg NEXT_PUBLIC_ASSISTANT_ID=o3_question_crafter_agent \
   --build-arg NEXT_PUBLIC_AUTH_MODE=iap \
   --build-arg NEXT_PUBLIC_MODEL_PROVIDER=OPENAI \
@@ -200,7 +202,7 @@ docker buildx build \
   --platform linux/amd64 \
   -t "$IMAGE:develop" \
   -t "$IMAGE:develop-$TS" \
-  --build-arg NEXT_PUBLIC_API_URL=https://questioncrafter-a13b34cfbfc25c1084843165f9c71db7.us.langgraph.app \
+  --build-arg NEXT_PUBLIC_API_URL=https://ht-giving-pickup-82-5383ffe79596502784b9eede7fffa087.us.langgraph.app \
   --build-arg NEXT_PUBLIC_ASSISTANT_ID=o3_question_crafter_agent \
   --build-arg NEXT_PUBLIC_AUTH_MODE=iap \
   --build-arg NEXT_PUBLIC_MODEL_PROVIDER=OPENAI \

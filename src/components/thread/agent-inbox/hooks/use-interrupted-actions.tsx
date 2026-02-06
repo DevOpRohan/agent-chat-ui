@@ -93,6 +93,7 @@ export default function useInterruptedActions({
           config: {
             recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
           },
+          multitaskStrategy: "reject",
           onDisconnect: "continue",
           command: {
             resume: {
@@ -199,6 +200,7 @@ export default function useInterruptedActions({
           config: {
             recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
           },
+          multitaskStrategy: "reject",
           onDisconnect: "continue",
           command: {
             goto: END,

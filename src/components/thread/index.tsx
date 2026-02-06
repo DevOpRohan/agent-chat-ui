@@ -42,6 +42,48 @@ import {
   useArtifactContext,
 } from "./artifact";
 
+function getErrorMessage(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const maybeMessage = (error as { message?: unknown }).message;
+  if (typeof maybeMessage === "string") return maybeMessage;
+  return undefined;
+}
+
+function isThreadConflictError(message: string): boolean {
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes("409") ||
+    lowered.includes("conflict") ||
+    lowered.includes("busy") ||
+    lowered.includes("inflight")
+  );
+}
+
+function showThreadRunningToast() {
+  toast("Thread is still running", {
+    description:
+      "Please wait for the current response to finish, then send your next message.",
+    closeButton: true,
+  });
+}
+
+function buildThreadPreview(input: string, attachmentCount: number): string {
+  const normalizedInput = input.trim().replace(/\s+/g, " ");
+  if (normalizedInput) {
+    const maxPreviewLength = 140;
+    if (normalizedInput.length <= maxPreviewLength) {
+      return normalizedInput;
+    }
+    return `${normalizedInput.slice(0, maxPreviewLength - 3)}...`;
+  }
+
+  if (attachmentCount > 0) {
+    return attachmentCount === 1 ? "1 attachment" : `${attachmentCount} attachments`;
+  }
+
+  return "New thread";
+}
+
 function StickyToBottomContent(props: {
   content: ReactNode;
   footer?: ReactNode;
@@ -150,7 +192,7 @@ export function Thread() {
       return;
     }
     try {
-      const message = (stream.error as any).message;
+      const message = getErrorMessage(stream.error);
       if (!message || lastError.current === message) {
         // Message has already been logged. do not modify ref, return early.
         return;
@@ -158,6 +200,14 @@ export function Thread() {
 
       // Message is defined, and it has not been logged yet. Save it, and send the error
       lastError.current = message;
+      if (isThreadConflictError(message)) {
+        toast("Thread already has an active run", {
+          description:
+            "Your message was not sent. Please retry after the current run completes.",
+          closeButton: true,
+        });
+        return;
+      }
       toast.error("An error occurred. Please try again.", {
         description: (
           <p>
@@ -195,13 +245,27 @@ export function Thread() {
     markThreadSeen(threadId, Date.now());
   }, [threadId]);
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (
-      (input.trim().length === 0 && contentBlocks.length === 0) ||
-      isLoading
-    )
+    if (input.trim().length === 0 && contentBlocks.length === 0) return;
+    if (isCurrentThreadLoading) {
+      showThreadRunningToast();
       return;
+    }
+
+    if (threadId) {
+      try {
+        const currentThread = await stream.client.threads.get(threadId);
+        if (currentThread.status === "busy") {
+          showThreadRunningToast();
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to preflight thread status before submit", error);
+      }
+    }
+
+    const threadPreview = buildThreadPreview(input, contentBlocks.length);
     setFirstTokenReceived(false);
 
     const attachmentLines = contentBlocks
@@ -241,18 +305,23 @@ export function Thread() {
 
     const context =
       Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
+    const submitMetadata = !threadId
+      ? { thread_preview: threadPreview }
+      : undefined;
 
     if (threadId) {
       setLoadingThreadId(threadId);
       markBusy(threadId, true);
     }
 
-    stream.submit(
+    void stream.submit(
       { messages: [...toolMessages, newHumanMessage], context },
       {
         config: {
           recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
         },
+        metadata: submitMetadata,
+        multitaskStrategy: "reject",
         onDisconnect: "continue",
         streamMode: ["values"],
         streamSubgraphs: true,
@@ -288,6 +357,7 @@ export function Thread() {
         recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
       },
       checkpoint: parentCheckpoint,
+      multitaskStrategy: "reject",
       onDisconnect: "continue",
       streamMode: ["values"],
       streamSubgraphs: true,
@@ -431,7 +501,7 @@ export function Thread() {
           <StickToBottom className="relative flex-1 overflow-hidden">
             <StickyToBottomContent
               className={cn(
-                "absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
+                "absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-400 [&::-webkit-scrollbar-thumb:hover]:bg-gray-500 [&::-webkit-scrollbar-track]:bg-gray-100/80",
                 !chatStarted && "mt-[25vh] flex flex-col items-stretch",
                 chatStarted && "grid grid-rows-[1fr_auto]",
               )}
@@ -580,7 +650,7 @@ export function Thread() {
                             type="submit"
                             className="ml-auto shadow-md transition-all"
                             disabled={
-                              isLoading ||
+                              isCurrentThreadLoading ||
                               isUploading ||
                               (!input.trim() && contentBlocks.length === 0)
                             }

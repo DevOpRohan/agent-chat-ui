@@ -178,6 +178,7 @@ export function ThreadActionsView({
       stream.submit(
         {},
         {
+          multitaskStrategy: "reject",
           command: {
             resume: { decisions: allDecisions },
           },
@@ -225,6 +226,7 @@ export function ThreadActionsView({
       stream.submit(
         {},
         {
+          multitaskStrategy: "reject",
           command: {
             resume: { decisions: allDecisions },
           },

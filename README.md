@@ -48,6 +48,15 @@ Once the app is running (or if using the deployed site), you'll be prompted to e
 
 After entering these values, click `Continue`. You'll then be redirected to a chat interface where you can start chatting with your LangGraph server.
 
+> [!NOTE]
+> This fork rejects concurrent sends on the **same thread** while a run is active. The UI shows a warning toast and keeps the current draft so the user can retry after completion.
+
+> [!NOTE]
+> Thread history refresh uses lightweight thread search fields and pauses polling when the history panel is closed or the browser tab is hidden.
+
+> [!NOTE]
+> If your model/provider emits `reasoning` content blocks, assistant messages now show a compact “Thinking” panel with the latest 500 characters.
+
 ## Environment Variables
 
 You can bypass the initial setup form by setting the following environment variables:

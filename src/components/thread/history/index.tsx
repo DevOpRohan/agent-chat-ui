@@ -1,10 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { useThreads } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 
-import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import {
   Sheet,
@@ -18,8 +17,13 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useThreadLastSeen } from "@/hooks/use-thread-last-seen";
 import { useThreadBusy } from "@/hooks/use-thread-busy";
 
-const POLL_INTERVAL_IDLE_MS = 8000;
-const POLL_INTERVAL_ACTIVE_MS = 3000;
+const POLL_INTERVAL_IDLE_MS = 15000;
+const POLL_INTERVAL_ACTIVE_MS = 5000;
+const THREAD_PREVIEW_METADATA_KEYS = [
+  "thread_preview",
+  "thread_title",
+  "title",
+] as const;
 
 function getThreadUpdatedAtMs(thread: Thread): number | null {
   const updatedAt = (
@@ -37,6 +41,44 @@ function getThreadUpdatedAtMs(thread: Thread): number | null {
     return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
+}
+
+function getThreadPreviewFromMetadata(thread: Thread): string | null {
+  const metadata = thread.metadata;
+  if (!metadata || typeof metadata !== "object") return null;
+
+  for (const key of THREAD_PREVIEW_METADATA_KEYS) {
+    const rawValue = (metadata as Record<string, unknown>)[key];
+    if (typeof rawValue !== "string") continue;
+    const trimmed = rawValue.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+
+  return null;
+}
+
+function getThreadListLabel(thread: Thread): string {
+  return getThreadPreviewFromMetadata(thread) ?? thread.thread_id;
+}
+
+function getThreadSignature(thread: Thread): string {
+  const updatedAtMs = getThreadUpdatedAtMs(thread);
+  return [
+    thread.thread_id,
+    thread.status,
+    updatedAtMs ?? "none",
+    getThreadListLabel(thread),
+  ].join("|");
+}
+
+function areThreadListsEquivalent(prev: Thread[], next: Thread[]): boolean {
+  if (prev.length !== next.length) return false;
+  for (let idx = 0; idx < prev.length; idx += 1) {
+    if (getThreadSignature(prev[idx]) !== getThreadSignature(next[idx])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function ThreadList({
@@ -61,17 +103,7 @@ function ThreadList({
   return (
     <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
       {threads.map((t) => {
-        let itemText = t.thread_id;
-        if (
-          typeof t.values === "object" &&
-          t.values &&
-          "messages" in t.values &&
-          Array.isArray(t.values.messages) &&
-          t.values.messages?.length > 0
-        ) {
-          const firstMessage = t.values.messages[0];
-          itemText = getContentString(firstMessage.content);
-        }
+        const itemText = getThreadListLabel(t);
         const updatedAtMs = getThreadUpdatedAtMs(t);
         const lastSeenMs = lastSeenByThreadId[t.thread_id] ?? baselineMs;
         const isBusy = busyByThreadId[t.thread_id] || t.status === "busy";
@@ -165,10 +197,24 @@ export default function ThreadHistory() {
   const { lastSeenByThreadId, baselineMs, markSeen } = useThreadLastSeen();
   const { busyByThreadId, markBusy } = useThreadBusy();
   const historyDisabled = !THREAD_HISTORY_ENABLED;
-  const isHistoryVisible =
-    !historyDisabled && (isLargeScreen || !!chatHistoryOpen);
+  const [isPageVisible, setIsPageVisible] = useState(() =>
+    typeof document === "undefined" ? true : !document.hidden,
+  );
+  const isHistoryVisible = !historyDisabled && !!chatHistoryOpen;
 
   const hasLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibilityChange = () => {
+      setIsPageVisible(!document.hidden);
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
   const refreshThreads = useCallback(
     async (withLoading: boolean) => {
       if (historyDisabled) return;
@@ -176,7 +222,11 @@ export default function ThreadHistory() {
       if (withLoading) setThreadsLoading(true);
       try {
         const nextThreads = await getThreads();
-        setThreads(nextThreads);
+        setThreads((prevThreads) =>
+          areThreadListsEquivalent(prevThreads, nextThreads)
+            ? prevThreads
+            : nextThreads,
+        );
       } catch (error) {
         console.error(error);
       } finally {
@@ -224,14 +274,15 @@ export default function ThreadHistory() {
   );
 
   useEffect(() => {
-    if (!isHistoryVisible) return;
+    if (!isHistoryVisible || !isPageVisible) return;
     refreshThreads(!hasLoadedRef.current);
     hasLoadedRef.current = true;
-  }, [isHistoryVisible, refreshThreads]);
+  }, [isHistoryVisible, isPageVisible, refreshThreads]);
 
   useEffect(() => {
     if (!isHistoryVisible) return;
     if (historyDisabled) return;
+    if (!isPageVisible) return;
     let cancelled = false;
     let timeoutId: number | null = null;
 
@@ -250,7 +301,13 @@ export default function ThreadHistory() {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [historyDisabled, isHistoryVisible, pollIntervalMs, refreshThreads]);
+  }, [
+    historyDisabled,
+    isHistoryVisible,
+    isPageVisible,
+    pollIntervalMs,
+    refreshThreads,
+  ]);
 
   useEffect(() => {
     if (!currentThreadId) return;

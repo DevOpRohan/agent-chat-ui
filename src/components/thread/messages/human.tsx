@@ -60,6 +60,7 @@ export function HumanMessage({
         config: {
           recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
         },
+        multitaskStrategy: "reject",
         onDisconnect: "continue",
         checkpoint: parentCheckpoint,
         streamMode: ["values"],
