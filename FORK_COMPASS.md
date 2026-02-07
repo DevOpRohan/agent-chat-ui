@@ -1,6 +1,6 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-02-06_  
+_Last updated: 2026-02-07_  
 _Branch: main_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
@@ -35,17 +35,18 @@ Recent post-sync changes (after 2026-01-22) include **re-enabling thread history
 
 ## 2) Diff Snapshot (Upstream vs Fork)
 - **Upstream status:** 0 commits behind
-- **Fork status:** 40 commits ahead
-- **Files changed vs upstream:** 50
-- **Net diff vs upstream:** +4788 / -585 lines
+- **Fork status:** 43 commits ahead
+- **Files changed vs upstream:** 51
+- **Net diff vs upstream:** +4968 / -587 lines
 
 Tracking anchor commits:
-- **Fork HEAD:** `1d0a8ec`
+- **Fork HEAD:** `d363602`
 - **Upstream main:** `1a0e8af`
 
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-07: Sync updated logo SVG across all assets and React icon, regenerate PNG + favicon. Files: `public/question-crafter-logo.svg`, `public/logo.svg`, `public/question-crafter-logo.png`, `src/components/icons/question-crafter.tsx`, `src/app/favicon.ico`.
 - 2026-02-06: Refresh Question Crafter branding assets to the selected balanced co-author mark and simplify the icon by removing the outer nested containers (inner symbol only). Also add alternate icon source under `public/branding/`; history-row rename save/cancel controls are compact icon actions for lower width. Files: `public/logo.svg`, `public/question-crafter-logo.svg`, `public/question-crafter-logo.png`, `public/branding/question-crafter-icon-option-1-collab.svg`, `src/components/icons/question-crafter.tsx`, `src/components/thread/history/index.tsx`, `FORK_COMPASS.md`.
 - 2026-02-06: Add manual thread naming on history rows (pencil icon with inline editor); persists names via `threads.update(...metadata.thread_title)` and prioritizes custom names in history labels. Also adds a clear `New` action in history headers (desktop + mobile sheet). Files: `src/components/thread/history/index.tsx`, `src/providers/Thread.tsx`, `src/lib/thread-metadata.ts`, `src/components/thread/index.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-06: Add thread history lazy loading in 20-thread batches with bottom-of-list scroll fetch and inline `Loading more history...` spinner indicator (desktop + mobile sheet). Files: `src/providers/Thread.tsx`, `src/components/thread/history/index.tsx`, `src/providers/Stream.tsx`, `README.md`, `FORK_COMPASS.md`.
@@ -272,6 +273,9 @@ Use this as a jump list when editing or debugging:
 
 ## 5) Fork-only Commit Log
 Commits unique to this fork (upstream/main..HEAD):
+- `d363602` fix(branding): sync updated logo svg across assets
+- `496d328` fix(branding): remove logo outer containers and update favicon
+- `a2239ce` docs: refresh fork compass snapshot after branding updates
 - `1d0a8ec` feat(ui): move thread actions to history and refresh branding
 - `f35cea4` fix(ui): stop intermediate spinner when final text starts
 - `3e924cd` fix(ui): remove extra gap under intermediate step blocks
