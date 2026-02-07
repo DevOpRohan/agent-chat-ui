@@ -237,7 +237,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
         <div className="animate-in fade-in-0 zoom-in-95 bg-background flex max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="mt-14 flex flex-col gap-2 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <QuestionCrafterLogoSVG className="h-7" />
+              <QuestionCrafterLogoSVG className="h-9" />
               <h1 className="text-xl font-semibold tracking-tight">
                 Question Crafter
               </h1>

@@ -495,8 +495,8 @@ export function Thread() {
                   }}
                 >
                   <QuestionCrafterLogoSVG
-                    width={32}
-                    height={32}
+                    width={40}
+                    height={40}
                   />
                   <span className="text-xl font-semibold tracking-tight">
                     Question Crafter
@@ -555,7 +555,7 @@ export function Thread() {
                 <div className="sticky bottom-0 flex flex-col items-center gap-8 bg-white">
                   {!chatStarted && (
                     <div className="flex items-center gap-3">
-                      <QuestionCrafterLogoSVG className="h-8 flex-shrink-0" />
+                      <QuestionCrafterLogoSVG className="h-10 flex-shrink-0" />
                       <h1 className="text-2xl font-semibold tracking-tight">
                         Question Crafter
                       </h1>

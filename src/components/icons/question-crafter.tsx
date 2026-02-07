@@ -11,81 +11,166 @@ export function QuestionCrafterLogoSVG({
     <svg
       width={width}
       height={height}
-      viewBox="0 0 96 96"
+      viewBox="0 0 1040 1024"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       aria-hidden="true"
     >
-      <line
-        x1="28"
-        y1="48"
-        x2="68"
-        y2="48"
-        stroke="#BDEFFF"
-        strokeWidth="4"
-        strokeLinecap="round"
+      <defs>
+        <radialGradient
+          id="qc_bg"
+          cx="50%"
+          cy="45%"
+          r="80%"
+        >
+          <stop
+            offset="0%"
+            stopColor="#ffffff"
+          />
+          <stop
+            offset="100%"
+            stopColor="#f2f4f8"
+          />
+        </radialGradient>
+
+        <linearGradient
+          id="qc_ink"
+          x1="0"
+          y1="0"
+          x2="1"
+          y2="1"
+        >
+          <stop
+            offset="0%"
+            stopColor="#1b2240"
+          />
+          <stop
+            offset="100%"
+            stopColor="#0f1324"
+          />
+        </linearGradient>
+      </defs>
+
+      <rect
+        width="1040"
+        height="1024"
+        fill="url(#qc_bg)"
       />
-      <circle
-        cx="24"
-        cy="48"
-        r="6"
-        fill="#67F0C4"
+
+      <g fill="url(#qc_ink)">
+        <rect
+          x="151"
+          y="448"
+          width="60"
+          height="52"
+          rx="0"
+        />
+        <circle
+          cx="97"
+          cy="474"
+          r="60"
+        />
+        <rect
+          x="783"
+          y="448"
+          width="53"
+          height="52"
+          rx="0"
+        />
+        <circle
+          cx="896"
+          cy="474"
+          r="60"
+        />
+      </g>
+
+      <rect
+        x="211"
+        y="48"
+        width="572"
+        height="851"
+        rx="120"
+        fill="url(#qc_ink)"
       />
-      <circle
-        cx="72"
-        cy="48"
-        r="6"
-        fill="#9CC9FF"
+      <rect
+        x="262"
+        y="99"
+        width="470"
+        height="749"
+        rx="70"
+        fill="#ffffff"
       />
 
       <rect
-        x="32"
-        y="24"
-        width="32"
-        height="48"
-        rx="10"
-        fill="#F8FDFF"
+        x="324"
+        y="231"
+        width="347"
+        height="34"
+        rx="17"
+        fill="#9CA2AE"
       />
       <rect
-        x="38"
-        y="34"
-        width="20"
-        height="3"
-        rx="1.5"
-        fill="#CBEFFE"
-      />
-      <rect
-        x="38"
-        y="40"
-        width="16"
-        height="3"
-        rx="1.5"
-        fill="#CBEFFE"
-      />
-      <rect
-        x="38"
-        y="46"
-        width="18"
-        height="3"
-        rx="1.5"
-        fill="#CBEFFE"
-      />
-      <path
-        d="M43.49 57.29C43.49 54.88 45.43 53.22 47.99 53.22C50.45 53.22 52.19 54.7 52.19 56.97C52.19 58.62 51.42 59.66 49.78 60.63C48.46 61.41 48.11 61.94 48.11 62.86V63.41H46.06V62.67C46.06 61.18 46.64 60.2 48.43 59.18C49.62 58.5 50.06 57.93 50.06 57.08C50.06 56 49.23 55.25 47.99 55.25C46.69 55.25 45.78 56.13 45.78 57.4V57.55H43.49V57.29ZM47.19 67.31C46.41 67.31 45.78 66.68 45.78 65.9C45.78 65.11 46.41 64.49 47.19 64.49C47.98 64.49 48.61 65.11 48.61 65.9C48.61 66.68 47.98 67.31 47.19 67.31Z"
-        fill="#0E5668"
+        x="323"
+        y="326"
+        width="209"
+        height="35"
+        rx="17"
+        fill="#9CA2AE"
       />
 
       <path
-        d="M63 58L74 47L80 53L69 64L62 65L63 58Z"
-        fill="#F6BC45"
+        d="M532.84,560.53 L461.60,560.53 L461.60,550.86
+       Q461.60,534.69 468.11,522.19
+       Q474.61,509.62 495.52,490.23
+       L508.15,478.80
+       Q519.39,468.57 524.63,459.47
+       Q529.87,450.38 529.87,441.28
+       Q529.87,427.52 520.40,419.75
+       Q510.93,411.92 493.94,411.92
+       Q477.96,411.92 459.39,418.55
+       Q440.82,425.12 420.74,438.13
+       L420.74,376.17
+       Q444.61,367.89 464.32,363.98
+       Q484.08,360.00 502.40,360.00
+       Q550.59,360.00 575.85,379.64
+       Q601.12,399.28 601.12,436.99
+       Q601.12,456.32 593.41,471.60
+       Q585.71,486.88 567.14,504.44
+       L554.51,515.75
+       Q541.12,527.94 536.95,535.39
+       Q532.84,542.78 532.84,551.62
+       L532.84,560.53 Z"
+        fill="url(#qc_ink)"
       />
+
       <circle
-        cx="70.5"
-        cy="52.5"
-        r="2.1"
-        fill="#0E5668"
+        cx="497"
+        cy="690"
+        r="44"
+        fill="url(#qc_ink)"
       />
+
+      <g transform="translate(528 659) rotate(-42)">
+        <path
+          d="M60,-40 H210
+         A40,40 0 0 1 250,0
+         A40,40 0 0 1 210,40
+         H60 L0,0 Z"
+          fill="url(#qc_ink)"
+        />
+        <rect
+          x="96"
+          y="-22"
+          width="120"
+          height="44"
+          fill="#B67B3C"
+        />
+        <polygon
+          points="8,0 60,-32 60,32"
+          fill="#F6D562"
+        />
+      </g>
     </svg>
   );
 }
