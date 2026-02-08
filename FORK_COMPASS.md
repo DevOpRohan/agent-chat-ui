@@ -1,7 +1,7 @@
 # Fork Compass — Agent Chat UI Customizations
 
 _Last updated: 2026-02-08_  
-_Branch: main_  
+_Branch: codex/dark_mode_exp_branch_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
 This document is a high-detail map of how this fork diverges from the upstream Agent Chat UI. It is designed so a new developer can quickly understand what was customized, why it exists, and where to edit it.
@@ -39,13 +39,13 @@ Key differences in one sentence:
 ## 2) Diff Snapshot (Upstream vs Fork)
 
 - **Upstream status:** 0 commits behind
-- **Fork status:** 47 commits ahead
-- **Files changed vs upstream:** 52
-- **Net diff vs upstream:** +4952 / -595 lines
+- **Fork status:** 49 commits ahead
+- **Files changed vs upstream:** 63
+- **Net diff vs upstream:** +5559 / -686 lines
 
 Tracking anchor commits:
 
-- **Fork HEAD:** `33bdc62`
+- **Fork HEAD:** `3d52ae1`
 - **Upstream main:** `1a0e8af`
 
 ---
@@ -329,6 +329,9 @@ Use this as a jump list when editing or debugging:
 
 Commits unique to this fork (upstream/main..HEAD):
 
+- `3d52ae1` feat(ui): add experimental dark mode toggle and themed logo
+- `c8add70` fix(stream): stabilize final assistant output after intermediate steps
+- `4612151` fix(build): use local inter font
 - `33bdc62` docs: refresh fork compass snapshot
 - `4b10f0c` fix(branding): remove logo background fill
 - `e8d8ed8` docs: refresh fork compass after logo sync
