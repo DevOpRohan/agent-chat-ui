@@ -1,7 +1,14 @@
 import { Button } from "@/components/ui/button";
 import { THREAD_HISTORY_PAGE_SIZE, useThreads } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
-import { UIEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  UIEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
@@ -141,7 +148,7 @@ function ThreadList({
 
   return (
     <div
-      className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent"
+      className="[&::-webkit-scrollbar-thumb]:bg-border flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent"
       onScroll={onListScroll}
     >
       {threads.map((t) => {
@@ -162,7 +169,7 @@ function ThreadList({
             aria-label="Thread running"
           >
             <LoaderCircle
-              className="size-3 animate-spin text-slate-500"
+              className="text-muted-foreground size-3 animate-spin"
               aria-hidden="true"
             />
           </span>
@@ -187,7 +194,7 @@ function ThreadList({
           >
             {editingThreadId === t.thread_id ? (
               <form
-                className="flex w-[280px] items-center gap-0.5 rounded-md border border-slate-200 bg-white p-1"
+                className="bg-card border-border flex w-[280px] items-center gap-0.5 rounded-md border p-1"
                 onSubmit={(e) => {
                   e.preventDefault();
                   onRenameSubmit(t);
@@ -233,7 +240,9 @@ function ThreadList({
                   data-thread-id={t.thread_id}
                   data-thread-active={isActive ? "true" : "false"}
                   className={`w-[280px] items-center justify-start gap-2 pr-9 text-left font-normal ${
-                    isActive ? "bg-slate-200 text-slate-900 hover:bg-slate-200" : ""
+                    isActive
+                      ? "bg-accent text-accent-foreground hover:bg-accent"
+                      : ""
                   }`}
                   onClick={(e) => {
                     e.preventDefault();
@@ -255,7 +264,7 @@ function ThreadList({
                   size="icon"
                   aria-label={`Rename ${itemText}`}
                   className={cn(
-                    "absolute top-1/2 right-2 size-7 -translate-y-1/2 rounded-sm text-slate-500 opacity-0 transition-opacity hover:bg-slate-200 hover:text-slate-900 group-hover:opacity-100",
+                    "text-muted-foreground hover:bg-accent hover:text-accent-foreground absolute top-1/2 right-2 size-7 -translate-y-1/2 rounded-sm opacity-0 transition-opacity group-hover:opacity-100",
                     isActive && "opacity-100",
                   )}
                   onClick={(event) => {
@@ -273,7 +282,7 @@ function ThreadList({
       })}
       {isLoadingMore ? (
         <div
-          className="flex w-full items-center gap-2 px-3 py-2 text-xs text-slate-500"
+          className="text-muted-foreground flex w-full items-center gap-2 px-3 py-2 text-xs"
           role="status"
           aria-live="polite"
         >
@@ -290,7 +299,7 @@ function ThreadList({
 
 function ThreadHistoryLoading() {
   return (
-    <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
+    <div className="[&::-webkit-scrollbar-thumb]:bg-border flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
       {Array.from({ length: 30 }).map((_, i) => (
         <Skeleton
           key={`skeleton-${i}`}
@@ -492,23 +501,30 @@ export default function ThreadHistory() {
   const hasBusyThread = useMemo(
     () =>
       threads.some(
-        (thread) => busyByThreadId[thread.thread_id] || thread.status === "busy",
+        (thread) =>
+          busyByThreadId[thread.thread_id] || thread.status === "busy",
       ),
     [threads, busyByThreadId],
   );
 
   const hasUnseenThread = useMemo(() => {
     return threads.some((thread) => {
-      const isBusy = busyByThreadId[thread.thread_id] || thread.status === "busy";
+      const isBusy =
+        busyByThreadId[thread.thread_id] || thread.status === "busy";
       if (isBusy) return false;
       if (thread.thread_id === currentThreadId) return false;
       const updatedAtMs = getThreadUpdatedAtMs(thread);
       if (updatedAtMs === null) return false;
-      const lastSeenMs =
-        lastSeenByThreadId[thread.thread_id] ?? baselineMs;
+      const lastSeenMs = lastSeenByThreadId[thread.thread_id] ?? baselineMs;
       return updatedAtMs > lastSeenMs;
     });
-  }, [threads, currentThreadId, lastSeenByThreadId, baselineMs, busyByThreadId]);
+  }, [
+    threads,
+    currentThreadId,
+    lastSeenByThreadId,
+    baselineMs,
+    busyByThreadId,
+  ]);
 
   useEffect(() => {
     for (const thread of threads) {
@@ -588,14 +604,14 @@ export default function ThreadHistory() {
 
   return (
     <>
-      <div className="shadow-inner-right hidden h-screen w-[300px] shrink-0 flex-col items-start justify-start gap-6 border-r-[1px] border-slate-300 lg:flex">
+      <div className="shadow-inner-right border-border hidden h-screen w-[300px] shrink-0 flex-col items-start justify-start gap-6 border-r-[1px] lg:flex">
         <div className="flex w-full items-center justify-between px-4 pt-1.5">
           <h1 className="text-left text-xl font-semibold tracking-tight">
             Chat History
           </h1>
           <div className="flex items-center gap-1">
             <Button
-              className="h-8 gap-1.5 px-2 text-slate-700 hover:bg-gray-100 hover:text-slate-900"
+              className="text-muted-foreground hover:text-accent-foreground hover:bg-accent h-8 gap-1.5 px-2"
               variant="ghost"
               size="sm"
               onClick={handleNewThread}
@@ -604,7 +620,7 @@ export default function ThreadHistory() {
               <span>New</span>
             </Button>
             <Button
-              className="hover:bg-gray-100"
+              className="hover:bg-accent"
               variant="ghost"
               onClick={() => setChatHistoryOpen((p) => !p)}
             >
@@ -617,7 +633,7 @@ export default function ThreadHistory() {
           </div>
         </div>
         {historyDisabled ? (
-          <div className="px-4 text-sm text-slate-500">
+          <div className="text-muted-foreground px-4 text-sm">
             Thread history is disabled.
           </div>
         ) : threadsLoading ? (
@@ -660,7 +676,7 @@ export default function ThreadHistory() {
               <div className="flex items-center justify-between">
                 <SheetTitle>Chat History</SheetTitle>
                 <Button
-                  className="h-8 gap-1.5 px-2 text-slate-700 hover:bg-gray-100 hover:text-slate-900"
+                  className="text-muted-foreground hover:text-accent-foreground hover:bg-accent h-8 gap-1.5 px-2"
                   variant="ghost"
                   size="sm"
                   onClick={handleNewThread}
@@ -671,7 +687,7 @@ export default function ThreadHistory() {
               </div>
             </SheetHeader>
             {historyDisabled ? (
-              <div className="px-1 text-sm text-slate-500">
+              <div className="text-muted-foreground px-1 text-sm">
                 Thread history is disabled.
               </div>
             ) : (

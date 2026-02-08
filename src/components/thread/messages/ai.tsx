@@ -168,9 +168,7 @@ function extractReasoningText(message: Message | undefined): string {
 
   const uniqueReasoning = Array.from(
     new Set(
-      collected
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0),
+      collected.map((item) => item.trim()).filter((item) => item.length > 0),
     ),
   );
 
@@ -208,7 +206,7 @@ function ThinkingPanel({ text }: { text: string }) {
 
   return (
     <details
-      className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+      className="bg-muted/50 text-muted-foreground border-border rounded-md border px-3 py-2 text-xs"
       onToggle={(event) => {
         const opened = (event.currentTarget as HTMLDetailsElement).open;
         setIsOpen(opened);
@@ -218,13 +216,13 @@ function ThinkingPanel({ text }: { text: string }) {
         }
       }}
     >
-      <summary className="cursor-pointer select-none font-medium text-slate-700">
+      <summary className="text-foreground cursor-pointer font-medium select-none">
         Thinking (latest {REASONING_PREVIEW_CHARS} chars)
       </summary>
       <pre
         ref={contentRef}
         onScroll={handleScroll}
-        className="mt-2 max-h-48 overflow-y-auto pr-2 whitespace-pre-wrap break-words text-xs leading-relaxed [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-slate-100"
+        className="[&::-webkit-scrollbar-thumb]:bg-border mt-2 max-h-48 overflow-y-auto pr-2 text-xs leading-relaxed break-words whitespace-pre-wrap [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent"
       >
         {previewText}
       </pre>
@@ -286,18 +284,18 @@ function IntermediateStepContent({
         return (
           <div
             key={part.key}
-            className="rounded-md border border-slate-200 bg-white p-2"
+            className="bg-card border-border rounded-md border p-2"
           >
             {part.kind === "tool_calls" ? (
               <>
-                <p className="mb-2 text-xs font-medium text-slate-600">
+                <p className="text-muted-foreground mb-2 text-xs font-medium">
                   Tool Calls
                 </p>
                 <ToolCalls toolCalls={part.toolCalls} />
               </>
             ) : (
               <>
-                <p className="mb-2 text-xs font-medium text-slate-600">
+                <p className="text-muted-foreground mb-2 text-xs font-medium">
                   Tool Result
                 </p>
                 <ToolResult message={part.toolResult} />
@@ -328,10 +326,7 @@ function IntermediateStepsArtifactTrigger({
   const [IntermediateArtifactContent, intermediateArtifact] = useArtifact();
   if (parts.length === 0) return null;
 
-  const runningStatus = getIntermediateRunningStatus(
-    parts,
-    isStreaming,
-  );
+  const runningStatus = getIntermediateRunningStatus(parts, isStreaming);
   const statusLabel = runningStatus ?? "open details";
 
   return (
@@ -339,21 +334,23 @@ function IntermediateStepsArtifactTrigger({
       <button
         type="button"
         onClick={() => intermediateArtifact.setOpen(true)}
-        className="w-full rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-left transition-colors hover:bg-slate-100"
+        className="bg-muted/60 hover:bg-muted border-border w-full rounded-lg border px-3 py-2 text-left transition-colors"
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+            <span className="text-foreground flex items-center gap-1.5 text-sm font-semibold">
               {runningStatus ? (
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin text-slate-600" />
+                <LoaderCircle className="text-muted-foreground h-3.5 w-3.5 animate-spin" />
               ) : null}
               Intermediate Step
             </span>
-            <span className="truncate text-xs font-medium text-slate-600">
+            <span className="text-muted-foreground truncate text-xs font-medium">
               {statusLabel}
             </span>
           </div>
-          <span className="shrink-0 text-xs text-slate-500">{parts.length}</span>
+          <span className="text-muted-foreground shrink-0 text-xs">
+            {parts.length}
+          </span>
         </div>
       </button>
       {showActions ? (
@@ -370,18 +367,22 @@ function IntermediateStepsArtifactTrigger({
       {intermediateArtifact.open ? (
         <IntermediateArtifactContent
           title={
-            <div className="flex items-center gap-1.5 truncate font-semibold text-slate-900">
+            <div className="text-foreground flex items-center gap-1.5 truncate font-semibold">
               {runningStatus ? (
-                <LoaderCircle className="h-4 w-4 animate-spin text-slate-600" />
+                <LoaderCircle className="text-muted-foreground h-4 w-4 animate-spin" />
               ) : null}
-              {runningStatus ? `Intermediate Step: ${runningStatus}` : "Intermediate Step"}
+              {runningStatus
+                ? `Intermediate Step: ${runningStatus}`
+                : "Intermediate Step"}
             </div>
           }
         >
           <div className="flex min-h-full flex-col">
-            <div className="border-b border-slate-200 px-4 py-3">
-              <p className="text-base font-semibold text-slate-900">Intermediate Step</p>
-              <p className="mt-0.5 text-xs text-slate-600">
+            <div className="border-border border-b px-4 py-3">
+              <p className="text-foreground text-base font-semibold">
+                Intermediate Step
+              </p>
+              <p className="text-muted-foreground mt-0.5 text-xs">
                 {runningStatus
                   ? runningStatus
                   : "Reasoning, tool calls, and tool responses for this assistant turn."}
@@ -400,9 +401,7 @@ function IntermediateStepsArtifactTrigger({
 function isToolCallLikeType(value: unknown): boolean {
   if (typeof value !== "string") return false;
   return (
-    value === "tool_use" ||
-    value === "tool_call" ||
-    value.endsWith("_call")
+    value === "tool_use" || value === "tool_call" || value.endsWith("_call")
   );
 }
 
@@ -450,7 +449,9 @@ function parseToolCallFromContentBlock(
   };
 }
 
-function getOrderedContentParts(message: Message | undefined): OrderedContentPart[] {
+function getOrderedContentParts(
+  message: Message | undefined,
+): OrderedContentPart[] {
   if (!message) return [];
   if (!Array.isArray(message.content)) return [];
 
@@ -490,7 +491,9 @@ function getOrderedContentParts(message: Message | undefined): OrderedContentPar
     }
 
     if (isTextBlock) {
-      const textValue = readTextValue(record.text ?? record.content).join("\n\n");
+      const textValue = readTextValue(record.text ?? record.content).join(
+        "\n\n",
+      );
       if (textValue.length > 0) {
         parts.push({ kind: "text", key: `text-${idx}`, text: textValue });
       }
@@ -566,7 +569,9 @@ function getIntermediateCopyText(parts: IntermediateContentPart[]): string {
 
     if (part.kind === "tool_calls") {
       if (part.toolCalls.length > 0) {
-        chunks.push(part.toolCalls.map((tc) => stringifyToolCall(tc)).join("\n\n"));
+        chunks.push(
+          part.toolCalls.map((tc) => stringifyToolCall(tc)).join("\n\n"),
+        );
       }
       continue;
     }
@@ -743,7 +748,9 @@ function messageHasRenderableText(message: Message | undefined): boolean {
 }
 
 function getRenderableMessages(messages: Message[]): Message[] {
-  return messages.filter((message) => !message.id?.startsWith(DO_NOT_RENDER_ID_PREFIX));
+  return messages.filter(
+    (message) => !message.id?.startsWith(DO_NOT_RENDER_ID_PREFIX),
+  );
 }
 
 interface InterruptProps {
@@ -791,11 +798,16 @@ export function AssistantMessage({
   const thread = useStreamContext();
   const renderedMessages = getRenderableMessages(allMessages);
   const currentMessageIndex = message?.id
-    ? renderedMessages.findIndex((threadMessage) => threadMessage.id === message.id)
+    ? renderedMessages.findIndex(
+        (threadMessage) => threadMessage.id === message.id,
+      )
     : -1;
   const isLastMessage =
-    currentMessageIndex >= 0 && currentMessageIndex === renderedMessages.length - 1;
-  const hasNoAIOrToolMessages = !renderedMessages.find((m) => isAiOrToolMessage(m));
+    currentMessageIndex >= 0 &&
+    currentMessageIndex === renderedMessages.length - 1;
+  const hasNoAIOrToolMessages = !renderedMessages.find((m) =>
+    isAiOrToolMessage(m),
+  );
   const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const threadInterrupt = thread.interrupt;
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
@@ -809,7 +821,9 @@ export function AssistantMessage({
     message,
     message?.id ?? "current",
   );
-  const fallbackCommandContent = getIntermediateCopyText(currentMessageIntermediateParts);
+  const fallbackCommandContent = getIntermediateCopyText(
+    currentMessageIntermediateParts,
+  );
   const commandContent =
     contentString.trim().length > 0 ? contentString : fallbackCommandContent;
 
@@ -817,7 +831,9 @@ export function AssistantMessage({
     orderedContentParts.length > 0
       ? orderedSegments
           .filter(
-            (segment): segment is Extract<OrderedRenderSegment, { kind: "text" }> =>
+            (
+              segment,
+            ): segment is Extract<OrderedRenderSegment, { kind: "text" }> =>
               segment.kind === "text",
           )
           .map((segment) => ({ key: segment.key, text: segment.text }))
@@ -827,7 +843,10 @@ export function AssistantMessage({
 
   let groupStartIndex = -1;
   let groupEndIndex = -1;
-  if (currentMessageIndex >= 0 && isAiOrToolMessage(renderedMessages[currentMessageIndex])) {
+  if (
+    currentMessageIndex >= 0 &&
+    isAiOrToolMessage(renderedMessages[currentMessageIndex])
+  ) {
     groupStartIndex = currentMessageIndex;
     groupEndIndex = currentMessageIndex;
     while (
@@ -880,7 +899,9 @@ export function AssistantMessage({
     isCurrentGroupAtThreadTail &&
     !groupHasRenderableText &&
     groupedIntermediateParts.length > 0;
-  const groupedIntermediateCopyContent = getIntermediateCopyText(groupedIntermediateParts);
+  const groupedIntermediateCopyContent = getIntermediateCopyText(
+    groupedIntermediateParts,
+  );
   const hasCustomComponentsForMessage =
     !!message &&
     !!thread.values.ui?.some((ui) => ui.metadata?.message_id === message.id);

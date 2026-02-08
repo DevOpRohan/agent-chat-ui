@@ -1,12 +1,51 @@
+import { useId } from "react";
+
+type LogoVariant = "light" | "dark";
+
+const PALETTES: Record<
+  LogoVariant,
+  {
+    inkStart: string;
+    inkEnd: string;
+    paper: string;
+    line: string;
+    penBody: string;
+    penTip: string;
+  }
+> = {
+  light: {
+    inkStart: "#1b2240",
+    inkEnd: "#0f1324",
+    paper: "#ffffff",
+    line: "#9CA2AE",
+    penBody: "#B67B3C",
+    penTip: "#F6D562",
+  },
+  dark: {
+    inkStart: "#E3ECFF",
+    inkEnd: "#B7C9FF",
+    paper: "#192136",
+    line: "#7F91B0",
+    penBody: "#C7924F",
+    penTip: "#FFD976",
+  },
+};
+
 export function QuestionCrafterLogoSVG({
   className,
   width,
   height,
+  variant = "light",
 }: {
   width?: number;
   height?: number;
   className?: string;
+  variant?: LogoVariant;
 }) {
+  const palette = PALETTES[variant];
+  const gradientId = useId().replace(/:/g, "");
+  const inkFill = `url(#qc_ink_${gradientId})`;
+
   return (
     <svg
       width={width}
@@ -19,7 +58,7 @@ export function QuestionCrafterLogoSVG({
     >
       <defs>
         <linearGradient
-          id="qc_ink"
+          id={`qc_ink_${gradientId}`}
           x1="0"
           y1="0"
           x2="1"
@@ -27,16 +66,16 @@ export function QuestionCrafterLogoSVG({
         >
           <stop
             offset="0%"
-            stopColor="#1b2240"
+            stopColor={palette.inkStart}
           />
           <stop
             offset="100%"
-            stopColor="#0f1324"
+            stopColor={palette.inkEnd}
           />
         </linearGradient>
       </defs>
 
-      <g fill="url(#qc_ink)">
+      <g fill={inkFill}>
         <rect
           x="151"
           y="448"
@@ -69,7 +108,7 @@ export function QuestionCrafterLogoSVG({
         width="572"
         height="851"
         rx="120"
-        fill="url(#qc_ink)"
+        fill={inkFill}
       />
       <rect
         x="262"
@@ -77,7 +116,7 @@ export function QuestionCrafterLogoSVG({
         width="470"
         height="749"
         rx="70"
-        fill="#ffffff"
+        fill={palette.paper}
       />
 
       <rect
@@ -86,7 +125,7 @@ export function QuestionCrafterLogoSVG({
         width="347"
         height="34"
         rx="17"
-        fill="#9CA2AE"
+        fill={palette.line}
       />
       <rect
         x="323"
@@ -94,7 +133,7 @@ export function QuestionCrafterLogoSVG({
         width="209"
         height="35"
         rx="17"
-        fill="#9CA2AE"
+        fill={palette.line}
       />
 
       <path
@@ -119,14 +158,14 @@ export function QuestionCrafterLogoSVG({
        Q541.12,527.94 536.95,535.39
        Q532.84,542.78 532.84,551.62
        L532.84,560.53 Z"
-        fill="url(#qc_ink)"
+        fill={inkFill}
       />
 
       <circle
         cx="497"
         cy="690"
         r="44"
-        fill="url(#qc_ink)"
+        fill={inkFill}
       />
 
       <g transform="translate(528 659) rotate(-42)">
@@ -135,18 +174,18 @@ export function QuestionCrafterLogoSVG({
          A40,40 0 0 1 250,0
          A40,40 0 0 1 210,40
          H60 L0,0 Z"
-          fill="url(#qc_ink)"
+          fill={inkFill}
         />
         <rect
           x="96"
           y="-22"
           width="120"
           height="44"
-          fill="#B67B3C"
+          fill={palette.penBody}
         />
         <polygon
           points="8,0 60,-32 60,32"
-          fill="#F6D562"
+          fill={palette.penTip}
         />
       </g>
     </svg>

@@ -22,28 +22,28 @@ export function ToolCalls({
         return (
           <div
             key={idx}
-            className="overflow-hidden rounded-lg border border-gray-200"
+            className="border-border overflow-hidden rounded-lg border"
           >
-            <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
-              <h3 className="font-medium text-gray-900">
+            <div className="bg-muted/50 border-border border-b px-4 py-2">
+              <h3 className="text-foreground font-medium">
                 {tc.name}
                 {tc.id && (
-                  <code className="ml-2 rounded bg-gray-100 px-2 py-1 text-sm">
+                  <code className="bg-muted ml-2 rounded px-2 py-1 text-sm">
                     {tc.id}
                   </code>
                 )}
               </h3>
             </div>
             {hasArgs ? (
-              <table className="min-w-full divide-y divide-gray-200">
-                <tbody className="divide-y divide-gray-200">
+              <table className="divide-border min-w-full divide-y">
+                <tbody className="divide-border divide-y">
                   {Object.entries(args).map(([key, value], argIdx) => (
                     <tr key={argIdx}>
-                      <td className="px-4 py-2 text-sm font-medium whitespace-nowrap text-gray-900">
+                      <td className="text-foreground px-4 py-2 text-sm font-medium whitespace-nowrap">
                         {key}
                       </td>
-                      <td className="px-4 py-2 text-sm text-gray-500">
-                        <pre className="max-h-[320px] overflow-auto rounded bg-white px-3 py-2 font-mono text-sm text-gray-800 whitespace-pre-wrap break-words">
+                      <td className="text-muted-foreground px-4 py-2 text-sm">
+                        <pre className="bg-card text-card-foreground border-border max-h-[320px] overflow-auto rounded border px-3 py-2 font-mono text-sm break-words whitespace-pre-wrap">
                           {isComplexValue(value)
                             ? JSON.stringify(value, null, 4)
                             : String(value)}
@@ -93,28 +93,28 @@ export function ToolResult({ message }: { message: ToolMessage }) {
 
   return (
     <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
-      <div className="overflow-hidden rounded-lg border border-gray-200">
-        <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
+      <div className="border-border overflow-hidden rounded-lg border">
+        <div className="bg-muted/50 border-border border-b px-4 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             {message.name ? (
-              <h3 className="font-medium text-gray-900">
+              <h3 className="text-foreground font-medium">
                 Tool Result:{" "}
-                <code className="rounded bg-gray-100 px-2 py-1">
+                <code className="bg-muted rounded px-2 py-1">
                   {message.name}
                 </code>
               </h3>
             ) : (
-              <h3 className="font-medium text-gray-900">Tool Result</h3>
+              <h3 className="text-foreground font-medium">Tool Result</h3>
             )}
             {message.tool_call_id && (
-              <code className="ml-2 rounded bg-gray-100 px-2 py-1 text-sm">
+              <code className="bg-muted ml-2 rounded px-2 py-1 text-sm">
                 {message.tool_call_id}
               </code>
             )}
           </div>
         </div>
         <motion.div
-          className="min-w-full bg-gray-100"
+          className="bg-muted/50 min-w-full"
           initial={false}
           animate={{ height: "auto" }}
           transition={{ duration: 0.3 }}
@@ -131,9 +131,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.2 }}
               >
-                <pre
-                  className="max-h-[400px] overflow-auto rounded bg-white px-3 py-2 font-mono text-sm text-gray-800 whitespace-pre-wrap break-words"
-                >
+                <pre className="bg-card text-card-foreground border-border max-h-[400px] overflow-auto rounded border px-3 py-2 font-mono text-sm break-words whitespace-pre-wrap">
                   {displayedContent}
                 </pre>
               </motion.div>
@@ -142,7 +140,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
           {shouldTruncate && (
             <motion.button
               onClick={() => setIsExpanded(!isExpanded)}
-              className="flex w-full cursor-pointer items-center justify-center border-t-[1px] border-gray-200 py-2 text-gray-500 transition-all duration-200 ease-in-out hover:bg-gray-50 hover:text-gray-600"
+              className="text-muted-foreground hover:text-foreground border-border hover:bg-muted flex w-full cursor-pointer items-center justify-center border-t-[1px] py-2 transition-all duration-200 ease-in-out"
               initial={{ scale: 1 }}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}

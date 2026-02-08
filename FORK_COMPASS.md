@@ -7,6 +7,7 @@ _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 This document is a high-detail map of how this fork diverges from the upstream Agent Chat UI. It is designed so a new developer can quickly understand what was customized, why it exists, and where to edit it.
 
 ## Table of Contents
+
 - [1) Executive Summary](#1-executive-summary)
 - [2) Diff Snapshot (Upstream vs Fork)](#2-diff-snapshot-upstream-vs-fork)
 - [2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)](#21-recent-fork-changes-since-upstream-sync-2026-01-22)
@@ -25,27 +26,33 @@ This document is a high-detail map of how this fork diverges from the upstream A
 ---
 
 ## 1) Executive Summary
+
 This fork focuses on **efficient multimodal uploads, IAP-backed auth for direct LangGraph calls, OpenAI-compatible PDF handling, deployment readiness, and a few UX tweaks**. The biggest architectural changes are a new **server-side upload pipeline** (GCS + optional OpenAI Files) and a **frontend token mint endpoint** that validates IAP headers and issues LangGraph JWTs so the browser can call LangGraph directly.
 
 Key differences in one sentence:
+
 - **Uploads now go to GCS first (and optionally OpenAI), IAP JWTs are validated and exchanged for LangGraph JWTs, content blocks are URL/ID-based, and the UI and submission configs were adjusted for reliability and UX.**
-Recent post-sync changes (after 2026-01-22) include **re-enabling thread history list**, **removing assistant/graph gating for history (owner-only)**, **removing stream health polling**, **removing stream auto-reconnect**, and **documentation updates**.
+  Recent post-sync changes (after 2026-01-22) include **re-enabling thread history list**, **removing assistant/graph gating for history (owner-only)**, **removing stream health polling**, **removing stream auto-reconnect**, and **documentation updates**.
 
 ---
 
 ## 2) Diff Snapshot (Upstream vs Fork)
+
 - **Upstream status:** 0 commits behind
 - **Fork status:** 47 commits ahead
 - **Files changed vs upstream:** 52
 - **Net diff vs upstream:** +4952 / -595 lines
 
 Tracking anchor commits:
+
 - **Fork HEAD:** `33bdc62`
 - **Upstream main:** `1a0e8af`
 
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+
+- 2026-02-08: Add full light/dark theme support with persistent toggle UX (`next-themes`) in setup and chat headers, migrate core chat/history/tool-call/agent-inbox surfaces to semantic theme tokens, and add a dedicated dark variant for the Question Crafter logo. Files: `src/app/layout.tsx`, `src/components/theme/theme-provider.tsx`, `src/components/theme/theme-toggle.tsx`, `src/components/icons/question-crafter.tsx`, `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/messages/tool-calls.tsx`, `src/components/thread/messages/generic-interrupt.tsx`, `src/components/thread/MultimodalPreview.tsx`, `src/components/thread/markdown-styles.css`, `src/components/thread/agent-inbox/index.tsx`, `src/components/thread/agent-inbox/components/state-view.tsx`, `src/components/thread/agent-inbox/components/thread-actions-view.tsx`, `src/components/thread/agent-inbox/components/inbox-item-input.tsx`, `src/components/thread/agent-inbox/components/thread-id.tsx`, `src/components/thread/agent-inbox/components/tool-call-table.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-08: Stabilize final assistant streaming after intermediate/tool activity by preventing same-tail-message regressions during stream-to-history handoff. Added a non-regressive tail AI snapshot hook and Playwright continuity coverage. Files: `src/hooks/use-stable-stream-messages.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `tests/final-stream-continuity.spec.ts`, `FORK_COMPASS.md`.
 - 2026-02-08: Switch to local Inter font assets via `@fontsource/inter` to avoid build-time Google Fonts fetch failures in Docker builds. Files: `package.json`, `pnpm-lock.yaml`, `src/app/layout.tsx`, `src/app/globals.css`.
 - 2026-02-07: Remove logo background fill for transparent assets (no square background in UI). Files: `public/question-crafter-logo.svg`, `public/logo.svg`, `public/question-crafter-logo.png`, `src/components/icons/question-crafter.tsx`, `src/app/favicon.ico`.
@@ -79,23 +86,28 @@ Tracking anchor commits:
 ## 3) Customization Map (by area)
 
 ### 3.1 Upload Pipeline (GCS + OpenAI Files)
+
 **What changed:** Uploads are handled server-side, stored in GCS, and optionally forwarded to OpenAI Files API for PDFs when `MODEL_PROVIDER=OPENAI`.
 
 **Why:**
+
 - Avoids large base64 payloads in messages.
 - Makes PDFs OpenAI-compatible using file IDs (LangChain converter rejects URL-based `file` blocks for OpenAI).
 - Keeps upload logic centralized with size validation and metadata handling.
 
 **Primary files:**
+
 - `src/app/api/upload/route.ts`
 - `src/app/api/openai/upload/route.ts`
 
 **Key behaviors:**
+
 - `/api/upload` accepts multipart `file`, enforces 100MB max, uploads to GCS, and returns `{ gsUrl, httpsUrl, openaiFileId?, ... }`.
 - When `MODEL_PROVIDER=OPENAI` and file is PDF, server uploads to OpenAI Files API in-memory and returns `openaiFileId`.
 - `/api/openai/upload` supports URL-based OpenAI file uploads and returns file metadata to the client.
 
 **Operational knobs:**
+
 - `GCS_BUCKET_NAME` (server)
 - `MODEL_PROVIDER` and `NEXT_PUBLIC_MODEL_PROVIDER`
 - `OPENAI_API_KEY` and `OPENAI_FILES_*`
@@ -103,6 +115,7 @@ Tracking anchor commits:
 ---
 
 #### 3.1.1 Implementation Notes & Limits
+
 - **Size cap:** 100MB enforced twice (file size + buffer length). Returns `413` with `{ max_bytes, content_length }`.
 - **In-memory upload:** Files are read once into memory and uploaded to GCS via `file.save(...)` with `resumable: false`.
 - **Uniform Bucket-Level Access (UBLA):** Object ACLs are not set. Public access must be handled at the bucket IAM policy, or use signed URLs.
@@ -114,15 +127,18 @@ Tracking anchor commits:
 ---
 
 ### 3.2 Multimodal Content Blocks & Previews
+
 **What changed:** The client now constructs **URL/ID-based blocks** instead of base64 for images/PDFs. UI previews handle URL-based images and ID-based PDFs.
 
 **Primary files:**
+
 - `src/lib/multimodal-utils.ts`
 - `src/hooks/use-file-upload.tsx`
 - `src/components/thread/MultimodalPreview.tsx`
 - `src/components/thread/ContentBlocksPreview.tsx`
 
 **Key behaviors:**
+
 - `fileToContentBlock` calls `/api/upload`, then creates:
   - **Images:** `{ type: "image", source_type: "url", url: httpsUrl }`
   - **PDFs (OpenAI):** `{ type: "file", source_type: "id", id: openaiFileId }`
@@ -133,9 +149,11 @@ Tracking anchor commits:
 ---
 
 ### 3.3 Thread Submission Behavior (recursion + disconnects)
+
 **What changed:** Thread submissions pass a recursion limit and keep the run alive on disconnect.
 
 **Primary files:**
+
 - `src/lib/constants.ts`
 - `src/components/thread/index.tsx`
 - `src/components/thread/messages/human.tsx`
@@ -143,6 +161,7 @@ Tracking anchor commits:
 - `src/providers/Stream.tsx`
 
 **Key behaviors:**
+
 - `DEFAULT_AGENT_RECURSION_LIMIT` is read from `NEXT_PUBLIC_AGENT_RECURSION_LIMIT` (fallback 50).
 - All `thread.submit` calls include:
   - `config: { recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT }`
@@ -152,9 +171,11 @@ Tracking anchor commits:
 ---
 
 ### 3.4 UX Polish & Rendering Tweaks
+
 **What changed:** Small but important UX changes, especially around uploads and tool-call formatting.
 
 **Primary files:**
+
 - `src/hooks/use-file-upload.tsx`
 - `src/components/thread/index.tsx`
 - `src/components/thread/history/index.tsx`
@@ -167,6 +188,7 @@ Tracking anchor commits:
 - `src/components/thread/messages/human.tsx`
 
 **Key behaviors:**
+
 - Upload flow now exposes `isUploading` and disables inputs while files upload.
 - Upload label shows spinner + “Uploading...”
 - Tool call results render in scrollable `<pre>` blocks with prettier JSON formatting.
@@ -179,6 +201,9 @@ Tracking anchor commits:
 - Tail AI message rendering now applies a monotonic guard for the active thread/branch so final assistant text does not shrink if SDK history refetch temporarily returns a shorter snapshot than live stream output.
 - Benign React `#185` stream errors are filtered from the generic run-error toast path to avoid false failure alerts for users.
 - Header/setup branding now uses `Question Crafter` title text with the fork logo.
+- App-wide theme switching now uses `next-themes` with a persistent light/dark toggle in the setup and main chat headers.
+- The `Question Crafter` logo now supports explicit light/dark variants and switches automatically with active theme.
+- Core chat/history/tool-call/interrupt/agent-inbox surfaces were migrated off hard-coded light grays to semantic theme tokens for readable dark mode.
 - Thread history rows now include a contextual rename action (pencil icon with inline editor); saving writes `thread_title` metadata through the LangGraph SDK `threads.update(...)` API.
 - Rename inline editor uses compact icon actions (`check` / `close`) instead of text buttons to reduce row width.
 - History label resolution now prioritizes user-defined thread titles (`thread_title`, then `title`) before fallback preview text.
@@ -191,9 +216,11 @@ Tracking anchor commits:
 ---
 
 ### 3.5 Configuration & Deployment
+
 **What changed:** Build/deploy setup now supports **direct LangGraph calls with IAP-backed JWT auth**, plus GCS uploads and standalone Next output.
 
 **Primary files:**
+
 - `next.config.mjs`
 - `.env.example`
 - `Dockerfile`
@@ -203,6 +230,7 @@ Tracking anchor commits:
 - `src/lib/iap-keys.ts`
 
 **Key behaviors:**
+
 - Next output set to `standalone` for containerized deploys.
 - `serverActions.bodySizeLimit` increased to `100mb`.
 - `images.remotePatterns` allows `storage.googleapis.com` for URL-based image previews.
@@ -215,9 +243,11 @@ Tracking anchor commits:
 ---
 
 ### 3.6 Documentation Added
+
 **What changed:** Added internal docs to explain uploads and deployment.
 
 **Primary files:**
+
 - `FORK_COMPASS.md` — this guide (includes upload refactor details).
 - `DEPLOYMENT_GUIDE.md` — multi-arch build + Cloud Run steps.
 - `README.md` — updated env vars and pointers to new docs.
@@ -226,24 +256,29 @@ Tracking anchor commits:
 ---
 
 ## 4) File Navigation Index
+
 Use this as a jump list when editing or debugging:
 
 **Uploads & provider logic**
+
 - `src/app/api/upload/route.ts`
 - `src/app/api/openai/upload/route.ts`
 - `src/lib/multimodal-utils.ts`
 - `src/hooks/use-file-upload.tsx`
 
 **UI preview components**
+
 - `src/components/thread/MultimodalPreview.tsx`
 - `src/components/thread/ContentBlocksPreview.tsx`
 
 **Auth & tokens**
+
 - `src/app/api/auth/token/route.ts`
 - `src/lib/auth-token.ts`
 - `src/lib/iap-keys.ts`
 
 **Thread submission and run behavior**
+
 - `src/components/thread/index.tsx`
 - `src/components/thread/messages/human.tsx`
 - `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`
@@ -251,39 +286,49 @@ Use this as a jump list when editing or debugging:
 - `src/providers/Stream.tsx`
 
 **UI formatting tweaks**
+
 - `src/components/thread/messages/tool-calls.tsx`
 - `src/components/thread/messages/ai.tsx`
 - `src/components/thread/history/index.tsx`
+- `src/components/theme/theme-provider.tsx`
+- `src/components/theme/theme-toggle.tsx`
 - `src/hooks/use-thread-last-seen.ts`
 - `src/hooks/use-stable-stream-messages.ts`
 - `src/lib/thread-metadata.ts`
 - `src/lib/thread-activity.ts`
 
 **E2E coverage**
+
 - `tests/final-stream-continuity.spec.ts`
 
 **Config, build, deploy**
+
 - `next.config.mjs`
 - `.env.example`
 - `Dockerfile`
 - `package.json`
 
 **Docs**
+
 - `FORK_COMPASS.md`
 - `DEPLOYMENT_GUIDE.md`
 - `README.md`
 - `AGENTS.md`
 
 **Branding assets**
+
 - `public/logo.svg`
 - `public/question-crafter-logo.svg`
 - `public/question-crafter-logo.png`
 - `public/branding/question-crafter-icon-option-1-collab.svg`
+- `src/components/icons/question-crafter.tsx`
 
 ---
 
 ## 5) Fork-only Commit Log
+
 Commits unique to this fork (upstream/main..HEAD):
+
 - `33bdc62` docs: refresh fork compass snapshot
 - `4b10f0c` fix(branding): remove logo background fill
 - `e8d8ed8` docs: refresh fork compass after logo sync
@@ -334,6 +379,7 @@ Commits unique to this fork (upstream/main..HEAD):
 ---
 
 ## 6) Notes / Known Deviations
+
 - **Polling removed:** A stream health polling hook was added and later removed. Current behavior relies on `onDisconnect: "continue"`.
 - **Docs consolidated:** `CODE_CHANGES.md` was removed in favor of this document.
 - **Tracked build artifact:** `tsconfig.tsbuildinfo` is currently tracked in git (from upstream diff list). Consider removing if you want a clean repo.

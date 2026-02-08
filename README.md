@@ -64,6 +64,9 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > Intermediate reasoning/tool activity is now surfaced through a single `Intermediate Step` launcher in chat. Clicking it opens the right artifact pane with ordered thinking, tool calls, and tool results (including streaming/parallel tool-call updates).
 > While a run is still streaming, the `Intermediate Step` header shows live status and a spinner.
 
+> [!NOTE]
+> The chat now includes a light/dark mode toggle in the top-right of the UI (and on the setup screen). Theme preference is persisted via `next-themes`.
+
 ## Environment Variables
 
 You can bypass the initial setup form by setting the following environment variables:
@@ -96,18 +99,19 @@ To use these variables:
 
 When these environment variables are set, the application will use them instead of showing the setup form.
 
-> [!NOTE]
-> `NEXT_PUBLIC_API_URL` should point directly at your LangGraph deployment (not the Next.js `/api` route).
+> [!NOTE] > `NEXT_PUBLIC_API_URL` should point directly at your LangGraph deployment (not the Next.js `/api` route).
 
 > [!NOTE]
 > When `NEXT_PUBLIC_AUTH_MODE=iap`, the UI calls `/api/auth/token` to validate IAP headers and mint a LangGraph JWT for `Authorization: Bearer <token>`.
 
 > [!NOTE]
 > For image/PDF uploads, this project now:
+>
 > - Sends images as URL content blocks for small client payloads and fast previews.
 > - Sends PDFs as file ID blocks when using OpenAI (to satisfy LangChain’s OpenAI converter), or as URL blocks for other providers. See FORK_COMPASS.md for details.
 
 ### Additional Docs
+
 - Fork customization guide (includes upload refactor details): `FORK_COMPASS.md`
 - Build, push, and Cloud Run deployment: `DEPLOYMENT_GUIDE.md`
 

@@ -33,6 +33,8 @@ import {
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 import { THREAD_HISTORY_PAGE_SIZE, useThreads } from "./Thread";
 import { toast } from "sonner";
+import { useTheme } from "next-themes";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 
 export type StateType = { messages: Message[]; ui?: UIMessage[] };
 
@@ -199,6 +201,7 @@ const DEFAULT_ASSISTANT_ID = "agent";
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
+  const { resolvedTheme } = useTheme();
   const isIapAuth = isIapAuthMode();
   // Get environment variables
   const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
@@ -229,15 +232,20 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // Determine final values to use, prioritizing URL params then env vars
   const finalApiUrl = apiUrl || envApiUrl;
   const finalAssistantId = assistantId || envAssistantId;
+  const logoVariant = resolvedTheme === "dark" ? "dark" : "light";
 
   // Show the form if we: don't have an API URL, or don't have an assistant ID
   if (!finalApiUrl || !finalAssistantId) {
     return (
-      <div className="flex min-h-screen w-full items-center justify-center p-4">
+      <div className="relative flex min-h-screen w-full items-center justify-center p-4">
+        <ThemeToggle className="absolute top-4 right-4 z-10" />
         <div className="animate-in fade-in-0 zoom-in-95 bg-background flex max-w-3xl flex-col rounded-lg border shadow-lg">
           <div className="mt-14 flex flex-col gap-2 border-b p-6">
             <div className="flex flex-col items-start gap-2">
-              <QuestionCrafterLogoSVG className="h-9" />
+              <QuestionCrafterLogoSVG
+                className="h-9"
+                variant={logoVariant}
+              />
               <h1 className="text-xl font-semibold tracking-tight">
                 Question Crafter
               </h1>

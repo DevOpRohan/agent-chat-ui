@@ -39,6 +39,8 @@ import {
   ArtifactTitle,
   useArtifactContext,
 } from "./artifact";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { useTheme } from "next-themes";
 
 function getErrorMessage(error: unknown): string | undefined {
   if (!error || typeof error !== "object") return undefined;
@@ -84,7 +86,9 @@ function buildThreadPreview(input: string, attachmentCount: number): string {
   }
 
   if (attachmentCount > 0) {
-    return attachmentCount === 1 ? "1 attachment" : `${attachmentCount} attachments`;
+    return attachmentCount === 1
+      ? "1 attachment"
+      : `${attachmentCount} attachments`;
   }
 
   return "New thread";
@@ -132,6 +136,7 @@ function ScrollToBottom(props: { className?: string }) {
 }
 
 export function Thread() {
+  const { resolvedTheme } = useTheme();
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
 
@@ -397,12 +402,13 @@ export function Thread() {
   const hasNoAIOrToolMessages = !displayMessages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
+  const logoVariant = resolvedTheme === "dark" ? "dark" : "light";
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <div className="relative hidden lg:flex">
         <motion.div
-          className="absolute z-20 h-full overflow-hidden border-r bg-white"
+          className="bg-background absolute z-20 h-full overflow-hidden border-r"
           style={{ width: 300 }}
           animate={
             isLargeScreen
@@ -456,7 +462,7 @@ export function Thread() {
               <div>
                 {(!chatHistoryOpen || !isLargeScreen) && (
                   <Button
-                    className="hover:bg-gray-100"
+                    className="hover:bg-accent"
                     variant="ghost"
                     onClick={() => setChatHistoryOpen((p) => !p)}
                   >
@@ -468,6 +474,7 @@ export function Thread() {
                   </Button>
                 )}
               </div>
+              <ThemeToggle />
             </div>
           )}
           {chatStarted && (
@@ -476,7 +483,7 @@ export function Thread() {
                 <div className="absolute left-0 z-10">
                   {(!chatHistoryOpen || !isLargeScreen) && (
                     <Button
-                      className="hover:bg-gray-100"
+                      className="hover:bg-accent"
                       variant="ghost"
                       onClick={() => setChatHistoryOpen((p) => !p)}
                     >
@@ -503,11 +510,15 @@ export function Thread() {
                   <QuestionCrafterLogoSVG
                     width={40}
                     height={40}
+                    variant={logoVariant}
                   />
                   <span className="text-xl font-semibold tracking-tight">
                     Question Crafter
                   </span>
                 </motion.button>
+              </div>
+              <div className="ml-auto">
+                <ThemeToggle />
               </div>
 
               <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
@@ -517,7 +528,7 @@ export function Thread() {
           <StickToBottom className="relative flex-1 overflow-hidden">
             <StickyToBottomContent
               className={cn(
-                "absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-400 [&::-webkit-scrollbar-thumb:hover]:bg-gray-500 [&::-webkit-scrollbar-track]:bg-gray-100/80",
+                "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
                 !chatStarted && "mt-[25vh] flex flex-col items-stretch",
                 chatStarted && "grid grid-rows-[1fr_auto]",
               )}
@@ -560,10 +571,13 @@ export function Thread() {
                 </>
               }
               footer={
-                <div className="sticky bottom-0 flex flex-col items-center gap-8 bg-white">
+                <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 flex flex-col items-center gap-8 backdrop-blur">
                   {!chatStarted && (
                     <div className="flex items-center gap-3">
-                      <QuestionCrafterLogoSVG className="h-10 flex-shrink-0" />
+                      <QuestionCrafterLogoSVG
+                        className="h-10 flex-shrink-0"
+                        variant={logoVariant}
+                      />
                       <h1 className="text-2xl font-semibold tracking-tight">
                         Question Crafter
                       </h1>
@@ -619,12 +633,12 @@ export function Thread() {
                           )}
                           aria-disabled={isUploading}
                         >
-                          <Plus className="size-5 text-gray-600" />
-                          <span className="text-sm text-gray-600">
+                          <Plus className="text-muted-foreground size-5" />
+                          <span className="text-muted-foreground text-sm">
                             Upload PDF or Image
                           </span>
                           {isUploading && (
-                            <span className="ml-2 flex items-center gap-2 text-sm text-gray-600">
+                            <span className="text-muted-foreground ml-2 flex items-center gap-2 text-sm">
                               <LoaderCircle className="h-4 w-4 animate-spin" />
                               Uploading...
                             </span>
@@ -675,12 +689,12 @@ export function Thread() {
               <ArtifactTitle className="truncate overflow-hidden" />
               <button
                 onClick={closeArtifact}
-                className="cursor-pointer"
+                className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
               >
                 <XIcon className="size-5" />
               </button>
             </div>
-            <ArtifactContent className="relative flex-grow overflow-y-scroll pr-1 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-400 [&::-webkit-scrollbar-thumb:hover]:bg-gray-500 [&::-webkit-scrollbar-track]:bg-gray-100/80" />
+            <ArtifactContent className="[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 relative flex-grow overflow-y-scroll pr-1 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent" />
           </div>
         </div>
       </div>
