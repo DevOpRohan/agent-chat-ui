@@ -46,6 +46,7 @@ Tracking anchor commits:
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-08: Stabilize final assistant streaming after intermediate/tool activity by preventing same-tail-message regressions during stream-to-history handoff. Added a non-regressive tail AI snapshot hook and Playwright continuity coverage. Files: `src/hooks/use-stable-stream-messages.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `tests/final-stream-continuity.spec.ts`, `FORK_COMPASS.md`.
 - 2026-02-08: Switch to local Inter font assets via `@fontsource/inter` to avoid build-time Google Fonts fetch failures in Docker builds. Files: `package.json`, `pnpm-lock.yaml`, `src/app/layout.tsx`, `src/app/globals.css`.
 - 2026-02-07: Remove logo background fill for transparent assets (no square background in UI). Files: `public/question-crafter-logo.svg`, `public/logo.svg`, `public/question-crafter-logo.png`, `src/components/icons/question-crafter.tsx`, `src/app/favicon.ico`.
 - 2026-02-07: Sync updated logo SVG across all assets and React icon, regenerate PNG + favicon. Files: `public/question-crafter-logo.svg`, `public/logo.svg`, `public/question-crafter-logo.png`, `src/components/icons/question-crafter.tsx`, `src/app/favicon.ico`.
@@ -157,7 +158,9 @@ Tracking anchor commits:
 - `src/hooks/use-file-upload.tsx`
 - `src/components/thread/index.tsx`
 - `src/components/thread/history/index.tsx`
+- `src/components/thread/messages/ai.tsx`
 - `src/hooks/use-thread-last-seen.ts`
+- `src/hooks/use-stable-stream-messages.ts`
 - `src/lib/thread-metadata.ts`
 - `src/lib/thread-activity.ts`
 - `src/components/thread/messages/tool-calls.tsx`
@@ -173,6 +176,7 @@ Tracking anchor commits:
 - Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
 - Intermediate reasoning/tool content now routes through one `Intermediate Step` launcher in the chat message area and renders full ordered details in the right artifact pane, including tool calls, tool results, and streaming status text.
 - Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
+- Tail AI message rendering now applies a monotonic guard for the active thread/branch so final assistant text does not shrink if SDK history refetch temporarily returns a shorter snapshot than live stream output.
 - Benign React `#185` stream errors are filtered from the generic run-error toast path to avoid false failure alerts for users.
 - Header/setup branding now uses `Question Crafter` title text with the fork logo.
 - Thread history rows now include a contextual rename action (pencil icon with inline editor); saving writes `thread_title` metadata through the LangGraph SDK `threads.update(...)` API.
@@ -248,10 +252,15 @@ Use this as a jump list when editing or debugging:
 
 **UI formatting tweaks**
 - `src/components/thread/messages/tool-calls.tsx`
+- `src/components/thread/messages/ai.tsx`
 - `src/components/thread/history/index.tsx`
 - `src/hooks/use-thread-last-seen.ts`
+- `src/hooks/use-stable-stream-messages.ts`
 - `src/lib/thread-metadata.ts`
 - `src/lib/thread-activity.ts`
+
+**E2E coverage**
+- `tests/final-stream-continuity.spec.ts`
 
 **Config, build, deploy**
 - `next.config.mjs`

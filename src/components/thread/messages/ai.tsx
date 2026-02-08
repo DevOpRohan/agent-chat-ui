@@ -779,15 +779,17 @@ function Interrupt({
 
 export function AssistantMessage({
   message,
+  allMessages,
   isLoading,
   handleRegenerate,
 }: {
   message: Message | undefined;
+  allMessages: Message[];
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
 }) {
   const thread = useStreamContext();
-  const renderedMessages = getRenderableMessages(thread.messages);
+  const renderedMessages = getRenderableMessages(allMessages);
   const currentMessageIndex = message?.id
     ? renderedMessages.findIndex((threadMessage) => threadMessage.id === message.id)
     : -1;

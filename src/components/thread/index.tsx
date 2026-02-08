@@ -32,6 +32,7 @@ import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import { markThreadSeen } from "@/lib/thread-activity";
 import { useThreadBusy } from "@/hooks/use-thread-busy";
+import { useStableStreamMessages } from "@/hooks/use-stable-stream-messages";
 import {
   useArtifactOpen,
   ArtifactContent,
@@ -156,6 +157,11 @@ export function Thread() {
 
   const stream = useStreamContext();
   const messages = stream.messages;
+  const displayMessages = useStableStreamMessages({
+    messages,
+    threadId,
+    branch: stream.branch,
+  });
   const isLoading = stream.isLoading;
   const { markBusy } = useThreadBusy();
   const [loadingThreadId, setLoadingThreadId] = useState<string | null>(null);
@@ -388,7 +394,7 @@ export function Thread() {
   };
 
   const chatStarted = !!threadId || !!messages.length;
-  const hasNoAIOrToolMessages = !messages.find(
+  const hasNoAIOrToolMessages = !displayMessages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
 
@@ -518,7 +524,7 @@ export function Thread() {
               contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
               content={
                 <>
-                  {messages
+                  {displayMessages
                     .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
                     .map((message, index) =>
                       message.type === "human" ? (
@@ -531,6 +537,7 @@ export function Thread() {
                         <AssistantMessage
                           key={message.id || `${message.type}-${index}`}
                           message={message}
+                          allMessages={displayMessages}
                           isLoading={isLoading}
                           handleRegenerate={handleRegenerate}
                         />
@@ -542,6 +549,7 @@ export function Thread() {
                     <AssistantMessage
                       key="interrupt-msg"
                       message={undefined}
+                      allMessages={displayMessages}
                       isLoading={isLoading}
                       handleRegenerate={handleRegenerate}
                     />
