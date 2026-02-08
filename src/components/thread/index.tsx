@@ -30,7 +30,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
-import { markThreadSeen } from "@/lib/thread-activity";
+import { getOrCreateThreadTabId, markThreadSeen } from "@/lib/thread-activity";
 import { useThreadBusy } from "@/hooks/use-thread-busy";
 import { useStableStreamMessages } from "@/hooks/use-stable-stream-messages";
 import {
@@ -41,36 +41,15 @@ import {
 } from "./artifact";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { useTheme } from "next-themes";
-
-function getErrorMessage(error: unknown): string | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const maybeMessage = (error as { message?: unknown }).message;
-  if (typeof maybeMessage === "string") return maybeMessage;
-  return undefined;
-}
-
-function isThreadConflictError(message: string): boolean {
-  const lowered = message.toLowerCase();
-  return (
-    lowered.includes("409") ||
-    lowered.includes("conflict") ||
-    lowered.includes("busy") ||
-    lowered.includes("inflight")
-  );
-}
-
-function isBenignReact185Error(message: string): boolean {
-  const lowered = message.toLowerCase();
-  return (
-    lowered.includes("minified react error #185") ||
-    lowered.includes("/errors/185")
-  );
-}
+import {
+  classifyStreamError,
+  getStreamErrorDetails,
+} from "@/lib/stream-error-classifier";
 
 function showThreadRunningToast() {
   toast("Thread is still running", {
     description:
-      "Please wait for the current response to finish, then send your next message.",
+      "Working on your query and will respond after completion.",
     closeButton: true,
   });
 }
@@ -92,6 +71,12 @@ function buildThreadPreview(input: string, attachmentCount: number): string {
   }
 
   return "New thread";
+}
+
+function isThreadActiveStatus(
+  status: string | null | undefined,
+): status is "busy" {
+  return status === "busy";
 }
 
 function StickyToBottomContent(props: {
@@ -168,12 +153,39 @@ export function Thread() {
     branch: stream.branch,
   });
   const isLoading = stream.isLoading;
-  const { markBusy } = useThreadBusy();
+  const { busyByThreadId, busyOwnerByThreadId, markBusy } = useThreadBusy();
   const [loadingThreadId, setLoadingThreadId] = useState<string | null>(null);
+  const [threadStatus, setThreadStatus] = useState<string | null>(null);
+  const [ownedBusyThreadId, setOwnedBusyThreadId] = useState<string | null>(
+    null,
+  );
   const isCurrentThreadLoading =
     !!threadId && isLoading && loadingThreadId === threadId;
+  const tabId = getOrCreateThreadTabId();
+  const isThreadBusyInAnyTab = !!threadId && !!busyByThreadId[threadId];
+  const isThreadActiveOnServer = isThreadActiveStatus(threadStatus);
+  const isCurrentThreadOwnedByTab =
+    !!threadId && ownedBusyThreadId === threadId;
+  const currentThreadBusyOwnerId = threadId
+    ? busyOwnerByThreadId[threadId]
+    : undefined;
+  const isBusyElsewhereFromLocalSignal =
+    isThreadBusyInAnyTab &&
+    !isCurrentThreadLoading &&
+    (currentThreadBusyOwnerId == null || currentThreadBusyOwnerId !== tabId);
+  const isBusyElsewhereFromServerSignal =
+    !isLoading &&
+    !isThreadBusyInAnyTab &&
+    !isCurrentThreadOwnedByTab &&
+    !isCurrentThreadLoading &&
+    isThreadActiveOnServer;
+  const isCurrentThreadBusyElsewhere =
+    isBusyElsewhereFromLocalSignal || isBusyElsewhereFromServerSignal;
+  const shouldShowRunningQueryMessage = isCurrentThreadBusyElsewhere;
 
   const lastError = useRef<string | undefined>(undefined);
+  const previouslyObservedBusyThreadId = useRef<string | null>(null);
+  const [runningDotsCount, setRunningDotsCount] = useState(1);
 
   const setThreadId = (id: string | null) => {
     _setThreadId(id);
@@ -184,6 +196,96 @@ export function Thread() {
   };
 
   useEffect(() => {
+    if (!threadId) {
+      setThreadStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const pollThreadStatus = async () => {
+      try {
+        const currentThread = await stream.client.threads.get(threadId);
+        if (cancelled) return;
+        setThreadStatus((prev) =>
+          prev === currentThread.status ? prev : currentThread.status,
+        );
+        const shouldPollFast =
+          isThreadActiveStatus(currentThread.status) ||
+          isLoading ||
+          isThreadBusyInAnyTab;
+        timeoutId = window.setTimeout(
+          pollThreadStatus,
+          shouldPollFast ? 2500 : 15000,
+        );
+      } catch {
+        if (cancelled) return;
+        timeoutId = window.setTimeout(pollThreadStatus, 5000);
+      }
+    };
+
+    void pollThreadStatus();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    threadId,
+    stream.client,
+    isLoading,
+    isThreadBusyInAnyTab,
+    isCurrentThreadOwnedByTab,
+  ]);
+
+  useEffect(() => {
+    if (!threadId) {
+      previouslyObservedBusyThreadId.current = null;
+      return;
+    }
+
+    if (
+      previouslyObservedBusyThreadId.current &&
+      previouslyObservedBusyThreadId.current !== threadId
+    ) {
+      previouslyObservedBusyThreadId.current = null;
+    }
+
+    if (isCurrentThreadBusyElsewhere) {
+      previouslyObservedBusyThreadId.current = threadId;
+      return;
+    }
+
+    if (
+      previouslyObservedBusyThreadId.current === threadId &&
+      !isLoading &&
+      threadStatus !== null &&
+      !isThreadActiveStatus(threadStatus)
+    ) {
+      previouslyObservedBusyThreadId.current = null;
+      window.location.reload();
+    }
+  }, [threadId, isCurrentThreadBusyElsewhere, threadStatus, isLoading]);
+
+  useEffect(() => {
+    if (!shouldShowRunningQueryMessage) {
+      setRunningDotsCount(1);
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setRunningDotsCount((prev) => (prev % 3) + 1);
+    }, 350);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [shouldShowRunningQueryMessage]);
+
+  useEffect(() => {
     if (!isLoading) {
       if (loadingThreadId) {
         markBusy(loadingThreadId, false);
@@ -192,11 +294,49 @@ export function Thread() {
       return;
     }
 
-    if (!loadingThreadId && threadId) {
-      setLoadingThreadId(threadId);
-      markBusy(threadId, true);
+    if (!loadingThreadId && threadId && isLoading) {
+      const ownerTabId = busyOwnerByThreadId[threadId];
+      if (!ownerTabId || ownerTabId === tabId) {
+        setLoadingThreadId(threadId);
+        setOwnedBusyThreadId(threadId);
+        markBusy(threadId, true, tabId ?? undefined);
+      }
     }
-  }, [isLoading, loadingThreadId, markBusy, threadId]);
+  }, [
+    isLoading,
+    loadingThreadId,
+    markBusy,
+    threadId,
+    busyOwnerByThreadId,
+    tabId,
+  ]);
+
+  useEffect(() => {
+    if (!threadId) return;
+    if (!busyByThreadId[threadId]) return;
+    if (isLoading) return;
+    if (threadStatus === null || threadStatus === "busy") return;
+
+    markBusy(threadId, false);
+    setLoadingThreadId((prev) => (prev === threadId ? null : prev));
+    setOwnedBusyThreadId((prev) => (prev === threadId ? null : prev));
+  }, [threadId, busyByThreadId, isLoading, threadStatus, markBusy]);
+
+  useEffect(() => {
+    if (!threadId) {
+      setOwnedBusyThreadId(null);
+      return;
+    }
+
+    if (
+      ownedBusyThreadId === threadId &&
+      !isLoading &&
+      threadStatus !== null &&
+      !isThreadActiveStatus(threadStatus)
+    ) {
+      setOwnedBusyThreadId(null);
+    }
+  }, [threadId, ownedBusyThreadId, isLoading, threadStatus]);
 
   useEffect(() => {
     if (!stream.error) {
@@ -204,19 +344,34 @@ export function Thread() {
       return;
     }
     try {
-      const message = getErrorMessage(stream.error);
-      if (!message || lastError.current === message) {
-        // Message has already been logged. do not modify ref, return early.
+      const { name, message } = getStreamErrorDetails(stream.error);
+      const errorKey = `${threadId ?? "no-thread"}::${name ?? ""}::${message ?? ""}`;
+      if (lastError.current === errorKey) {
+        return;
+      }
+      lastError.current = errorKey;
+
+      const classification = classifyStreamError(stream.error, {
+        hasInterrupt: !!stream.interrupt,
+      });
+
+      if (classification === "benign_react_185") {
+        console.warn(
+          "Ignoring benign React #185 stream error",
+          message ?? name ?? stream.error,
+        );
         return;
       }
 
-      // Message is defined, and it has not been logged yet. Save it, and send the error
-      lastError.current = message;
-      if (isBenignReact185Error(message)) {
-        console.warn("Ignoring benign React #185 stream error", message);
+      if (classification === "expected_interrupt_or_breakpoint") {
+        console.info("Ignoring expected interrupt/breakpoint stream error", {
+          name,
+          message,
+        });
         return;
       }
-      if (isThreadConflictError(message)) {
+
+      if (classification === "conflict") {
         toast("Thread already has an active run", {
           description:
             "Your message was not sent. Please retry after the current run completes.",
@@ -224,10 +379,12 @@ export function Thread() {
         });
         return;
       }
+
+      const detailMessage = message ?? name ?? "Unknown stream error";
       toast.error("An error occurred. Please try again.", {
         description: (
           <p>
-            <strong>Error:</strong> <code>{message}</code>
+            <strong>Error:</strong> <code>{detailMessage}</code>
           </p>
         ),
         richColors: true,
@@ -236,7 +393,7 @@ export function Thread() {
     } catch {
       // no-op
     }
-  }, [stream.error]);
+  }, [stream.error, stream.interrupt, threadId]);
 
   // TODO: this should be part of the useStream hook
   const prevMessageLength = useRef(0);
@@ -264,6 +421,11 @@ export function Thread() {
   const shouldBlockWhileCurrentThreadBusy = async (
     source: "submit" | "regenerate",
   ): Promise<boolean> => {
+    if (isCurrentThreadBusyElsewhere) {
+      showThreadRunningToast();
+      return true;
+    }
+
     if (isCurrentThreadLoading) {
       showThreadRunningToast();
       return true;
@@ -273,7 +435,7 @@ export function Thread() {
 
     try {
       const currentThread = await stream.client.threads.get(threadId);
-      if (currentThread.status === "busy") {
+      if (isThreadActiveStatus(currentThread.status)) {
         showThreadRunningToast();
         return true;
       }
@@ -340,7 +502,7 @@ export function Thread() {
 
     if (threadId) {
       setLoadingThreadId(threadId);
-      markBusy(threadId, true);
+      markBusy(threadId, true, tabId ?? undefined);
     }
 
     void stream.submit(
@@ -383,7 +545,7 @@ export function Thread() {
     setFirstTokenReceived(false);
     if (threadId) {
       setLoadingThreadId(threadId);
-      markBusy(threadId, true);
+      markBusy(threadId, true, tabId ?? undefined);
     }
     void stream.submit(undefined, {
       config: {
@@ -586,6 +748,22 @@ export function Thread() {
 
                   <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
 
+                  {shouldShowRunningQueryMessage ? (
+                    <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
+                      <p
+                        className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
+                        aria-live="polite"
+                      >
+                        Working on your query
+                        <span
+                          className="ml-1 inline-block w-4 text-left"
+                          aria-hidden="true"
+                        >
+                          {".".repeat(runningDotsCount)}
+                        </span>
+                      </p>
+                    </div>
+                  ) : null}
                   <div
                     ref={dropRef}
                     className={cn(
@@ -668,6 +846,7 @@ export function Thread() {
                             className="ml-auto shadow-md transition-all"
                             disabled={
                               isCurrentThreadLoading ||
+                              isCurrentThreadBusyElsewhere ||
                               isUploading ||
                               (!input.trim() && contentBlocks.length === 0)
                             }

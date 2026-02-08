@@ -52,6 +52,9 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > This fork rejects concurrent sends on the **same thread** while a run is active. The UI shows a warning toast and keeps the current draft so the user can retry after completion.
 
 > [!NOTE]
+> If you open the same active thread in another tab, that tab enters observer mode while the run is in progress: send stays disabled for that thread, draft text is preserved, expected breakpoint/interrupt/cancel stream signals are not shown as fatal error toasts, and the composer shows a reload hint for stale cross-tab/cross-browser/device sync states.
+
+> [!NOTE]
 > Thread history refresh uses lightweight thread search fields, lazy-loads history in 20-thread batches as you scroll (with a "Loading more history..." spinner), and pauses polling when the history panel is closed or the browser tab is hidden.
 
 > [!NOTE]

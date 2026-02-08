@@ -1,7 +1,7 @@
 # Fork Compass — Agent Chat UI Customizations
 
 _Last updated: 2026-02-08_  
-_Branch: codex/dark_mode_exp_branch_  
+_Branch: codex/fix-cross-tab-breakpoint-observer_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
 This document is a high-detail map of how this fork diverges from the upstream Agent Chat UI. It is designed so a new developer can quickly understand what was customized, why it exists, and where to edit it.
@@ -39,19 +39,20 @@ Key differences in one sentence:
 ## 2) Diff Snapshot (Upstream vs Fork)
 
 - **Upstream status:** 0 commits behind
-- **Fork status:** 53 commits ahead
-- **Files changed vs upstream:** 67
-- **Net diff vs upstream:** +5603 / -692 lines
+- **Fork status:** 55 commits ahead
+- **Files changed vs upstream:** 68
+- **Net diff vs upstream:** +6292 / -958 lines
 
 Tracking anchor commits:
 
-- **Fork HEAD:** `44fe615`
+- **Fork HEAD:** `2d99f2e`
 - **Upstream main:** `1a0e8af`
 
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
+- 2026-02-08: Add cross-tab observer mode for active threads and harden stream error classification so expected interrupt/breakpoint signals (including human breakpoint and cancel/abort-style errors) do not show generic fatal toasts. Active-run state in another tab now keeps draft text editable while disabling send for that thread, observer lock release aligns to active `busy` status so it clears after cancellation/interrupt transitions, and composer UX now includes explicit fallback copy plus a reload action for stale cross-tab/cross-browser/device sync. Running-thread submit/regenerate blocking toast behavior remains intact and is asserted in E2E. Files: `src/lib/stream-error-classifier.ts`, `src/components/thread/index.tsx`, `tests/cross-tab-observer.spec.ts`, `tests/submit-guard.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-08: Add per-expression KaTeX fallback sanitization so malformed formulas render as plain text (instead of red `katex-error` output), set `errorColor: "currentColor"` as a secondary guard, and make markdown render-boundary fallback GFM-only (no KaTeX) for full fail-open behavior. Files: `src/components/thread/markdown-text.tsx`, `FORK_COMPASS.md`.
 - 2026-02-08: Optimize live stream markdown performance by adding a fast-path renderer for actively streaming assistant tail messages (skip async Shiki highlighting and math transforms during token flow, then restore full render after stream completion). This reduces UI stalls from partial LaTeX/code while preserving final rich formatting. Files: `src/components/thread/markdown-text.tsx`, `src/components/thread/messages/ai.tsx`, `FORK_COMPASS.md`.
 - 2026-02-08: Harden markdown streaming render path against malformed/incomplete LaTeX by adding a fail-open error boundary around async markdown highlighting and forcing KaTeX non-throwing mode (`throwOnError: false`, `strict: "ignore"`). Streaming now falls back to safe markdown rendering instead of stalling the UI when formula parsing fails mid-stream. Files: `src/components/thread/markdown-text.tsx`, `FORK_COMPASS.md`.
@@ -191,6 +192,7 @@ Tracking anchor commits:
 - `src/hooks/use-stable-stream-messages.ts`
 - `src/lib/thread-metadata.ts`
 - `src/lib/thread-activity.ts`
+- `src/lib/stream-error-classifier.ts`
 - `src/components/thread/messages/tool-calls.tsx`
 - `src/components/thread/messages/human.tsx`
 
@@ -202,6 +204,7 @@ Tracking anchor commits:
 - Human message bubble alignment adjusted (removed `text-right`).
 - Composer now rejects same-thread sends while the thread is still running and shows a warning toast; draft text/files are preserved for retry.
 - Conflict-like run errors (busy/conflict/409) surface with a dedicated “active run” toast instead of a generic error message.
+- When the same thread is open in another tab while a run is active, the non-owning tab enters observer mode for that thread: send is disabled, draft typing remains enabled, expected interrupt/breakpoint/cancel stream signals are suppressed from generic fatal error toasts, and the composer offers a reload action to recover from stale sync across tabs/browsers/devices.
 - Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
 - Intermediate reasoning/tool content now routes through one `Intermediate Step` launcher in the chat message area and renders full ordered details in the right artifact pane, including tool calls, tool results, and streaming status text.
 - Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
@@ -314,6 +317,8 @@ Use this as a jump list when editing or debugging:
 **E2E coverage**
 
 - `tests/final-stream-continuity.spec.ts`
+- `tests/cross-tab-observer.spec.ts`
+- `tests/submit-guard.spec.ts`
 
 **Config, build, deploy**
 

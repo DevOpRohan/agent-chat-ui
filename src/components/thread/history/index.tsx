@@ -85,6 +85,12 @@ function getThreadSignature(thread: Thread): string {
   ].join("|");
 }
 
+function isThreadActiveStatus(
+  status: Thread["status"] | string | null | undefined,
+): boolean {
+  return status === "busy" || status === "interrupted";
+}
+
 function areThreadListsEquivalent(prev: Thread[], next: Thread[]): boolean {
   if (prev.length !== next.length) return false;
   for (let idx = 0; idx < prev.length; idx += 1) {
@@ -155,7 +161,8 @@ function ThreadList({
         const itemText = getThreadListLabel(t);
         const updatedAtMs = getThreadUpdatedAtMs(t);
         const lastSeenMs = lastSeenByThreadId[t.thread_id] ?? baselineMs;
-        const isBusy = busyByThreadId[t.thread_id] || t.status === "busy";
+        const isBusy =
+          busyByThreadId[t.thread_id] || isThreadActiveStatus(t.status);
         const isActive = t.thread_id === currentThreadId;
         const isUnseen =
           !isBusy &&
@@ -502,7 +509,8 @@ export default function ThreadHistory() {
     () =>
       threads.some(
         (thread) =>
-          busyByThreadId[thread.thread_id] || thread.status === "busy",
+          busyByThreadId[thread.thread_id] ||
+          isThreadActiveStatus(thread.status),
       ),
     [threads, busyByThreadId],
   );
@@ -510,7 +518,8 @@ export default function ThreadHistory() {
   const hasUnseenThread = useMemo(() => {
     return threads.some((thread) => {
       const isBusy =
-        busyByThreadId[thread.thread_id] || thread.status === "busy";
+        busyByThreadId[thread.thread_id] ||
+        isThreadActiveStatus(thread.status);
       if (isBusy) return false;
       if (thread.thread_id === currentThreadId) return false;
       const updatedAtMs = getThreadUpdatedAtMs(thread);
@@ -528,7 +537,10 @@ export default function ThreadHistory() {
 
   useEffect(() => {
     for (const thread of threads) {
-      if (thread.status !== "busy" && busyByThreadId[thread.thread_id]) {
+      if (
+        !isThreadActiveStatus(thread.status) &&
+        busyByThreadId[thread.thread_id]
+      ) {
         markBusy(thread.thread_id, false);
       }
     }

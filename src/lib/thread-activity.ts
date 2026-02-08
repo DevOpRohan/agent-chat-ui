@@ -1,11 +1,14 @@
 export type ThreadLastSeenMap = Record<string, number>;
 export type ThreadBusyMap = Record<string, boolean>;
+export type ThreadBusyOwnerMap = Record<string, string>;
 
 const THREAD_LAST_SEEN_STORAGE_KEY = "lg:thread:lastSeenUpdatedAt";
 const THREAD_LAST_SEEN_BASELINE_KEY = "lg:thread:lastSeenBaselineAt";
 const THREAD_LAST_SEEN_EVENT = "lg:thread:lastSeenUpdatedAt:event";
 const THREAD_BUSY_STORAGE_KEY = "lg:thread:busy";
+const THREAD_BUSY_OWNER_STORAGE_KEY = "lg:thread:busy:owner";
 const THREAD_BUSY_EVENT = "lg:thread:busy:event";
+const THREAD_TAB_ID_STORAGE_KEY = "lg:thread:tabId";
 
 function safeParseMap(raw: string | null): ThreadLastSeenMap {
   if (!raw) return {};
@@ -41,6 +44,23 @@ function safeParseBusyMap(raw: string | null): ThreadBusyMap {
   }
 }
 
+function safeParseBusyOwnerMap(raw: string | null): ThreadBusyOwnerMap {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const map: ThreadBusyOwnerMap = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "string" && value.trim().length > 0) {
+        map[key] = value;
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 function readStorage(key: string): string | null {
   if (typeof window === "undefined") return null;
   try {
@@ -54,6 +74,24 @@ function writeStorage(key: string, value: string) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(key, value);
+  } catch {
+    // no-op
+  }
+}
+
+function readSessionStorage(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionStorage(key: string, value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(key, value);
   } catch {
     // no-op
   }
@@ -141,17 +179,55 @@ export function setThreadBusyMap(map: ThreadBusyMap) {
   writeStorage(THREAD_BUSY_STORAGE_KEY, JSON.stringify(map));
 }
 
-export function markThreadBusy(threadId: string, busy: boolean): ThreadBusyMap {
+export function getThreadBusyOwnerMap(): ThreadBusyOwnerMap {
+  return safeParseBusyOwnerMap(readStorage(THREAD_BUSY_OWNER_STORAGE_KEY));
+}
+
+export function setThreadBusyOwnerMap(map: ThreadBusyOwnerMap) {
+  writeStorage(THREAD_BUSY_OWNER_STORAGE_KEY, JSON.stringify(map));
+}
+
+export function getOrCreateThreadTabId(): string | null {
+  const existing = readSessionStorage(THREAD_TAB_ID_STORAGE_KEY);
+  if (existing) return existing;
+
+  const randomPart =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const nextId = `tab-${randomPart}`;
+  writeSessionStorage(THREAD_TAB_ID_STORAGE_KEY, nextId);
+  return nextId;
+}
+
+export function markThreadBusy(
+  threadId: string,
+  busy: boolean,
+  ownerTabId?: string,
+): ThreadBusyMap {
   if (typeof window === "undefined") return {};
   const map = getThreadBusyMap();
+  const ownerMap = getThreadBusyOwnerMap();
   if (busy) {
     map[threadId] = true;
+    if (ownerTabId) {
+      ownerMap[threadId] = ownerTabId;
+    } else if (!ownerMap[threadId]) {
+      const currentTabId = getOrCreateThreadTabId();
+      if (currentTabId) {
+        ownerMap[threadId] = currentTabId;
+      }
+    }
   } else {
     delete map[threadId];
+    delete ownerMap[threadId];
   }
   setThreadBusyMap(map);
+  setThreadBusyOwnerMap(ownerMap);
   try {
-    window.dispatchEvent(new CustomEvent(THREAD_BUSY_EVENT, { detail: { map } }));
+    window.dispatchEvent(
+      new CustomEvent(THREAD_BUSY_EVENT, { detail: { map, ownerMap } }),
+    );
   } catch {
     // no-op
   }
@@ -159,22 +235,32 @@ export function markThreadBusy(threadId: string, busy: boolean): ThreadBusyMap {
 }
 
 export function subscribeThreadBusy(
-  onChange: (map: ThreadBusyMap) => void,
+  onChange: (state: { map: ThreadBusyMap; ownerMap: ThreadBusyOwnerMap }) => void,
 ): () => void {
   if (typeof window === "undefined") return () => undefined;
 
   const handleCustomEvent = (event: Event) => {
-    const detail = (event as CustomEvent<{ map?: ThreadBusyMap }>).detail;
-    if (detail?.map) {
-      onChange(detail.map);
+    const detail = (
+      event as CustomEvent<{ map?: ThreadBusyMap; ownerMap?: ThreadBusyOwnerMap }>
+    ).detail;
+    if (detail?.map || detail?.ownerMap) {
+      onChange({
+        map: detail?.map ?? getThreadBusyMap(),
+        ownerMap: detail?.ownerMap ?? getThreadBusyOwnerMap(),
+      });
       return;
     }
-    onChange(getThreadBusyMap());
+    onChange({ map: getThreadBusyMap(), ownerMap: getThreadBusyOwnerMap() });
   };
 
   const handleStorage = (event: StorageEvent) => {
-    if (event.key !== THREAD_BUSY_STORAGE_KEY) return;
-    onChange(getThreadBusyMap());
+    if (
+      event.key !== THREAD_BUSY_STORAGE_KEY &&
+      event.key !== THREAD_BUSY_OWNER_STORAGE_KEY
+    ) {
+      return;
+    }
+    onChange({ map: getThreadBusyMap(), ownerMap: getThreadBusyOwnerMap() });
   };
 
   window.addEventListener(THREAD_BUSY_EVENT, handleCustomEvent);

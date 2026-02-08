@@ -28,6 +28,10 @@ test("same-thread submit is rejected while run is active and draft is preserved"
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   });
 
+  await expect(page.getByText("Thread is still running")).toBeVisible({
+    timeout: 10_000,
+  });
+
   await expect(input).toHaveValue(blockedPrompt, {
     timeout: 10_000,
   });

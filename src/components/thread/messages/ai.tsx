@@ -759,6 +759,74 @@ interface InterruptProps {
   hasNoAIOrToolMessages: boolean;
 }
 
+function containsBreakpointSignal(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return (
+    normalized.includes("breakpoint") ||
+    normalized.includes("human interrupt") ||
+    normalized.includes("graphinterrupt") ||
+    normalized.includes("nodeinterrupt")
+  );
+}
+
+function shouldSuppressBreakpointInterrupt(
+  interrupt: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+): boolean {
+  if (!interrupt) return false;
+
+  if (typeof interrupt === "string") {
+    return containsBreakpointSignal(interrupt);
+  }
+
+  if (Array.isArray(interrupt)) {
+    return interrupt.some((item) =>
+      shouldSuppressBreakpointInterrupt(item, seen),
+    );
+  }
+
+  if (typeof interrupt !== "object") {
+    return false;
+  }
+
+  const record = interrupt as Record<string, unknown>;
+  if (seen.has(record)) {
+    return false;
+  }
+  seen.add(record);
+
+  const actionRequests = record.action_requests;
+  if (Array.isArray(actionRequests) && actionRequests.length > 0) {
+    // Keep actionable interrupt UX for explicit review/action requests.
+    return false;
+  }
+
+  const fieldsToInspect = [
+    record.when,
+    record.reason,
+    record.type,
+    record.kind,
+    record.name,
+    record.message,
+    record.interrupt,
+    record.value,
+  ];
+
+  if (
+    fieldsToInspect.some((value) =>
+      shouldSuppressBreakpointInterrupt(value, seen),
+    )
+  ) {
+    return true;
+  }
+
+  try {
+    return containsBreakpointSignal(JSON.stringify(record));
+  } catch {
+    return false;
+  }
+}
+
 function Interrupt({
   interrupt,
   isLastMessage,
@@ -768,6 +836,11 @@ function Interrupt({
     ? (interrupt as Record<string, any>[])
     : (((interrupt as { value?: unknown } | undefined)?.value ??
         interrupt) as Record<string, any>);
+  const shouldSuppress = shouldSuppressBreakpointInterrupt(fallbackValue);
+
+  if (shouldSuppress) {
+    return null;
+  }
 
   return (
     <>
