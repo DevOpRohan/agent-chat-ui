@@ -8,12 +8,14 @@
 }
 
 .markdown-content a {
-  color: var(--primary);
-  text-decoration: none;
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  overflow-wrap: anywhere;
 }
 
 .markdown-content a:hover {
-  text-decoration: underline;
+  color: var(--link-hover);
 }
 
 .markdown-content blockquote {

@@ -120,10 +120,7 @@ const defaultComponents: any = {
   ),
   a: ({ className, ...props }: { className?: string }) => (
     <a
-      className={cn(
-        "text-primary font-medium underline underline-offset-4",
-        className,
-      )}
+      className={cn("font-medium", className)}
       {...props}
     />
   ),
