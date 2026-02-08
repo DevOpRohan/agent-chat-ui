@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useEffect, useRef } from "react";
+import { ReactNode, useCallback, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
@@ -33,6 +33,7 @@ import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import { getOrCreateThreadTabId, markThreadSeen } from "@/lib/thread-activity";
 import { useThreadBusy } from "@/hooks/use-thread-busy";
 import { useStableStreamMessages } from "@/hooks/use-stable-stream-messages";
+import { useStreamAutoReconnect } from "@/hooks/use-stream-auto-reconnect";
 import {
   useArtifactOpen,
   ArtifactContent,
@@ -77,6 +78,18 @@ function isThreadActiveStatus(
   status: string | null | undefined,
 ): status is "busy" {
   return status === "busy";
+}
+
+function readStoredRunId(threadId: string | null): string | null {
+  if (!threadId || typeof window === "undefined") return null;
+  try {
+    const runId = window.sessionStorage.getItem(`lg:stream:${threadId}`);
+    if (!runId) return null;
+    const normalized = runId.trim();
+    return normalized.length > 0 ? normalized : null;
+  } catch {
+    return null;
+  }
 }
 
 function StickyToBottomContent(props: {
@@ -160,15 +173,20 @@ export function Thread() {
     null,
   );
   const isCurrentThreadLoading =
-    !!threadId && isLoading && loadingThreadId === threadId;
+    !!threadId &&
+    isLoading &&
+    (loadingThreadId === null || loadingThreadId === threadId);
   const tabId = getOrCreateThreadTabId();
   const isThreadBusyInAnyTab = !!threadId && !!busyByThreadId[threadId];
   const isThreadActiveOnServer = isThreadActiveStatus(threadStatus);
-  const isCurrentThreadOwnedByTab =
-    !!threadId && ownedBusyThreadId === threadId;
   const currentThreadBusyOwnerId = threadId
     ? busyOwnerByThreadId[threadId]
     : undefined;
+  const isCurrentThreadOwnedByTab =
+    !!threadId &&
+    (ownedBusyThreadId === threadId ||
+      currentThreadBusyOwnerId === tabId ||
+      loadingThreadId === threadId);
   const isBusyElsewhereFromLocalSignal =
     isThreadBusyInAnyTab &&
     !isCurrentThreadLoading &&
@@ -182,10 +200,39 @@ export function Thread() {
   const isCurrentThreadBusyElsewhere =
     isBusyElsewhereFromLocalSignal || isBusyElsewhereFromServerSignal;
   const shouldShowRunningQueryMessage = isCurrentThreadBusyElsewhere;
+  const {
+    isReconnecting,
+    statusText: reconnectStatusText,
+    activeRunId,
+    stopReconnect,
+  } = useStreamAutoReconnect({
+    stream,
+    threadId,
+    threadStatus,
+    isCurrentThreadBusyElsewhere,
+    isCurrentThreadOwnedByTab,
+  });
+  const effectiveIsLoading = isCurrentThreadLoading || isReconnecting;
 
   const lastError = useRef<string | undefined>(undefined);
   const previouslyObservedBusyThreadId = useRef<string | null>(null);
+  const pendingNewThreadOwnership = useRef<{
+    pending: boolean;
+    startedAtMs: number;
+  }>({
+    pending: false,
+    startedAtMs: 0,
+  });
   const [runningDotsCount, setRunningDotsCount] = useState(1);
+
+  const claimThreadOwnership = useCallback(
+    (targetThreadId: string) => {
+      setLoadingThreadId(targetThreadId);
+      setOwnedBusyThreadId(targetThreadId);
+      markBusy(targetThreadId, true, tabId ?? undefined);
+    },
+    [markBusy, tabId],
+  );
 
   const setThreadId = (id: string | null) => {
     _setThreadId(id);
@@ -194,6 +241,27 @@ export function Thread() {
     closeArtifact();
     setArtifactContext({});
   };
+
+  useEffect(() => {
+    if (
+      pendingNewThreadOwnership.current.pending &&
+      !threadId &&
+      !isLoading &&
+      Date.now() - pendingNewThreadOwnership.current.startedAtMs > 60_000
+    ) {
+      pendingNewThreadOwnership.current.pending = false;
+      pendingNewThreadOwnership.current.startedAtMs = 0;
+    }
+  }, [threadId, isLoading]);
+
+  useEffect(() => {
+    if (!threadId) return;
+    if (!pendingNewThreadOwnership.current.pending) return;
+
+    claimThreadOwnership(threadId);
+    pendingNewThreadOwnership.current.pending = false;
+    pendingNewThreadOwnership.current.startedAtMs = 0;
+  }, [threadId, claimThreadOwnership]);
 
   useEffect(() => {
     if (!threadId) {
@@ -213,7 +281,7 @@ export function Thread() {
         );
         const shouldPollFast =
           isThreadActiveStatus(currentThread.status) ||
-          isLoading ||
+          effectiveIsLoading ||
           isThreadBusyInAnyTab;
         timeoutId = window.setTimeout(
           pollThreadStatus,
@@ -236,7 +304,7 @@ export function Thread() {
   }, [
     threadId,
     stream.client,
-    isLoading,
+    effectiveIsLoading,
     isThreadBusyInAnyTab,
     isCurrentThreadOwnedByTab,
   ]);
@@ -261,14 +329,13 @@ export function Thread() {
 
     if (
       previouslyObservedBusyThreadId.current === threadId &&
-      !isLoading &&
+      !effectiveIsLoading &&
       threadStatus !== null &&
       !isThreadActiveStatus(threadStatus)
     ) {
       previouslyObservedBusyThreadId.current = null;
-      window.location.reload();
     }
-  }, [threadId, isCurrentThreadBusyElsewhere, threadStatus, isLoading]);
+  }, [threadId, isCurrentThreadBusyElsewhere, threadStatus, effectiveIsLoading]);
 
   useEffect(() => {
     if (!shouldShowRunningQueryMessage) {
@@ -286,15 +353,28 @@ export function Thread() {
   }, [shouldShowRunningQueryMessage]);
 
   useEffect(() => {
-    if (!isLoading) {
+    if (!effectiveIsLoading) {
       if (loadingThreadId) {
+        if (loadingThreadId !== threadId) {
+          setLoadingThreadId(null);
+          return;
+        }
+
+        if (
+          loadingThreadId === threadId &&
+          threadStatus !== null &&
+          isThreadActiveStatus(threadStatus)
+        ) {
+          return;
+        }
+
         markBusy(loadingThreadId, false);
         setLoadingThreadId(null);
       }
       return;
     }
 
-    if (!loadingThreadId && threadId && isLoading) {
+    if (!loadingThreadId && threadId && effectiveIsLoading) {
       const ownerTabId = busyOwnerByThreadId[threadId];
       if (!ownerTabId || ownerTabId === tabId) {
         setLoadingThreadId(threadId);
@@ -303,40 +383,62 @@ export function Thread() {
       }
     }
   }, [
-    isLoading,
+    effectiveIsLoading,
     loadingThreadId,
     markBusy,
     threadId,
+    threadStatus,
     busyOwnerByThreadId,
     tabId,
   ]);
 
   useEffect(() => {
+    if (!threadId || !effectiveIsLoading) return;
+    if (ownedBusyThreadId === threadId) return;
+
+    const ownerTabId = busyOwnerByThreadId[threadId];
+    if (ownerTabId === tabId || loadingThreadId === threadId) {
+      setOwnedBusyThreadId(threadId);
+    }
+  }, [
+    threadId,
+    effectiveIsLoading,
+    ownedBusyThreadId,
+    busyOwnerByThreadId,
+    tabId,
+    loadingThreadId,
+  ]);
+
+  useEffect(() => {
     if (!threadId) return;
     if (!busyByThreadId[threadId]) return;
-    if (isLoading) return;
+    if (effectiveIsLoading) return;
     if (threadStatus === null || threadStatus === "busy") return;
 
     markBusy(threadId, false);
     setLoadingThreadId((prev) => (prev === threadId ? null : prev));
     setOwnedBusyThreadId((prev) => (prev === threadId ? null : prev));
-  }, [threadId, busyByThreadId, isLoading, threadStatus, markBusy]);
+  }, [threadId, busyByThreadId, effectiveIsLoading, threadStatus, markBusy]);
 
   useEffect(() => {
-    if (!threadId) {
-      setOwnedBusyThreadId(null);
-      return;
-    }
-
     if (
+      threadId &&
       ownedBusyThreadId === threadId &&
-      !isLoading &&
+      !effectiveIsLoading &&
       threadStatus !== null &&
       !isThreadActiveStatus(threadStatus)
     ) {
       setOwnedBusyThreadId(null);
     }
-  }, [threadId, ownedBusyThreadId, isLoading, threadStatus]);
+  }, [threadId, ownedBusyThreadId, effectiveIsLoading, threadStatus]);
+
+  useEffect(() => {
+    if (!ownedBusyThreadId) return;
+    if (busyByThreadId[ownedBusyThreadId]) return;
+    setOwnedBusyThreadId((prev) =>
+      prev === ownedBusyThreadId ? null : prev,
+    );
+  }, [ownedBusyThreadId, busyByThreadId]);
 
   useEffect(() => {
     if (!stream.error) {
@@ -376,6 +478,15 @@ export function Thread() {
           description:
             "Your message was not sent. Please retry after the current run completes.",
           closeButton: true,
+        });
+        return;
+      }
+
+      if (classification === "recoverable_disconnect") {
+        console.info("Recoverable disconnect detected; reconnecting stream", {
+          name,
+          message,
+          threadId,
         });
         return;
       }
@@ -426,7 +537,7 @@ export function Thread() {
       return true;
     }
 
-    if (isCurrentThreadLoading) {
+    if (effectiveIsLoading) {
       showThreadRunningToast();
       return true;
     }
@@ -501,8 +612,10 @@ export function Thread() {
       : undefined;
 
     if (threadId) {
-      setLoadingThreadId(threadId);
-      markBusy(threadId, true, tabId ?? undefined);
+      claimThreadOwnership(threadId);
+    } else {
+      pendingNewThreadOwnership.current.pending = true;
+      pendingNewThreadOwnership.current.startedAtMs = Date.now();
     }
 
     void stream.submit(
@@ -544,8 +657,10 @@ export function Thread() {
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
     if (threadId) {
-      setLoadingThreadId(threadId);
-      markBusy(threadId, true, tabId ?? undefined);
+      claimThreadOwnership(threadId);
+    } else {
+      pendingNewThreadOwnership.current.pending = true;
+      pendingNewThreadOwnership.current.startedAtMs = Date.now();
     }
     void stream.submit(undefined, {
       config: {
@@ -558,6 +673,35 @@ export function Thread() {
       streamSubgraphs: true,
       streamResumable: true,
     });
+  };
+
+  const handleCancel = async () => {
+    const activeThreadId = threadId;
+    const runIdForCancel = activeRunId ?? readStoredRunId(activeThreadId);
+
+    try {
+      await stream.stop();
+    } catch (error) {
+      console.error("Failed to stop active stream", error);
+    }
+
+    if (activeThreadId && runIdForCancel) {
+      try {
+        await stream.client.runs.cancel(activeThreadId, runIdForCancel);
+      } catch (error) {
+        console.warn("Best-effort backend cancel failed", error);
+      }
+    }
+
+    stopReconnect();
+    pendingNewThreadOwnership.current.pending = false;
+    pendingNewThreadOwnership.current.startedAtMs = 0;
+
+    if (activeThreadId) {
+      markBusy(activeThreadId, false);
+      setLoadingThreadId((prev) => (prev === activeThreadId ? null : prev));
+      setOwnedBusyThreadId((prev) => (prev === activeThreadId ? null : prev));
+    }
   };
 
   const chatStarted = !!threadId || !!messages.length;
@@ -704,14 +848,15 @@ export function Thread() {
                         <HumanMessage
                           key={message.id || `${message.type}-${index}`}
                           message={message}
-                          isLoading={isLoading}
+                          isLoading={effectiveIsLoading}
                         />
                       ) : (
                         <AssistantMessage
                           key={message.id || `${message.type}-${index}`}
                           message={message}
                           allMessages={displayMessages}
-                          isLoading={isLoading}
+                          isLoading={effectiveIsLoading}
+                          isReconnecting={isReconnecting}
                           handleRegenerate={handleRegenerate}
                         />
                       ),
@@ -723,11 +868,12 @@ export function Thread() {
                       key="interrupt-msg"
                       message={undefined}
                       allMessages={displayMessages}
-                      isLoading={isLoading}
+                      isLoading={effectiveIsLoading}
+                      isReconnecting={isReconnecting}
                       handleRegenerate={handleRegenerate}
                     />
                   )}
-                  {isCurrentThreadLoading && !firstTokenReceived && (
+                  {effectiveIsLoading && !firstTokenReceived && (
                     <AssistantMessageLoading />
                   )}
                 </>
@@ -761,6 +907,18 @@ export function Thread() {
                         >
                           {".".repeat(runningDotsCount)}
                         </span>
+                      </p>
+                    </div>
+                  ) : null}
+                  {isReconnecting ? (
+                    <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
+                      <p
+                        data-testid="stream-reconnect-status"
+                        className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
+                        aria-live="polite"
+                      >
+                        <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
+                        {reconnectStatusText ?? "Reconnecting stream..."}
                       </p>
                     </div>
                   ) : null}
@@ -831,10 +989,11 @@ export function Thread() {
                           className="hidden"
                           disabled={isUploading}
                         />
-                        {isCurrentThreadLoading ? (
+                        {effectiveIsLoading ? (
                           <Button
+                            type="button"
                             key="stop"
-                            onClick={() => stream.stop()}
+                            onClick={() => void handleCancel()}
                             className="ml-auto"
                           >
                             <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -845,7 +1004,7 @@ export function Thread() {
                             type="submit"
                             className="ml-auto shadow-md transition-all"
                             disabled={
-                              isCurrentThreadLoading ||
+                              effectiveIsLoading ||
                               isCurrentThreadBusyElsewhere ||
                               isUploading ||
                               (!input.trim() && contentBlocks.length === 0)

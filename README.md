@@ -68,6 +68,9 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > While a run is still streaming, the `Intermediate Step` header shows live status and a spinner.
 
 > [!NOTE]
+> Mid-stream disconnects now auto-recover in-app (no manual page refresh) for runs owned by the current tab. During recovery, loading UX stays consistent: composer keeps `Cancel`, history uses true backend `busy` state for running spinner behavior, and intermediate-step status can show reconnecting state while stream rejoin is in progress.
+
+> [!NOTE]
 > The chat now includes a light/dark mode toggle in the top-right of the UI (and on the setup screen). Theme preference is persisted via `next-themes`.
 
 ## Environment Variables

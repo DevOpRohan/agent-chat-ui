@@ -233,8 +233,17 @@ function ThinkingPanel({ text }: { text: string }) {
 function getIntermediateRunningStatus(
   parts: IntermediateContentPart[],
   isStreaming: boolean,
+  isReconnecting: boolean,
 ): string | null {
-  if (!isStreaming || parts.length === 0) {
+  if (parts.length === 0) {
+    return null;
+  }
+
+  if (isReconnecting) {
+    return "reconnecting...";
+  }
+
+  if (!isStreaming) {
     return null;
   }
 
@@ -311,6 +320,7 @@ function IntermediateStepContent({
 function IntermediateStepsArtifactTrigger({
   parts,
   isStreaming,
+  isReconnecting = false,
   isLoading,
   showActions,
   actionContent,
@@ -318,6 +328,7 @@ function IntermediateStepsArtifactTrigger({
 }: {
   parts: IntermediateContentPart[];
   isStreaming: boolean;
+  isReconnecting?: boolean;
   isLoading: boolean;
   showActions?: boolean;
   actionContent?: string;
@@ -326,7 +337,11 @@ function IntermediateStepsArtifactTrigger({
   const [IntermediateArtifactContent, intermediateArtifact] = useArtifact();
   if (parts.length === 0) return null;
 
-  const runningStatus = getIntermediateRunningStatus(parts, isStreaming);
+  const runningStatus = getIntermediateRunningStatus(
+    parts,
+    isStreaming,
+    isReconnecting,
+  );
   const statusLabel = runningStatus ?? "open details";
 
   return (
@@ -861,11 +876,13 @@ export function AssistantMessage({
   message,
   allMessages,
   isLoading,
+  isReconnecting = false,
   handleRegenerate,
 }: {
   message: Message | undefined;
   allMessages: Message[];
   isLoading: boolean;
+  isReconnecting?: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
 }) {
   const thread = useStreamContext();
@@ -963,7 +980,7 @@ export function AssistantMessage({
     messageHasRenderableText(groupMessage),
   );
   const isGroupStreaming =
-    isLoading &&
+    (isLoading || isReconnecting) &&
     isCurrentGroupAtThreadTail &&
     groupedIntermediateParts.length > 0 &&
     !groupHasRenderableText;
@@ -1002,6 +1019,7 @@ export function AssistantMessage({
           <IntermediateStepsArtifactTrigger
             parts={groupedIntermediateParts}
             isStreaming={isGroupStreaming}
+            isReconnecting={isReconnecting}
             isLoading={isLoading}
             showActions={shouldRenderInlineActionsForIntermediate}
             actionContent={groupedIntermediateCopyContent}

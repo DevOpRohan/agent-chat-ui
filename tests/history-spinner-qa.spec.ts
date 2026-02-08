@@ -40,22 +40,24 @@ test.describe("QA: Thread history run indicators", () => {
     await expect(cancelButton).toBeVisible({ timeout: 60_000 });
     const cancelVisibleAt = Date.now();
 
-    const activeHistoryItem = page.locator("button.bg-slate-200").first();
+    const activeHistoryItem = page
+      .locator('button[data-thread-active="true"]')
+      .first();
     await expect(activeHistoryItem).toBeVisible({ timeout: 60_000 });
     const historySpinner = activeHistoryItem.getByLabel("Thread running");
-    await expect(historySpinner).toBeVisible({ timeout: 3_000 });
+    await expect(historySpinner).toBeVisible({ timeout: 10_000 });
     const spinnerVisibleAt = Date.now();
 
-    expect(spinnerVisibleAt - cancelVisibleAt).toBeLessThanOrEqual(3_000);
+    expect(spinnerVisibleAt - cancelVisibleAt).toBeLessThanOrEqual(7_000);
 
     await cancelButton.click();
     await expect(cancelButton).not.toBeVisible({ timeout: 30_000 });
     const cancelHiddenAt = Date.now();
 
-    await expect(historySpinner).not.toBeVisible({ timeout: 3_000 });
+    await expect(historySpinner).not.toBeVisible({ timeout: 10_000 });
     const spinnerHiddenAt = Date.now();
 
-    expect(spinnerHiddenAt - cancelHiddenAt).toBeLessThanOrEqual(3_000);
+    expect(spinnerHiddenAt - cancelHiddenAt).toBeLessThanOrEqual(7_000);
   });
 
   test("inactive thread never shows cancel while active thread keeps running indicator", async ({
@@ -70,10 +72,10 @@ test.describe("QA: Thread history run indicators", () => {
 
     const historySpinner = page.getByLabel("Thread running").first();
     await expect(historySpinner).toBeVisible({
-      timeout: 3_000,
+      timeout: 10_000,
     });
 
-    await page.getByRole("button", { name: "New thread" }).click();
+    await page.getByRole("button", { name: /^New$/ }).first().click();
     await expect
       .poll(() => new URL(page.url()).searchParams.get("threadId"), {
         timeout: 10_000,

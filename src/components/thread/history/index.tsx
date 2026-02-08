@@ -88,7 +88,7 @@ function getThreadSignature(thread: Thread): string {
 function isThreadActiveStatus(
   status: Thread["status"] | string | null | undefined,
 ): boolean {
-  return status === "busy" || status === "interrupted";
+  return status === "busy";
 }
 
 function areThreadListsEquivalent(prev: Thread[], next: Thread[]): boolean {

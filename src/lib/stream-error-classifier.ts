@@ -2,6 +2,7 @@ export type StreamErrorClassification =
   | "benign_react_185"
   | "conflict"
   | "expected_interrupt_or_breakpoint"
+  | "recoverable_disconnect"
   | "fatal";
 
 type StreamErrorDetails = {
@@ -75,6 +76,25 @@ function isExpectedInterruptError(text: string): boolean {
   );
 }
 
+function isRecoverableDisconnectError(text: string): boolean {
+  return (
+    text.includes("failed to fetch") ||
+    text.includes("networkerror") ||
+    text.includes("network error") ||
+    text.includes("network request failed") ||
+    text.includes("load failed") ||
+    text.includes("internet disconnected") ||
+    text.includes("err_internet_disconnected") ||
+    text.includes("err_network_changed") ||
+    text.includes("addressunreachable") ||
+    text.includes("connection reset") ||
+    text.includes("connection was reset") ||
+    text.includes("connection was lost") ||
+    text.includes("timed out") ||
+    text.includes("timeout")
+  );
+}
+
 export function classifyStreamError(
   error: unknown,
   options?: { hasInterrupt?: boolean },
@@ -92,6 +112,10 @@ export function classifyStreamError(
 
   if (options?.hasInterrupt || isExpectedInterruptError(text)) {
     return "expected_interrupt_or_breakpoint";
+  }
+
+  if (isRecoverableDisconnectError(text)) {
+    return "recoverable_disconnect";
   }
 
   return "fatal";
