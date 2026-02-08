@@ -52,6 +52,11 @@ Tracking anchor commits:
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
+- 2026-02-08: Add per-expression KaTeX fallback sanitization so malformed formulas render as plain text (instead of red `katex-error` output), set `errorColor: "currentColor"` as a secondary guard, and make markdown render-boundary fallback GFM-only (no KaTeX) for full fail-open behavior. Files: `src/components/thread/markdown-text.tsx`, `FORK_COMPASS.md`.
+- 2026-02-08: Optimize live stream markdown performance by adding a fast-path renderer for actively streaming assistant tail messages (skip async Shiki highlighting and math transforms during token flow, then restore full render after stream completion). This reduces UI stalls from partial LaTeX/code while preserving final rich formatting. Files: `src/components/thread/markdown-text.tsx`, `src/components/thread/messages/ai.tsx`, `FORK_COMPASS.md`.
+- 2026-02-08: Harden markdown streaming render path against malformed/incomplete LaTeX by adding a fail-open error boundary around async markdown highlighting and forcing KaTeX non-throwing mode (`throwOnError: false`, `strict: "ignore"`). Streaming now falls back to safe markdown rendering instead of stalling the UI when formula parsing fails mid-stream. Files: `src/components/thread/markdown-text.tsx`, `FORK_COMPASS.md`.
+- 2026-02-08: Replace Prism-based markdown code block highlighting with `rehype-pretty-code` (`shiki`) for robust GitHub-style syntax coloring across languages, including light/dark theme-aware rendering and copy-to-clipboard controls on rendered code blocks. Files: `src/components/thread/markdown-text.tsx`, `src/components/thread/markdown-styles.css`, `package.json`, `pnpm-lock.yaml`, `FORK_COMPASS.md`; removed `src/components/thread/syntax-highlighter.tsx`.
+- 2026-02-08: Add LaTeX delimiter normalization in markdown rendering so `\(...\)` renders as inline math and `\[...\]` renders as display math (in both streaming and settled assistant output, plus other markdown views). Code spans and fenced code blocks are excluded from normalization. Files: `src/components/thread/markdown-text.tsx`, `FORK_COMPASS.md`.
 - 2026-02-08: Sync browser tab/app icons to Question Crafter branding by explicitly declaring metadata icon links (SVG, PNG sizes, ICO, apple-touch) and generating matching assets to avoid stale favicon caches across browsers. Files: `src/app/layout.tsx`, `src/app/favicon.ico`, `public/favicon-32x32.png`, `public/favicon-16x16.png`, `public/apple-touch-icon.png`.
 - 2026-02-08: Improve markdown link readability in dark mode by adding dedicated light/dark link color tokens and applying them in markdown rendering so plain URLs remain visually distinct from body text. Files: `src/app/globals.css`, `src/components/thread/markdown-styles.css`, `src/components/thread/markdown-text.tsx`.
 - 2026-02-08: Add full light/dark theme support with persistent toggle UX (`next-themes`) in setup and chat headers, migrate core chat/history/tool-call/agent-inbox surfaces to semantic theme tokens, and add a dedicated dark variant for the Question Crafter logo. Files: `src/app/layout.tsx`, `src/components/theme/theme-provider.tsx`, `src/components/theme/theme-toggle.tsx`, `src/components/icons/question-crafter.tsx`, `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/messages/tool-calls.tsx`, `src/components/thread/messages/generic-interrupt.tsx`, `src/components/thread/MultimodalPreview.tsx`, `src/components/thread/markdown-styles.css`, `src/components/thread/agent-inbox/index.tsx`, `src/components/thread/agent-inbox/components/state-view.tsx`, `src/components/thread/agent-inbox/components/thread-actions-view.tsx`, `src/components/thread/agent-inbox/components/inbox-item-input.tsx`, `src/components/thread/agent-inbox/components/thread-id.tsx`, `src/components/thread/agent-inbox/components/tool-call-table.tsx`, `README.md`, `FORK_COMPASS.md`.
@@ -202,11 +207,15 @@ Tracking anchor commits:
 - Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
 - Tail AI message rendering now applies a monotonic guard for the active thread/branch so final assistant text does not shrink if SDK history refetch temporarily returns a shorter snapshot than live stream output.
 - Benign React `#185` stream errors are filtered from the generic run-error toast path to avoid false failure alerts for users.
+- Markdown code blocks now use `rehype-pretty-code` (`shiki`) with GitHub light/dark themes for stronger language coverage and consistent syntax color quality across streamed and final output.
+- Markdown rendering now fails open for malformed LaTeX across settled markdown views: failed KaTeX expressions are sanitized to plain text (no red `katex-error` styling/tooltip), KaTeX uses non-throwing mode with neutral `errorColor`, and boundary-level failures degrade to safe GFM-only markdown instead of blocking the UI.
+- While assistant text is actively streaming, markdown rendering now uses a lighter fast path (GFM only) to keep token updates smooth; once streaming ends, the message re-renders with full LaTeX + Shiki formatting.
 - Header/setup branding now uses `Question Crafter` title text with the fork logo.
 - App metadata now declares explicit favicon + app icon links (`svg`, `16/32 png`, `ico`, and `apple-touch-icon`) with versioned URLs to prevent stale browser icon caches after logo updates.
 - App-wide theme switching now uses `next-themes` with a persistent light/dark toggle in the setup and main chat headers.
 - The `Question Crafter` logo now supports explicit light/dark variants and switches automatically with active theme.
 - Core chat/history/tool-call/interrupt/agent-inbox surfaces were migrated off hard-coded light grays to semantic theme tokens for readable dark mode.
+- Markdown rendering now normalizes LaTeX delimiters from `\(...\)` and `\[...\]` into `remark-math`-compatible syntax before parsing, so these delimiters render consistently during stream updates and final output.
 - Thread history rows now include a contextual rename action (pencil icon with inline editor); saving writes `thread_title` metadata through the LangGraph SDK `threads.update(...)` API.
 - Rename inline editor uses compact icon actions (`check` / `close`) instead of text buttons to reduce row width.
 - History label resolution now prioritizes user-defined thread titles (`thread_title`, then `title`) before fallback preview text.
@@ -292,6 +301,8 @@ Use this as a jump list when editing or debugging:
 
 - `src/components/thread/messages/tool-calls.tsx`
 - `src/components/thread/messages/ai.tsx`
+- `src/components/thread/markdown-text.tsx`
+- `src/components/thread/markdown-styles.css`
 - `src/components/thread/history/index.tsx`
 - `src/components/theme/theme-provider.tsx`
 - `src/components/theme/theme-toggle.tsx`

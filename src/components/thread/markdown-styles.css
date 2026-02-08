@@ -28,6 +28,92 @@
   overflow-x: auto;
 }
 
+.markdown-content [data-rehype-pretty-code-figure] {
+  margin: 1.25rem 0;
+}
+
+.markdown-content [data-rehype-pretty-code-figure] pre {
+  margin: 0;
+  border: 1px solid var(--border);
+  background-color: var(--shiki-light-bg, var(--muted));
+  color: var(--shiki-light, var(--foreground));
+  padding: 0.75rem 0;
+  tab-size: 2;
+}
+
+.markdown-content [data-rehype-pretty-code-figure] [data-line] {
+  display: inline-block;
+  min-width: 100%;
+  padding: 0 1rem;
+}
+
+.markdown-content [data-rehype-pretty-code-figure] [data-highlighted-line] {
+  background-color: var(--muted);
+}
+
+.markdown-content
+  [data-rehype-pretty-code-figure]
+  [data-rehype-pretty-code-title],
+.markdown-content
+  [data-rehype-pretty-code-figure]
+  [data-rehype-pretty-code-caption] {
+  border: 1px solid var(--border);
+  background-color: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.25;
+  padding: 0.35rem 0.75rem;
+}
+
+.markdown-content
+  [data-rehype-pretty-code-figure]
+  [data-rehype-pretty-code-title] {
+  border-bottom: 0;
+  border-radius: 0.5rem 0.5rem 0 0;
+}
+
+.markdown-content
+  [data-rehype-pretty-code-figure]:has([data-rehype-pretty-code-title])
+  pre {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.markdown-content
+  [data-rehype-pretty-code-figure]
+  [data-rehype-pretty-code-caption] {
+  border-top: 0;
+  border-radius: 0 0 0.5rem 0.5rem;
+}
+
+.markdown-content [data-rehype-pretty-code-figure] span {
+  color: var(--shiki-light, inherit);
+  font-style: var(--shiki-light-font-style, normal);
+  font-weight: var(--shiki-light-font-weight, 400);
+  text-decoration: var(--shiki-light-text-decoration, none);
+}
+
+.dark .markdown-content [data-rehype-pretty-code-figure] pre {
+  background-color: var(--shiki-dark-bg, var(--shiki-light-bg, var(--muted)));
+  color: var(--shiki-dark, var(--shiki-light, var(--foreground)));
+}
+
+.dark .markdown-content [data-rehype-pretty-code-figure] span {
+  color: var(--shiki-dark, var(--shiki-light, inherit));
+  font-style: var(
+    --shiki-dark-font-style,
+    var(--shiki-light-font-style, normal)
+  );
+  font-weight: var(
+    --shiki-dark-font-weight,
+    var(--shiki-light-font-weight, 400)
+  );
+  text-decoration: var(
+    --shiki-dark-text-decoration,
+    var(--shiki-light-text-decoration, none)
+  );
+}
+
 .markdown-content table {
   border-collapse: collapse;
   width: 100%;

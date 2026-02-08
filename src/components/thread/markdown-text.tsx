@@ -2,23 +2,30 @@
 
 import "./markdown-styles.css";
 
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { MarkdownHooks } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
+import rehypePrettyCode, {
+  type Options as RehypePrettyCodeOptions,
+} from "rehype-pretty-code";
 import remarkMath from "remark-math";
-import { FC, memo, useState } from "react";
+import {
+  Component,
+  FC,
+  memo,
+  useMemo,
+  useState,
+  isValidElement,
+  type ErrorInfo,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import { SyntaxHighlighter } from "@/components/thread/syntax-highlighter";
 
 import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { cn } from "@/lib/utils";
 
 import "katex/dist/katex.min.css";
-
-interface CodeHeaderProps {
-  language?: string;
-  code: string;
-}
 
 const useCopyToClipboard = ({
   copiedDuration = 3000,
@@ -39,23 +46,103 @@ const useCopyToClipboard = ({
   return { isCopied, copyToClipboard };
 };
 
-const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
+function extractTextFromNode(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+
+  if (!node) {
+    return "";
+  }
+
+  if (Array.isArray(node)) {
+    return node.map((item) => extractTextFromNode(item)).join("");
+  }
+
+  if (isValidElement(node)) {
+    const props = node.props as { children?: ReactNode };
+    return extractTextFromNode(props.children);
+  }
+
+  return "";
+}
+
+function collectCodeLines(node: ReactNode, lines: string[]): void {
+  if (!node) return;
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      collectCodeLines(item, lines);
+    }
+    return;
+  }
+
+  if (isValidElement(node)) {
+    const props = node.props as {
+      children?: ReactNode;
+      "data-line"?: unknown;
+    };
+    if ("data-line" in props) {
+      lines.push(extractTextFromNode(props.children));
+      return;
+    }
+
+    collectCodeLines(props.children, lines);
+  }
+}
+
+function extractCodeText(node: ReactNode): string {
+  const lines: string[] = [];
+  collectCodeLines(node, lines);
+
+  if (lines.length > 0) {
+    return lines.join("\n");
+  }
+
+  return extractTextFromNode(node);
+}
+
+type CodeBlockPreProps = HTMLAttributes<HTMLPreElement> & {
+  children?: ReactNode;
+};
+
+const CodeBlockPre: FC<CodeBlockPreProps> = ({
+  className,
+  children,
+  ...props
+}) => {
   const { isCopied, copyToClipboard } = useCopyToClipboard();
+  const code = useMemo(
+    () => extractCodeText(children).replace(/\n$/, ""),
+    [children],
+  );
+
   const onCopy = () => {
     if (!code || isCopied) return;
     copyToClipboard(code);
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-t-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">
-      <span className="lowercase [&>span]:text-xs">{language}</span>
-      <TooltipIconButton
-        tooltip="Copy"
-        onClick={onCopy}
+    <div className="group relative my-4 max-w-4xl">
+      <pre
+        className={cn("max-w-4xl overflow-x-auto rounded-lg", className)}
+        {...props}
       >
-        {!isCopied && <CopyIcon />}
-        {isCopied && <CheckIcon />}
-      </TooltipIconButton>
+        {children}
+      </pre>
+      {code ? (
+        <TooltipIconButton
+          tooltip="Copy code"
+          onClick={onCopy}
+          className="bg-background/85 text-muted-foreground border-border hover:text-foreground absolute top-2 right-2 z-10 border opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+        >
+          {!isCopied ? (
+            <CopyIcon className="h-3.5 w-3.5" />
+          ) : (
+            <CheckIcon className="h-3.5 w-3.5" />
+          )}
+        </TooltipIconButton>
+      ) : null}
     </div>
   );
 };
@@ -190,14 +277,49 @@ const defaultComponents: any = {
       {...props}
     />
   ),
-  pre: ({ className, ...props }: { className?: string }) => (
-    <pre
-      className={cn(
-        "max-w-4xl overflow-x-auto rounded-lg bg-black text-white",
-        className,
-      )}
+  span: ({
+    className,
+    children,
+    title,
+    style,
+    ...props
+  }: HTMLAttributes<HTMLSpanElement>) => {
+    const classTokens = (className ?? "").split(/\s+/).filter(Boolean);
+    const isKatexErrorSpan = classTokens.includes("katex-error");
+
+    if (!isKatexErrorSpan) {
+      return (
+        <span
+          className={className}
+          title={title}
+          style={style}
+          {...props}
+        >
+          {children}
+        </span>
+      );
+    }
+
+    const sanitizedClassName = classTokens
+      .filter((token) => token !== "katex-error")
+      .join(" ");
+
+    return (
+      <span
+        className={cn("break-words whitespace-pre-wrap", sanitizedClassName)}
+        {...props}
+      >
+        {children}
+      </span>
+    );
+  },
+  pre: ({ className, children, ...props }: CodeBlockPreProps) => (
+    <CodeBlockPre
+      className={className}
       {...props}
-    />
+    >
+      {children}
+    </CodeBlockPre>
   ),
   code: ({
     className,
@@ -205,33 +327,14 @@ const defaultComponents: any = {
     ...props
   }: {
     className?: string;
-    children: React.ReactNode;
+    children: ReactNode;
+    "data-language"?: string;
   }) => {
-    const match = /language-(\w+)/.exec(className || "");
-
-    if (match) {
-      const language = match[1];
-      const code = String(children).replace(/\n$/, "");
-
-      return (
-        <>
-          <CodeHeader
-            language={language}
-            code={code}
-          />
-          <SyntaxHighlighter
-            language={language}
-            className={className}
-          >
-            {code}
-          </SyntaxHighlighter>
-        </>
-      );
-    }
+    const isBlockCode = typeof props["data-language"] === "string";
 
     return (
       <code
-        className={cn("rounded font-semibold", className)}
+        className={cn(!isBlockCode && "rounded font-semibold", className)}
         {...props}
       >
         {children}
@@ -240,16 +343,278 @@ const defaultComponents: any = {
   },
 };
 
-const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
-  return (
-    <div className="markdown-content">
+const prettyCodeOptions: RehypePrettyCodeOptions = {
+  theme: {
+    light: "github-light",
+    dark: "github-dark-default",
+  },
+  keepBackground: true,
+  bypassInlineCode: true,
+  defaultLang: {
+    block: "plaintext",
+    inline: "plaintext",
+  },
+};
+
+const katexOptions = {
+  throwOnError: false,
+  strict: "ignore",
+  errorColor: "currentColor",
+} as const;
+
+function getFenceRun(markdown: string, start: number): string | null {
+  const marker = markdown[start];
+  if (marker !== "`" && marker !== "~") return null;
+
+  let end = start;
+  while (end < markdown.length && markdown[end] === marker) {
+    end += 1;
+  }
+
+  if (end - start < 3) return null;
+  return markdown.slice(start, end);
+}
+
+function findClosingDelimiter(
+  markdown: string,
+  start: number,
+  delimiter: "\\)" | "\\]",
+): number {
+  let cursor = start;
+
+  while (cursor < markdown.length) {
+    const matchIndex = markdown.indexOf(delimiter, cursor);
+    if (matchIndex === -1) return -1;
+
+    // Skip escaped delimiters (for example: `\\(` should stay literal text).
+    if (!isEscapedDelimiter(markdown, matchIndex)) {
+      return matchIndex;
+    }
+
+    cursor = matchIndex + delimiter.length;
+  }
+
+  return -1;
+}
+
+function isEscapedDelimiter(markdown: string, index: number): boolean {
+  let backslashCount = 0;
+  let cursor = index - 1;
+
+  while (cursor >= 0 && markdown[cursor] === "\\") {
+    backslashCount += 1;
+    cursor -= 1;
+  }
+
+  return backslashCount % 2 === 1;
+}
+
+function normalizeLatexDelimiters(markdown: string): string {
+  if (!markdown.includes("\\(") && !markdown.includes("\\[")) {
+    return markdown;
+  }
+
+  let result = "";
+  let index = 0;
+  let activeFence: string | null = null;
+  let inlineCodeTickCount: number | null = null;
+
+  while (index < markdown.length) {
+    const currentChar = markdown[index];
+    const atLineStart = index === 0 || markdown[index - 1] === "\n";
+
+    if (inlineCodeTickCount == null && atLineStart) {
+      const fenceRun = getFenceRun(markdown, index);
+      if (fenceRun) {
+        if (!activeFence) {
+          activeFence = fenceRun;
+        } else if (
+          fenceRun[0] === activeFence[0] &&
+          fenceRun.length >= activeFence.length
+        ) {
+          activeFence = null;
+        }
+
+        result += fenceRun;
+        index += fenceRun.length;
+        continue;
+      }
+    }
+
+    if (activeFence) {
+      result += currentChar;
+      index += 1;
+      continue;
+    }
+
+    if (currentChar === "`") {
+      let end = index;
+      while (end < markdown.length && markdown[end] === "`") {
+        end += 1;
+      }
+
+      const tickCount = end - index;
+      result += markdown.slice(index, end);
+      if (inlineCodeTickCount == null) {
+        inlineCodeTickCount = tickCount;
+      } else if (inlineCodeTickCount === tickCount) {
+        inlineCodeTickCount = null;
+      }
+
+      index = end;
+      continue;
+    }
+
+    if (inlineCodeTickCount != null) {
+      result += currentChar;
+      index += 1;
+      continue;
+    }
+
+    const escapedOpenDelimiter = isEscapedDelimiter(markdown, index);
+
+    if (!escapedOpenDelimiter && markdown.startsWith("\\[", index)) {
+      const closingIndex = findClosingDelimiter(markdown, index + 2, "\\]");
+      if (closingIndex !== -1) {
+        const body = markdown.slice(index + 2, closingIndex);
+        const trimmedBody = body.replace(/^\n+/, "").replace(/\n+$/, "");
+        result += `$$\n${trimmedBody}\n$$`;
+        index = closingIndex + 2;
+        continue;
+      }
+    }
+
+    if (!escapedOpenDelimiter && markdown.startsWith("\\(", index)) {
+      const closingIndex = findClosingDelimiter(markdown, index + 2, "\\)");
+      if (closingIndex !== -1) {
+        const body = markdown.slice(index + 2, closingIndex);
+        result += `$${body}$`;
+        index = closingIndex + 2;
+        continue;
+      }
+    }
+
+    result += currentChar;
+    index += 1;
+  }
+
+  return result;
+}
+
+function getRenderResetKey(markdown: string): string {
+  if (!markdown) {
+    return "0";
+  }
+
+  const previewWindow = 96;
+  const head = markdown.slice(0, previewWindow);
+  const tail = markdown.slice(-previewWindow);
+  return `${markdown.length}:${head}:${tail}`;
+}
+
+type MarkdownRenderBoundaryProps = {
+  children: ReactNode;
+  fallback: ReactNode;
+  resetKey: string;
+};
+
+type MarkdownRenderBoundaryState = {
+  hasError: boolean;
+};
+
+class MarkdownRenderBoundary extends Component<
+  MarkdownRenderBoundaryProps,
+  MarkdownRenderBoundaryState
+> {
+  public state: MarkdownRenderBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): MarkdownRenderBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown, _errorInfo: ErrorInfo): void {
+    console.warn(
+      "Markdown render failed. Falling back to safe markdown.",
+      error,
+    );
+  }
+
+  componentDidUpdate(prevProps: MarkdownRenderBoundaryProps): void {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+
+    return this.props.children;
+  }
+}
+
+type MarkdownTextProps = {
+  children: string;
+  streaming?: boolean;
+};
+
+const MarkdownTextImpl: FC<MarkdownTextProps> = ({
+  children,
+  streaming = false,
+}) => {
+  const normalizedChildren = useMemo(
+    () => (streaming ? children : normalizeLatexDelimiters(children)),
+    [children, streaming],
+  );
+  const renderResetKey = useMemo(
+    () => getRenderResetKey(normalizedChildren),
+    [normalizedChildren],
+  );
+
+  const fallback = useMemo(
+    () => (
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={[remarkGfm]}
         components={defaultComponents}
       >
-        {children}
+        {normalizedChildren}
       </ReactMarkdown>
+    ),
+    [normalizedChildren],
+  );
+
+  if (streaming) {
+    return (
+      <div className="markdown-content">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={defaultComponents}
+        >
+          {normalizedChildren}
+        </ReactMarkdown>
+      </div>
+    );
+  }
+
+  return (
+    <div className="markdown-content">
+      <MarkdownRenderBoundary
+        fallback={fallback}
+        resetKey={renderResetKey}
+      >
+        <MarkdownHooks
+          fallback={fallback}
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[
+            [rehypeKatex, katexOptions],
+            [rehypePrettyCode, prettyCodeOptions],
+          ]}
+          components={defaultComponents}
+        >
+          {normalizedChildren}
+        </MarkdownHooks>
+      </MarkdownRenderBoundary>
     </div>
   );
 };

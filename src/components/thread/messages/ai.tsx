@@ -907,6 +907,8 @@ export function AssistantMessage({
     !!thread.values.ui?.some((ui) => ui.metadata?.message_id === message.id);
   const shouldRenderInterrupt =
     !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
+  const shouldUseFastStreamingMarkdown =
+    message?.type === "ai" && isLoading && isLastMessage;
   const shouldHideGroupedPlaceholderMessage =
     !!message &&
     isAiOrToolMessage(message) &&
@@ -941,7 +943,9 @@ export function AssistantMessage({
                 key={segment.key}
                 className="py-1"
               >
-                <MarkdownText>{segment.text}</MarkdownText>
+                <MarkdownText streaming={shouldUseFastStreamingMarkdown}>
+                  {segment.text}
+                </MarkdownText>
               </div>
             ))}
 
