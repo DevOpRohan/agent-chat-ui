@@ -35,17 +35,18 @@ Recent post-sync changes (after 2026-01-22) include **re-enabling thread history
 
 ## 2) Diff Snapshot (Upstream vs Fork)
 - **Upstream status:** 0 commits behind
-- **Fork status:** 46 commits ahead
-- **Files changed vs upstream:** 51
-- **Net diff vs upstream:** +4937 / -587 lines
+- **Fork status:** 47 commits ahead
+- **Files changed vs upstream:** 52
+- **Net diff vs upstream:** +4952 / -595 lines
 
 Tracking anchor commits:
-- **Fork HEAD:** `4b10f0c`
+- **Fork HEAD:** `33bdc62`
 - **Upstream main:** `1a0e8af`
 
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+- 2026-02-08: Switch to local Inter font assets via `@fontsource/inter` to avoid build-time Google Fonts fetch failures in Docker builds. Files: `package.json`, `pnpm-lock.yaml`, `src/app/layout.tsx`, `src/app/globals.css`.
 - 2026-02-07: Remove logo background fill for transparent assets (no square background in UI). Files: `public/question-crafter-logo.svg`, `public/logo.svg`, `public/question-crafter-logo.png`, `src/components/icons/question-crafter.tsx`, `src/app/favicon.ico`.
 - 2026-02-07: Sync updated logo SVG across all assets and React icon, regenerate PNG + favicon. Files: `public/question-crafter-logo.svg`, `public/logo.svg`, `public/question-crafter-logo.png`, `src/components/icons/question-crafter.tsx`, `src/app/favicon.ico`.
 - 2026-02-06: Refresh Question Crafter branding assets to the selected balanced co-author mark and simplify the icon by removing the outer nested containers (inner symbol only). Also add alternate icon source under `public/branding/`; history-row rename save/cancel controls are compact icon actions for lower width. Files: `public/logo.svg`, `public/question-crafter-logo.svg`, `public/question-crafter-logo.png`, `public/branding/question-crafter-icon-option-1-collab.svg`, `src/components/icons/question-crafter.tsx`, `src/components/thread/history/index.tsx`, `FORK_COMPASS.md`.
@@ -274,6 +275,7 @@ Use this as a jump list when editing or debugging:
 
 ## 5) Fork-only Commit Log
 Commits unique to this fork (upstream/main..HEAD):
+- `33bdc62` docs: refresh fork compass snapshot
 - `4b10f0c` fix(branding): remove logo background fill
 - `e8d8ed8` docs: refresh fork compass after logo sync
 - `d363602` fix(branding): sync updated logo svg across assets
