@@ -8,6 +8,7 @@
 - `README.md`: setup, usage, env vars.
 - `FORK_COMPASS.md`: authoritative map of fork customizations and file locations.
 - `DEPLOYMENT_GUIDE.md`: build, push, and Cloud Run deployment steps.
+- `EngineeringPrinciple.md`: required workflow for stable UX changes (research -> plan -> execution -> deploy -> test -> iterate with scratchpad evidence).
 
 ## Local dev
 - Package manager: `pnpm` (see `package.json` `packageManager` field).
