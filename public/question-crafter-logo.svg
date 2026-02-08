@@ -1,18 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1040" height="1024" viewBox="0 0 1040 1024">
   <defs>
-    <radialGradient id="bg" cx="50%" cy="45%" r="80%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#f2f4f8"/>
-    </radialGradient>
-
     <linearGradient id="ink" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#1b2240"/>
       <stop offset="100%" stop-color="#0f1324"/>
     </linearGradient>
   </defs>
-
-  <!-- Background -->
-  <rect width="1040" height="1024" fill="url(#bg)"/>
 
   <!-- Side connectors -->
   <g fill="url(#ink)">

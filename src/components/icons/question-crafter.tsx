@@ -18,22 +18,6 @@ export function QuestionCrafterLogoSVG({
       aria-hidden="true"
     >
       <defs>
-        <radialGradient
-          id="qc_bg"
-          cx="50%"
-          cy="45%"
-          r="80%"
-        >
-          <stop
-            offset="0%"
-            stopColor="#ffffff"
-          />
-          <stop
-            offset="100%"
-            stopColor="#f2f4f8"
-          />
-        </radialGradient>
-
         <linearGradient
           id="qc_ink"
           x1="0"
@@ -51,12 +35,6 @@ export function QuestionCrafterLogoSVG({
           />
         </linearGradient>
       </defs>
-
-      <rect
-        width="1040"
-        height="1024"
-        fill="url(#qc_bg)"
-      />
 
       <g fill="url(#qc_ink)">
         <rect
