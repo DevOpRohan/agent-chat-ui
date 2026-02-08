@@ -39,19 +39,20 @@ Key differences in one sentence:
 ## 2) Diff Snapshot (Upstream vs Fork)
 
 - **Upstream status:** 0 commits behind
-- **Fork status:** 49 commits ahead
-- **Files changed vs upstream:** 63
-- **Net diff vs upstream:** +5559 / -686 lines
+- **Fork status:** 51 commits ahead
+- **Files changed vs upstream:** 64
+- **Net diff vs upstream:** +5571 / -692 lines
 
 Tracking anchor commits:
 
-- **Fork HEAD:** `3d52ae1`
+- **Fork HEAD:** `a95bf63`
 - **Upstream main:** `1a0e8af`
 
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
+- 2026-02-08: Improve markdown link readability in dark mode by adding dedicated light/dark link color tokens and applying them in markdown rendering so plain URLs remain visually distinct from body text. Files: `src/app/globals.css`, `src/components/thread/markdown-styles.css`, `src/components/thread/markdown-text.tsx`.
 - 2026-02-08: Add full light/dark theme support with persistent toggle UX (`next-themes`) in setup and chat headers, migrate core chat/history/tool-call/agent-inbox surfaces to semantic theme tokens, and add a dedicated dark variant for the Question Crafter logo. Files: `src/app/layout.tsx`, `src/components/theme/theme-provider.tsx`, `src/components/theme/theme-toggle.tsx`, `src/components/icons/question-crafter.tsx`, `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/messages/tool-calls.tsx`, `src/components/thread/messages/generic-interrupt.tsx`, `src/components/thread/MultimodalPreview.tsx`, `src/components/thread/markdown-styles.css`, `src/components/thread/agent-inbox/index.tsx`, `src/components/thread/agent-inbox/components/state-view.tsx`, `src/components/thread/agent-inbox/components/thread-actions-view.tsx`, `src/components/thread/agent-inbox/components/inbox-item-input.tsx`, `src/components/thread/agent-inbox/components/thread-id.tsx`, `src/components/thread/agent-inbox/components/tool-call-table.tsx`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-08: Stabilize final assistant streaming after intermediate/tool activity by preventing same-tail-message regressions during stream-to-history handoff. Added a non-regressive tail AI snapshot hook and Playwright continuity coverage. Files: `src/hooks/use-stable-stream-messages.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `tests/final-stream-continuity.spec.ts`, `FORK_COMPASS.md`.
 - 2026-02-08: Switch to local Inter font assets via `@fontsource/inter` to avoid build-time Google Fonts fetch failures in Docker builds. Files: `package.json`, `pnpm-lock.yaml`, `src/app/layout.tsx`, `src/app/globals.css`.
@@ -329,6 +330,7 @@ Use this as a jump list when editing or debugging:
 
 Commits unique to this fork (upstream/main..HEAD):
 
+- `a95bf63` fix(ui): restore markdown link contrast in dark mode
 - `3d52ae1` feat(ui): add experimental dark mode toggle and themed logo
 - `c8add70` fix(stream): stabilize final assistant output after intermediate steps
 - `4612151` fix(build): use local inter font
