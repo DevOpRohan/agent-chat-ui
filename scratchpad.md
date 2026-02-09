@@ -64,3 +64,45 @@
 ## Final Learning
 - 2026-02-08T21:56:02Z | A robust app-level reconnect fix needs explicit ownership state transitions for new-thread runs. Without pending ownership claim handoff (submit before threadId exists), the UI can fall into observer mode (`Send` disabled, no `Cancel`) even in the run-owning tab.
 - 2026-02-08T21:56:02Z | E2E stability improved significantly by asserting durable UX outcomes (recovery/cancel/spinner continuity/no fatal toast) rather than transient reconnect-label timing.
+
+---
+
+## UX Task: Composer Growth Cap (2026-02-09)
+
+### Problem Statement
+- Composer textarea expands indefinitely with multi-line input and can consume nearly the full viewport.
+- Goal: preserve auto-grow behavior for short drafts, but cap growth at a threshold and enable internal scrolling beyond that point.
+
+### Subproblem Tree
+- Root: Keep composer usable for long multi-line drafts.
+- Subproblem A: Identify current sizing behavior and whether autosize is CSS- or JS-driven.
+- Subproblem B: Apply minimal safe UI change that avoids submit/shortcut regressions.
+- Subproblem C: Validate lint/build and formatting; record outcomes.
+
+### Strategy Decisions
+- Use CSS-only containment on the existing textarea (`max-height` + `overflow-y-auto`) to preserve current input event behavior and Enter/Shift+Enter logic.
+- Set threshold to viewport-relative (`40vh`) so it scales across screen sizes.
+- Keep change scoped to primary thread composer only.
+
+### Experiment Log
+- 2026-02-09T11:30:05Z | `rg -n "textarea|composer|auto.?resize|autosize|multiline|input" src` + targeted file reads | PASS | Confirmed main composer lives in `src/components/thread/index.tsx` and uses `field-sizing-content` with no height cap.
+- 2026-02-09T11:30:05Z | Patch textarea class in `src/components/thread/index.tsx` | PASS | Added `max-h-[40vh]` and `overflow-y-auto` while preserving existing handlers and layout.
+- 2026-02-09T11:30:05Z | Update `FORK_COMPASS.md` (date + behavior entry) | PASS | Recorded fork-specific UX behavior change.
+
+### Deploy/Test Run Log
+- 2026-02-09T11:30:05Z | `pnpm lint` | PASS | No lint errors; only pre-existing warnings in unrelated files.
+- 2026-02-09T11:30:05Z | `pnpm prettier --check src/components/thread/index.tsx FORK_COMPASS.md` | PASS | Formatting clean after write pass.
+- 2026-02-09T11:31:20Z | `pnpm build` | PASS | Production build completed successfully; existing unrelated lint warnings remain non-blocking.
+- 2026-02-09T11:31:20Z | `pnpm exec playwright test tests/submit-guard.spec.ts --project=chromium --list` | PASS | Targeted adjacent UX spec discovered.
+- 2026-02-09T11:31:20Z | `pnpm exec playwright test tests/reconnect.spec.ts --project=chromium --list` | PASS | Regression adjacent flow spec discovered.
+- 2026-02-09T11:31:20Z | `pnpm exec playwright test tests/submit-guard.spec.ts tests/reconnect.spec.ts --project=chromium --workers=1` | PASS | Auth setup + both regression specs passed locally (3/3).
+- 2026-02-09T11:31:20Z | Deploy step | SKIPPED | Not requested in this task; validation performed locally only.
+
+### Failed Hypotheses
+- None.
+
+### Final Learning
+- 2026-02-09T11:30:05Z | For this composer implementation (`field-sizing-content`), a CSS cap plus internal scroll is sufficient and avoids additional JS autosize complexity.
+- 2026-02-09T11:41:54Z | `docker buildx build --platform linux/amd64 -t gcr.io/cerebryai/question_crafter_agent_ui:develop -t gcr.io/cerebryai/question_crafter_agent_ui:develop-20260209-113729 ... --push .` | PASS | Built and pushed develop + pinned tag (digest `sha256:4b0c4b69e1df46082fb3e0124e2e2cd3a5463b17ee3b7a26897ca86f993e27c2`).
+- 2026-02-09T11:41:54Z | `gcloud run deploy agent-chat-ui --image gcr.io/cerebryai/question_crafter_agent_ui:develop-20260209-113729 --region asia-south1 --platform managed --no-traffic --tag develop --quiet` | PASS | Deployed revision `agent-chat-ui-00110-yug` to tagged develop URL, 0% production traffic.
+- 2026-02-09T11:41:54Z | `PLAYWRIGHT_BASE_URL=https://develop---agent-chat-ui-6duluzey3a-el.a.run.app pnpm exec playwright test tests/submit-guard.spec.ts tests/reconnect.spec.ts --project=chromium --workers=1` | PASS | Deployed smoke/regression suite passed (3/3 incl. auth setup).

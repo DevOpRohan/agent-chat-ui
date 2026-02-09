@@ -1,6 +1,6 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-02-08_  
+_Last updated: 2026-02-09_  
 _Branch: main_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
@@ -52,6 +52,7 @@ Tracking anchor commits:
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
+- 2026-02-09: Cap composer textarea growth at a viewport-based threshold and enable internal scrolling after the limit so long multi-line drafts do not consume the full screen. File: `src/components/thread/index.tsx`.
 - 2026-02-08: Add app-level stream reconnect controller for mid-run disconnect recovery (no manual refresh), extend stream error classification with recoverable disconnect signatures, keep composer/intermediate loading UX aligned during reconnect, harden run ownership transitions across thread switches, and make history running indicator semantics strictly backend `busy`. Added reconnect-focused E2E coverage scaffold. Files: `src/hooks/use-stream-auto-reconnect.ts`, `src/lib/stream-error-classifier.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/history/index.tsx`, `tests/auto-reconnect-disconnect.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-08: Add cross-tab observer mode for active threads and harden stream error classification so expected interrupt/breakpoint signals (including human breakpoint and cancel/abort-style errors) do not show generic fatal toasts. Active-run state in another tab now keeps draft text editable while disabling send for that thread, observer lock release aligns to active `busy` status so it clears after cancellation/interrupt transitions, and composer UX now includes explicit fallback copy plus a reload action for stale cross-tab/cross-browser/device sync. Running-thread submit/regenerate blocking toast behavior remains intact and is asserted in E2E. Files: `src/lib/stream-error-classifier.ts`, `src/components/thread/index.tsx`, `tests/cross-tab-observer.spec.ts`, `tests/submit-guard.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-08: Add per-expression KaTeX fallback sanitization so malformed formulas render as plain text (instead of red `katex-error` output), set `errorColor: "currentColor"` as a secondary guard, and make markdown render-boundary fallback GFM-only (no KaTeX) for full fail-open behavior. Files: `src/components/thread/markdown-text.tsx`, `FORK_COMPASS.md`.
@@ -208,6 +209,7 @@ Tracking anchor commits:
 - When the same thread is open in another tab while a run is active, the non-owning tab enters observer mode for that thread: send is disabled, draft typing remains enabled, expected interrupt/breakpoint/cancel stream signals are suppressed from generic fatal error toasts, and the composer offers a reload action to recover from stale sync across tabs/browsers/devices.
 - Mid-run disconnects for the run-owning tab now trigger app-level reconnect attempts (run-id resolution + bounded retry/backoff) without forcing a page refresh.
 - During reconnect, composer loading/cancel state and assistant intermediate-step status stay in loading mode (`reconnecting...`) until stream resumes or run ends.
+- Composer input still auto-expands for multi-line drafts, but now stops growing at `40vh` and becomes internally scrollable beyond that threshold.
 - Local run ownership/busy markers are no longer cleared aggressively during thread switches, reducing false observer-mode transitions and preserving reconnect authority for the owning tab.
 - Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
 - Intermediate reasoning/tool content now routes through one `Intermediate Step` launcher in the chat message area and renders full ordered details in the right artifact pane, including tool calls, tool results, and streaming status text.
