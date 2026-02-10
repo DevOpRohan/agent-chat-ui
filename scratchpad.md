@@ -106,3 +106,42 @@
 - 2026-02-09T11:41:54Z | `docker buildx build --platform linux/amd64 -t gcr.io/cerebryai/question_crafter_agent_ui:develop -t gcr.io/cerebryai/question_crafter_agent_ui:develop-20260209-113729 ... --push .` | PASS | Built and pushed develop + pinned tag (digest `sha256:4b0c4b69e1df46082fb3e0124e2e2cd3a5463b17ee3b7a26897ca86f993e27c2`).
 - 2026-02-09T11:41:54Z | `gcloud run deploy agent-chat-ui --image gcr.io/cerebryai/question_crafter_agent_ui:develop-20260209-113729 --region asia-south1 --platform managed --no-traffic --tag develop --quiet` | PASS | Deployed revision `agent-chat-ui-00110-yug` to tagged develop URL, 0% production traffic.
 - 2026-02-09T11:41:54Z | `PLAYWRIGHT_BASE_URL=https://develop---agent-chat-ui-6duluzey3a-el.a.run.app pnpm exec playwright test tests/submit-guard.spec.ts tests/reconnect.spec.ts --project=chromium --workers=1` | PASS | Deployed smoke/regression suite passed (3/3 incl. auth setup).
+
+---
+
+## UX Task: Desktop 3-Pane Resizable Layout + Full-Width Artifact (2026-02-09)
+
+### Problem Statement
+- Add desktop-only pane resizing for history↔chat and chat↔artifact boundaries.
+- Add artifact full-width expand/restore control.
+- Preserve previous widths when leaving full-width mode, but reset pane widths on page reload.
+
+### Subproblem Tree
+- Root: robust desktop pane layout controls without regressing chat/history/stream UX.
+- Subproblem A: replace fixed-width desktop history/artifact layout with stateful width model.
+- Subproblem B: implement pointer + keyboard resizing with viewport-safe clamps.
+- Subproblem C: ensure artifact expand/restore preserves prior layout state.
+- Subproblem D: preserve mobile/tablet behavior unchanged.
+- Subproblem E: add deterministic E2E coverage for pane resize/expand/restore/reload.
+- Subproblem F: run local and post-deploy regression validation.
+
+### Strategy Decisions
+- Introduced desktop pane width state in `src/components/thread/index.tsx` and enforced clamp rules (`HISTORY_MIN=220`, `HISTORY_MAX=480`, `ARTIFACT_MIN=320`, `ARTIFACT_MAX_RATIO=0.62`, `CHAT_MIN=360`).
+- Added separator drag with pointer and keyboard support (`ArrowLeft`/`ArrowRight`, step 24px).
+- Added artifact expand/restore toggle in artifact header with previous-layout snapshot restore.
+- Made history pane internals width-fluid (`w-full`) so resized width is reflected in rows/forms/skeletons.
+- Added hidden E2E-only artifact-open control for deterministic pane test coverage when no Intermediate Step is available.
+
+### Experiment Log
+- 2026-02-11T04:25:00Z | Fresh checkout from `main` and patch research pass | PASS | Verified full patch applicability; only `scratchpad.md` had context drift.
+- 2026-02-11T04:26:00Z | Applied all non-scratchpad hunks from `/Users/rohanverma/Downloads/last_diffs.patch` | PASS | README/FORK_COMPASS/thread/history/tests changes applied cleanly.
+- 2026-02-11T04:27:00Z | Manual scratchpad section merge | PASS | Recorded pane task context in current scratchpad baseline.
+
+### Deploy/Test Run Log
+- Pending in this run.
+
+### Failed Hypotheses
+- None in this run.
+
+### Final Learning
+- Patch portability improves when scratchpad updates are append-only instead of context-replacing broad existing sections.

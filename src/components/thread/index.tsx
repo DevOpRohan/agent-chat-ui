@@ -1,10 +1,18 @@
 import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useCallback, useEffect, useRef } from "react";
+import {
+  FormEvent,
+  KeyboardEvent,
+  PointerEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
 import { useStreamContext } from "@/providers/Stream";
-import { useState, FormEvent } from "react";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
@@ -17,6 +25,8 @@ import { QuestionCrafterLogoSVG } from "../icons/question-crafter";
 import {
   ArrowDown,
   LoaderCircle,
+  Maximize2,
+  Minimize2,
   PanelRightOpen,
   PanelRightClose,
   XIcon,
@@ -49,8 +59,7 @@ import {
 
 function showThreadRunningToast() {
   toast("Thread is still running", {
-    description:
-      "Working on your query and will respond after completion.",
+    description: "Working on your query and will respond after completion.",
     closeButton: true,
   });
 }
@@ -90,6 +99,143 @@ function readStoredRunId(threadId: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+const DEFAULT_HISTORY_WIDTH_PX = 300;
+const HISTORY_MIN_WIDTH_PX = 220;
+const HISTORY_MAX_WIDTH_PX = 480;
+const DEFAULT_ARTIFACT_RATIO = 0.38;
+const DEFAULT_ARTIFACT_FALLBACK_WIDTH_PX = 360;
+const ARTIFACT_MIN_WIDTH_PX = 320;
+const ARTIFACT_MAX_RATIO = 0.62;
+const CHAT_MIN_WIDTH_PX = 360;
+const RESIZE_STEP_PX = 24;
+const RESIZE_HANDLE_WIDTH_PX = 10;
+
+type PaneDragState =
+  | { type: "none" }
+  | { type: "history"; startX: number; startHistory: number }
+  | { type: "artifact"; startX: number; startArtifact: number };
+
+function clamp(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  if (max <= min) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function toBounds(min: number, max: number) {
+  const safeMax = Math.max(0, max);
+  const safeMin = Math.min(Math.max(0, min), safeMax);
+  return { min: safeMin, max: safeMax };
+}
+
+function getHistoryBounds(
+  viewportWidth: number,
+  artifactWidth: number,
+): { min: number; max: number } {
+  const maxByChat =
+    viewportWidth - CHAT_MIN_WIDTH_PX - Math.max(artifactWidth, 0);
+  const max = Math.min(HISTORY_MAX_WIDTH_PX, Math.max(0, maxByChat));
+  return toBounds(HISTORY_MIN_WIDTH_PX, max);
+}
+
+function getArtifactBounds(
+  viewportWidth: number,
+  historyWidth: number,
+): { min: number; max: number } {
+  const mainWidth = Math.max(0, viewportWidth - Math.max(0, historyWidth));
+  const maxByChat = Math.max(0, mainWidth - CHAT_MIN_WIDTH_PX);
+  const maxByRatio = Math.max(0, Math.floor(mainWidth * ARTIFACT_MAX_RATIO));
+  const max = Math.min(maxByChat, maxByRatio);
+  return toBounds(ARTIFACT_MIN_WIDTH_PX, max);
+}
+
+function getDefaultArtifactWidth(viewportWidth: number, historyWidth: number) {
+  const bounds = getArtifactBounds(viewportWidth, historyWidth);
+  const baseWidth = Math.floor(
+    Math.max(0, viewportWidth - Math.max(0, historyWidth)) *
+      DEFAULT_ARTIFACT_RATIO,
+  );
+  return Math.round(clamp(baseWidth, bounds.min, bounds.max));
+}
+
+function normalizePaneWidths(params: {
+  viewportWidth: number;
+  chatHistoryOpen: boolean;
+  artifactOpen: boolean;
+  artifactExpanded: boolean;
+  historyWidth: number;
+  artifactWidth: number;
+}) {
+  const {
+    viewportWidth,
+    chatHistoryOpen,
+    artifactOpen,
+    artifactExpanded,
+    historyWidth,
+    artifactWidth,
+  } = params;
+  const safeViewportWidth = Math.max(0, viewportWidth);
+  let nextHistory = Math.max(0, historyWidth);
+  let nextArtifact = Math.max(0, artifactWidth);
+  let activeHistory = chatHistoryOpen ? nextHistory : 0;
+  let activeArtifact = artifactOpen && !artifactExpanded ? nextArtifact : 0;
+
+  if (chatHistoryOpen) {
+    const historyBounds = getHistoryBounds(safeViewportWidth, activeArtifact);
+    activeHistory = clamp(activeHistory, historyBounds.min, historyBounds.max);
+  } else {
+    nextHistory = clamp(
+      nextHistory,
+      HISTORY_MIN_WIDTH_PX,
+      HISTORY_MAX_WIDTH_PX,
+    );
+  }
+
+  if (artifactOpen && !artifactExpanded) {
+    const artifactBounds = getArtifactBounds(safeViewportWidth, activeHistory);
+    activeArtifact = clamp(
+      activeArtifact,
+      artifactBounds.min,
+      artifactBounds.max,
+    );
+  }
+
+  let chatWidth = safeViewportWidth - activeHistory - activeArtifact;
+  if (chatWidth < CHAT_MIN_WIDTH_PX) {
+    let overflow = CHAT_MIN_WIDTH_PX - chatWidth;
+    if (activeArtifact > 0) {
+      const reduceArtifactBy = Math.min(overflow, activeArtifact);
+      activeArtifact -= reduceArtifactBy;
+      overflow -= reduceArtifactBy;
+    }
+    if (overflow > 0 && activeHistory > 0) {
+      const reduceHistoryBy = Math.min(overflow, activeHistory);
+      activeHistory -= reduceHistoryBy;
+    }
+    chatWidth = safeViewportWidth - activeHistory - activeArtifact;
+    if (chatWidth < CHAT_MIN_WIDTH_PX) {
+      activeHistory = Math.max(
+        0,
+        activeHistory - (CHAT_MIN_WIDTH_PX - chatWidth),
+      );
+    }
+  }
+
+  if (chatHistoryOpen) {
+    nextHistory = activeHistory;
+  }
+  if (artifactOpen && !artifactExpanded) {
+    nextArtifact = activeArtifact;
+  }
+
+  nextHistory = Math.round(Math.max(0, nextHistory));
+  nextArtifact = Math.round(Math.max(0, nextArtifact));
+
+  return {
+    historyWidth: nextHistory,
+    artifactWidth: nextArtifact,
+  };
 }
 
 function StickyToBottomContent(props: {
@@ -137,6 +283,7 @@ export function Thread() {
   const { resolvedTheme } = useTheme();
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
+  const [manualArtifactOpen, setManualArtifactOpen] = useState(false);
 
   const [threadId, _setThreadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
@@ -224,6 +371,34 @@ export function Thread() {
     startedAtMs: 0,
   });
   const [runningDotsCount, setRunningDotsCount] = useState(1);
+  const [viewportWidthPx, setViewportWidthPx] = useState(() =>
+    typeof window === "undefined" ? 1440 : window.innerWidth,
+  );
+  const [historyWidthPx, setHistoryWidthPx] = useState(
+    DEFAULT_HISTORY_WIDTH_PX,
+  );
+  const [artifactWidthPx, setArtifactWidthPx] = useState(
+    DEFAULT_ARTIFACT_FALLBACK_WIDTH_PX,
+  );
+  const [artifactExpanded, setArtifactExpanded] = useState(false);
+  const [paneDragState, setPaneDragState] = useState<PaneDragState>({
+    type: "none",
+  });
+  const preExpandLayoutRef = useRef<{
+    historyOpen: boolean;
+    historyWidth: number;
+    artifactWidth: number;
+  } | null>(null);
+  const artifactWidthInitializedRef = useRef(false);
+  const artifactPaneOpen = artifactOpen || manualArtifactOpen;
+  const isArtifactExpandedMode =
+    isLargeScreen && artifactPaneOpen && artifactExpanded;
+  const showDesktopHistoryPane =
+    isLargeScreen && chatHistoryOpen && !isArtifactExpandedMode;
+  const showDesktopArtifactHandle =
+    isLargeScreen && artifactPaneOpen && !isArtifactExpandedMode;
+  const showDesktopHistoryHandle = showDesktopHistoryPane;
+  const isPaneDragActive = paneDragState.type !== "none";
 
   const claimThreadOwnership = useCallback(
     (targetThreadId: string) => {
@@ -233,14 +408,164 @@ export function Thread() {
     },
     [markBusy, tabId],
   );
+  const restoreLayoutFromExpand = useCallback(() => {
+    const preExpandLayout = preExpandLayoutRef.current;
+    if (!preExpandLayout) return;
+    setHistoryWidthPx(preExpandLayout.historyWidth);
+    setArtifactWidthPx(preExpandLayout.artifactWidth);
+    setChatHistoryOpen(preExpandLayout.historyOpen);
+    preExpandLayoutRef.current = null;
+  }, [setChatHistoryOpen]);
 
-  const setThreadId = (id: string | null) => {
-    _setThreadId(id);
-
-    // close artifact and reset artifact context
+  const handleArtifactClose = useCallback(() => {
+    setPaneDragState({ type: "none" });
+    setManualArtifactOpen(false);
+    if (isArtifactExpandedMode) {
+      restoreLayoutFromExpand();
+    }
+    setArtifactExpanded(false);
     closeArtifact();
-    setArtifactContext({});
-  };
+  }, [closeArtifact, isArtifactExpandedMode, restoreLayoutFromExpand]);
+
+  const setThreadId = useCallback(
+    (id: string | null) => {
+      _setThreadId(id);
+
+      // close artifact and reset artifact context
+      handleArtifactClose();
+      setArtifactContext({});
+    },
+    [_setThreadId, handleArtifactClose, setArtifactContext],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncViewportWidth = () => {
+      setViewportWidthPx(window.innerWidth);
+    };
+    syncViewportWidth();
+    window.addEventListener("resize", syncViewportWidth);
+    return () => {
+      window.removeEventListener("resize", syncViewportWidth);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isLargeScreen) {
+      setArtifactExpanded(false);
+      preExpandLayoutRef.current = null;
+      setPaneDragState({ type: "none" });
+      return;
+    }
+
+    if (!artifactPaneOpen) {
+      setArtifactExpanded(false);
+      preExpandLayoutRef.current = null;
+      setPaneDragState({ type: "none" });
+    }
+  }, [artifactPaneOpen, isLargeScreen]);
+
+  useEffect(() => {
+    if (!isLargeScreen) return;
+    if (artifactWidthInitializedRef.current) return;
+    const historyForDefault = chatHistoryOpen ? historyWidthPx : 0;
+    setArtifactWidthPx(
+      getDefaultArtifactWidth(viewportWidthPx, historyForDefault),
+    );
+    artifactWidthInitializedRef.current = true;
+  }, [chatHistoryOpen, historyWidthPx, isLargeScreen, viewportWidthPx]);
+
+  useEffect(() => {
+    if (!isLargeScreen) return;
+    const normalized = normalizePaneWidths({
+      viewportWidth: viewportWidthPx,
+      chatHistoryOpen,
+      artifactOpen: artifactPaneOpen,
+      artifactExpanded,
+      historyWidth: historyWidthPx,
+      artifactWidth: artifactWidthPx,
+    });
+    if (normalized.historyWidth !== historyWidthPx) {
+      setHistoryWidthPx(normalized.historyWidth);
+    }
+    if (normalized.artifactWidth !== artifactWidthPx) {
+      setArtifactWidthPx(normalized.artifactWidth);
+    }
+  }, [
+    artifactExpanded,
+    artifactPaneOpen,
+    artifactWidthPx,
+    chatHistoryOpen,
+    historyWidthPx,
+    isLargeScreen,
+    viewportWidthPx,
+  ]);
+
+  useEffect(() => {
+    if (!isPaneDragActive || typeof document === "undefined") return;
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    return () => {
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+    };
+  }, [isPaneDragActive]);
+
+  useEffect(() => {
+    if (!isLargeScreen || paneDragState.type === "none") return;
+
+    const onPointerMove = (event: globalThis.PointerEvent) => {
+      if (paneDragState.type === "history") {
+        const artifactWidthForBounds =
+          artifactPaneOpen && !isArtifactExpandedMode ? artifactWidthPx : 0;
+        const bounds = getHistoryBounds(
+          viewportWidthPx,
+          artifactWidthForBounds,
+        );
+        const deltaX = event.clientX - paneDragState.startX;
+        const nextHistory = clamp(
+          paneDragState.startHistory + deltaX,
+          bounds.min,
+          bounds.max,
+        );
+        setHistoryWidthPx(Math.round(nextHistory));
+        return;
+      }
+
+      const historyWidthForBounds = showDesktopHistoryPane ? historyWidthPx : 0;
+      const bounds = getArtifactBounds(viewportWidthPx, historyWidthForBounds);
+      const deltaX = event.clientX - paneDragState.startX;
+      const nextArtifact = clamp(
+        paneDragState.startArtifact - deltaX,
+        bounds.min,
+        bounds.max,
+      );
+      setArtifactWidthPx(Math.round(nextArtifact));
+    };
+
+    const stopDragging = () => setPaneDragState({ type: "none" });
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopDragging);
+    window.addEventListener("pointercancel", stopDragging);
+
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopDragging);
+      window.removeEventListener("pointercancel", stopDragging);
+    };
+  }, [
+    artifactPaneOpen,
+    artifactWidthPx,
+    historyWidthPx,
+    isArtifactExpandedMode,
+    isLargeScreen,
+    paneDragState,
+    showDesktopHistoryPane,
+    viewportWidthPx,
+  ]);
 
   useEffect(() => {
     if (
@@ -335,7 +660,12 @@ export function Thread() {
     ) {
       previouslyObservedBusyThreadId.current = null;
     }
-  }, [threadId, isCurrentThreadBusyElsewhere, threadStatus, effectiveIsLoading]);
+  }, [
+    threadId,
+    isCurrentThreadBusyElsewhere,
+    threadStatus,
+    effectiveIsLoading,
+  ]);
 
   useEffect(() => {
     if (!shouldShowRunningQueryMessage) {
@@ -435,9 +765,7 @@ export function Thread() {
   useEffect(() => {
     if (!ownedBusyThreadId) return;
     if (busyByThreadId[ownedBusyThreadId]) return;
-    setOwnedBusyThreadId((prev) =>
-      prev === ownedBusyThreadId ? null : prev,
-    );
+    setOwnedBusyThreadId((prev) => (prev === ownedBusyThreadId ? null : prev));
   }, [ownedBusyThreadId, busyByThreadId]);
 
   useEffect(() => {
@@ -704,91 +1032,215 @@ export function Thread() {
     }
   };
 
+  const handleHistoryResizePointerDown = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (!isLargeScreen || !showDesktopHistoryHandle) return;
+      event.preventDefault();
+      setPaneDragState({
+        type: "history",
+        startX: event.clientX,
+        startHistory: historyWidthPx,
+      });
+    },
+    [historyWidthPx, isLargeScreen, showDesktopHistoryHandle],
+  );
+
+  const handleArtifactResizePointerDown = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (!isLargeScreen || !showDesktopArtifactHandle) return;
+      event.preventDefault();
+      setPaneDragState({
+        type: "artifact",
+        startX: event.clientX,
+        startArtifact: artifactWidthPx,
+      });
+    },
+    [artifactWidthPx, isLargeScreen, showDesktopArtifactHandle],
+  );
+
+  const handleHistoryResizeKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!isLargeScreen || !showDesktopHistoryHandle) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const artifactWidthForBounds =
+        artifactPaneOpen && !isArtifactExpandedMode ? artifactWidthPx : 0;
+      const bounds = getHistoryBounds(viewportWidthPx, artifactWidthForBounds);
+      const delta =
+        event.key === "ArrowRight" ? RESIZE_STEP_PX : -RESIZE_STEP_PX;
+      const nextHistory = clamp(historyWidthPx + delta, bounds.min, bounds.max);
+      setHistoryWidthPx(Math.round(nextHistory));
+    },
+    [
+      artifactPaneOpen,
+      artifactWidthPx,
+      historyWidthPx,
+      isArtifactExpandedMode,
+      isLargeScreen,
+      showDesktopHistoryHandle,
+      viewportWidthPx,
+    ],
+  );
+
+  const handleArtifactResizeKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!isLargeScreen || !showDesktopArtifactHandle) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const historyWidthForBounds = showDesktopHistoryPane ? historyWidthPx : 0;
+      const bounds = getArtifactBounds(viewportWidthPx, historyWidthForBounds);
+      const delta =
+        event.key === "ArrowLeft" ? RESIZE_STEP_PX : -RESIZE_STEP_PX;
+      const nextArtifact = clamp(
+        artifactWidthPx + delta,
+        bounds.min,
+        bounds.max,
+      );
+      setArtifactWidthPx(Math.round(nextArtifact));
+    },
+    [
+      artifactWidthPx,
+      historyWidthPx,
+      isLargeScreen,
+      showDesktopArtifactHandle,
+      showDesktopHistoryPane,
+      viewportWidthPx,
+    ],
+  );
+
+  const toggleArtifactExpanded = useCallback(() => {
+    if (!isLargeScreen || !artifactPaneOpen) return;
+
+    if (!artifactExpanded) {
+      preExpandLayoutRef.current = {
+        historyOpen: chatHistoryOpen,
+        historyWidth: historyWidthPx,
+        artifactWidth: artifactWidthPx,
+      };
+      setPaneDragState({ type: "none" });
+      setArtifactExpanded(true);
+      if (chatHistoryOpen) {
+        setChatHistoryOpen(false);
+      }
+      return;
+    }
+
+    restoreLayoutFromExpand();
+    setArtifactExpanded(false);
+  }, [
+    artifactExpanded,
+    artifactPaneOpen,
+    artifactWidthPx,
+    chatHistoryOpen,
+    historyWidthPx,
+    isLargeScreen,
+    restoreLayoutFromExpand,
+    setChatHistoryOpen,
+  ]);
+
   const chatStarted = !!threadId || !!messages.length;
   const hasNoAIOrToolMessages = !displayMessages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
   const logoVariant = resolvedTheme === "dark" ? "dark" : "light";
+  const desktopHistoryWidth = showDesktopHistoryPane ? historyWidthPx : 0;
+  const desktopMainGridTemplate = isLargeScreen
+    ? isArtifactExpandedMode
+      ? "0px 0px minmax(0,1fr)"
+      : artifactPaneOpen
+        ? `minmax(0,1fr) ${RESIZE_HANDLE_WIDTH_PX}px ${artifactWidthPx}px`
+        : "minmax(0,1fr) 0px 0px"
+    : undefined;
+  const mobileMainGridClasses = cn(
+    "grid-cols-[1fr_0fr] transition-all duration-500",
+    artifactPaneOpen && "grid-cols-[3fr_2fr]",
+  );
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
-      <div className="relative hidden lg:flex">
-        <motion.div
-          className="bg-background absolute z-20 h-full overflow-hidden border-r"
-          style={{ width: 300 }}
-          animate={
-            isLargeScreen
-              ? { x: chatHistoryOpen ? 0 : -300 }
-              : { x: chatHistoryOpen ? 0 : -300 }
-          }
-          initial={{ x: -300 }}
-          transition={
-            isLargeScreen
-              ? { type: "spring", stiffness: 300, damping: 30 }
-              : { duration: 0 }
-          }
-        >
-          <div
-            className="relative h-full"
-            style={{ width: 300 }}
-          >
-            <ThreadHistory />
-          </div>
-        </motion.div>
+    <div
+      className={cn(
+        "flex h-screen w-full overflow-hidden",
+        isPaneDragActive && "cursor-col-resize",
+      )}
+    >
+      <div
+        data-testid="pane-history"
+        className="relative hidden shrink-0 overflow-hidden border-r lg:flex"
+        style={{
+          width: desktopHistoryWidth,
+          transition: isPaneDragActive ? "none" : "width 200ms ease",
+        }}
+      >
+        <div className="relative h-full w-full min-w-0">
+          <ThreadHistory />
+        </div>
       </div>
 
       <div
+        data-testid="resize-handle-history-chat"
         className={cn(
-          "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
-          artifactOpen && "grid-cols-[3fr_2fr]",
+          "group relative hidden touch-none items-stretch justify-center select-none lg:flex",
+          showDesktopHistoryHandle
+            ? "cursor-col-resize"
+            : "pointer-events-none opacity-0",
         )}
+        style={{ width: showDesktopHistoryHandle ? RESIZE_HANDLE_WIDTH_PX : 0 }}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize history and chat panes"
+        aria-hidden={showDesktopHistoryHandle ? undefined : "true"}
+        tabIndex={showDesktopHistoryHandle ? 0 : -1}
+        onPointerDown={handleHistoryResizePointerDown}
+        onKeyDown={handleHistoryResizeKeyDown}
       >
-        <motion.div
+        <span
           className={cn(
-            "relative flex min-w-0 flex-1 flex-col overflow-hidden",
-            !chatStarted && "grid-rows-[1fr]",
+            "bg-border pointer-events-none my-auto h-20 w-px rounded-full transition-colors",
+            paneDragState.type === "history"
+              ? "bg-primary"
+              : "group-hover:bg-foreground/40",
           )}
-          layout={isLargeScreen}
-          animate={{
-            marginLeft: chatHistoryOpen ? (isLargeScreen ? 300 : 0) : 0,
-            width: chatHistoryOpen
-              ? isLargeScreen
-                ? "calc(100% - 300px)"
-                : "100%"
-              : "100%",
-          }}
-          transition={
+        />
+      </div>
+
+      <button
+        type="button"
+        data-testid="open-artifact-panel-test-control"
+        aria-hidden="true"
+        tabIndex={-1}
+        className="pointer-events-none absolute top-0 left-0 h-px w-px opacity-0"
+        onClick={() => setManualArtifactOpen(true)}
+      >
+        Open artifact panel
+      </button>
+
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "grid h-full w-full",
+            !isLargeScreen && mobileMainGridClasses,
+          )}
+          style={
             isLargeScreen
-              ? { type: "spring", stiffness: 300, damping: 30 }
-              : { duration: 0 }
+              ? { gridTemplateColumns: desktopMainGridTemplate }
+              : undefined
           }
         >
-          {!chatStarted && (
-            <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
-              <div>
-                {(!chatHistoryOpen || !isLargeScreen) && (
-                  <Button
-                    className="hover:bg-accent"
-                    variant="ghost"
-                    onClick={() => setChatHistoryOpen((p) => !p)}
-                  >
-                    {chatHistoryOpen ? (
-                      <PanelRightOpen className="size-5" />
-                    ) : (
-                      <PanelRightClose className="size-5" />
-                    )}
-                  </Button>
-                )}
-              </div>
-              <ThemeToggle />
-            </div>
-          )}
-          {chatStarted && (
-            <div className="relative z-10 flex items-center gap-3 p-2">
-              <div className="relative flex items-center justify-start gap-2">
-                <div className="absolute left-0 z-10">
+          <div
+            data-testid="pane-chat"
+            className={cn(
+              "relative flex min-w-0 flex-col overflow-hidden",
+              !chatStarted && "grid-rows-[1fr]",
+              isArtifactExpandedMode && "pointer-events-none opacity-0",
+            )}
+            aria-hidden={isArtifactExpandedMode ? "true" : undefined}
+          >
+            {!chatStarted && (
+              <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
+                <div>
                   {(!chatHistoryOpen || !isLargeScreen) && (
                     <Button
+                      data-testid="chat-history-toggle"
                       className="hover:bg-accent"
                       variant="ghost"
                       onClick={() => setChatHistoryOpen((p) => !p)}
@@ -801,238 +1253,321 @@ export function Thread() {
                     </Button>
                   )}
                 </div>
-                <motion.button
-                  className="flex cursor-pointer items-center gap-2"
-                  onClick={() => setThreadId(null)}
-                  animate={{
-                    marginLeft: !chatHistoryOpen ? 48 : 0,
-                  }}
-                  transition={{
-                    type: "spring",
-                    stiffness: 300,
-                    damping: 30,
-                  }}
-                >
-                  <QuestionCrafterLogoSVG
-                    width={40}
-                    height={40}
-                    variant={logoVariant}
-                  />
-                  <span className="text-xl font-semibold tracking-tight">
-                    Question Crafter
-                  </span>
-                </motion.button>
-              </div>
-              <div className="ml-auto">
                 <ThemeToggle />
               </div>
-
-              <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
-            </div>
-          )}
-
-          <StickToBottom className="relative flex-1 overflow-hidden">
-            <StickyToBottomContent
-              className={cn(
-                "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
-                !chatStarted && "mt-[25vh] flex flex-col items-stretch",
-                chatStarted && "grid grid-rows-[1fr_auto]",
-              )}
-              contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
-              content={
-                <>
-                  {displayMessages
-                    .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                    .map((message, index) =>
-                      message.type === "human" ? (
-                        <HumanMessage
-                          key={message.id || `${message.type}-${index}`}
-                          message={message}
-                          isLoading={effectiveIsLoading}
-                        />
-                      ) : (
-                        <AssistantMessage
-                          key={message.id || `${message.type}-${index}`}
-                          message={message}
-                          allMessages={displayMessages}
-                          isLoading={effectiveIsLoading}
-                          isReconnecting={isReconnecting}
-                          handleRegenerate={handleRegenerate}
-                        />
-                      ),
-                    )}
-                  {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
-                    We need to render it outside of the messages list, since there are no messages to render */}
-                  {hasNoAIOrToolMessages && !!stream.interrupt && (
-                    <AssistantMessage
-                      key="interrupt-msg"
-                      message={undefined}
-                      allMessages={displayMessages}
-                      isLoading={effectiveIsLoading}
-                      isReconnecting={isReconnecting}
-                      handleRegenerate={handleRegenerate}
-                    />
-                  )}
-                  {effectiveIsLoading && !firstTokenReceived && (
-                    <AssistantMessageLoading />
-                  )}
-                </>
-              }
-              footer={
-                <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 flex flex-col items-center gap-8 backdrop-blur">
-                  {!chatStarted && (
-                    <div className="flex items-center gap-3">
-                      <QuestionCrafterLogoSVG
-                        className="h-10 flex-shrink-0"
-                        variant={logoVariant}
-                      />
-                      <h1 className="text-2xl font-semibold tracking-tight">
-                        Question Crafter
-                      </h1>
-                    </div>
-                  )}
-
-                  <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
-
-                  {shouldShowRunningQueryMessage ? (
-                    <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
-                      <p
-                        className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
-                        aria-live="polite"
+            )}
+            {chatStarted && (
+              <div className="relative z-10 flex items-center gap-3 p-2">
+                <div className="relative flex items-center justify-start gap-2">
+                  <div className="absolute left-0 z-10">
+                    {(!chatHistoryOpen || !isLargeScreen) && (
+                      <Button
+                        data-testid="chat-history-toggle"
+                        className="hover:bg-accent"
+                        variant="ghost"
+                        onClick={() => setChatHistoryOpen((p) => !p)}
                       >
-                        Working on your query
-                        <span
-                          className="ml-1 inline-block w-4 text-left"
-                          aria-hidden="true"
-                        >
-                          {".".repeat(runningDotsCount)}
-                        </span>
-                      </p>
-                    </div>
-                  ) : null}
-                  {isReconnecting ? (
-                    <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
-                      <p
-                        data-testid="stream-reconnect-status"
-                        className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
-                        aria-live="polite"
-                      >
-                        <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
-                        {reconnectStatusText ?? "Reconnecting stream..."}
-                      </p>
-                    </div>
-                  ) : null}
-                  <div
-                    ref={dropRef}
-                    className={cn(
-                      "bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
-                      dragOver
-                        ? "border-primary border-2 border-dotted"
-                        : "border border-solid",
-                    )}
-                  >
-                    <form
-                      onSubmit={handleSubmit}
-                      className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2"
-                    >
-                      <ContentBlocksPreview
-                        blocks={contentBlocks}
-                        onRemove={removeBlock}
-                      />
-                      <textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onPaste={handlePaste}
-                        onKeyDown={(e) => {
-                          if (
-                            e.key === "Enter" &&
-                            !e.shiftKey &&
-                            !e.metaKey &&
-                            !e.nativeEvent.isComposing
-                          ) {
-                            e.preventDefault();
-                            const el = e.target as HTMLElement | undefined;
-                            const form = el?.closest("form");
-                            form?.requestSubmit();
-                          }
-                        }}
-                        placeholder="Type your message..."
-                        className="field-sizing-content max-h-[40vh] resize-none overflow-y-auto border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
-                      />
-
-                      <div className="flex items-center gap-6 p-2 pt-4">
-                        <Label
-                          htmlFor="file-input"
-                          className={cn(
-                            "flex items-center gap-2",
-                            isUploading ? "cursor-wait" : "cursor-pointer",
-                          )}
-                          aria-disabled={isUploading}
-                        >
-                          <Plus className="text-muted-foreground size-5" />
-                          <span className="text-muted-foreground text-sm">
-                            Upload PDF or Image
-                          </span>
-                          {isUploading && (
-                            <span className="text-muted-foreground ml-2 flex items-center gap-2 text-sm">
-                              <LoaderCircle className="h-4 w-4 animate-spin" />
-                              Uploading...
-                            </span>
-                          )}
-                        </Label>
-                        <input
-                          id="file-input"
-                          type="file"
-                          onChange={handleFileUpload}
-                          multiple
-                          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                          className="hidden"
-                          disabled={isUploading}
-                        />
-                        {effectiveIsLoading ? (
-                          <Button
-                            type="button"
-                            key="stop"
-                            onClick={() => void handleCancel()}
-                            className="ml-auto"
-                          >
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                            Cancel
-                          </Button>
+                        {chatHistoryOpen ? (
+                          <PanelRightOpen className="size-5" />
                         ) : (
-                          <Button
-                            type="submit"
-                            className="ml-auto shadow-md transition-all"
-                            disabled={
-                              effectiveIsLoading ||
-                              isCurrentThreadBusyElsewhere ||
-                              isUploading ||
-                              (!input.trim() && contentBlocks.length === 0)
-                            }
-                          >
-                            Send
-                          </Button>
+                          <PanelRightClose className="size-5" />
                         )}
-                      </div>
-                    </form>
+                      </Button>
+                    )}
                   </div>
+                  <motion.button
+                    className="flex cursor-pointer items-center gap-2"
+                    onClick={() => setThreadId(null)}
+                    animate={{
+                      marginLeft: !chatHistoryOpen ? 48 : 0,
+                    }}
+                    transition={{
+                      type: "spring",
+                      stiffness: 300,
+                      damping: 30,
+                    }}
+                  >
+                    <QuestionCrafterLogoSVG
+                      width={40}
+                      height={40}
+                      variant={logoVariant}
+                    />
+                    <span className="text-xl font-semibold tracking-tight">
+                      Question Crafter
+                    </span>
+                  </motion.button>
                 </div>
-              }
-            />
-          </StickToBottom>
-        </motion.div>
-        <div className="relative flex flex-col border-l">
-          <div className="absolute inset-0 flex min-w-[30vw] flex-col overflow-hidden">
-            <div className="grid grid-cols-[1fr_auto] border-b p-4">
-              <ArtifactTitle className="truncate overflow-hidden" />
-              <button
-                onClick={closeArtifact}
-                className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-              >
-                <XIcon className="size-5" />
-              </button>
+                <div className="ml-auto">
+                  <ThemeToggle />
+                </div>
+
+                <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
+              </div>
+            )}
+
+            <StickToBottom className="relative flex-1 overflow-hidden">
+              <StickyToBottomContent
+                className={cn(
+                  "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
+                  !chatStarted && "mt-[25vh] flex flex-col items-stretch",
+                  chatStarted && "grid grid-rows-[1fr_auto]",
+                )}
+                contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
+                content={
+                  <>
+                    {displayMessages
+                      .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
+                      .map((message, index) =>
+                        message.type === "human" ? (
+                          <HumanMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            isLoading={effectiveIsLoading}
+                          />
+                        ) : (
+                          <AssistantMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            allMessages={displayMessages}
+                            isLoading={effectiveIsLoading}
+                            isReconnecting={isReconnecting}
+                            handleRegenerate={handleRegenerate}
+                          />
+                        ),
+                      )}
+                    {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
+                      We need to render it outside of the messages list, since there are no messages to render */}
+                    {hasNoAIOrToolMessages && !!stream.interrupt && (
+                      <AssistantMessage
+                        key="interrupt-msg"
+                        message={undefined}
+                        allMessages={displayMessages}
+                        isLoading={effectiveIsLoading}
+                        isReconnecting={isReconnecting}
+                        handleRegenerate={handleRegenerate}
+                      />
+                    )}
+                    {effectiveIsLoading && !firstTokenReceived && (
+                      <AssistantMessageLoading />
+                    )}
+                  </>
+                }
+                footer={
+                  <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 flex flex-col items-center gap-8 backdrop-blur">
+                    {!chatStarted && (
+                      <div className="flex items-center gap-3">
+                        <QuestionCrafterLogoSVG
+                          className="h-10 flex-shrink-0"
+                          variant={logoVariant}
+                        />
+                        <h1 className="text-2xl font-semibold tracking-tight">
+                          Question Crafter
+                        </h1>
+                      </div>
+                    )}
+
+                    <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
+
+                    {shouldShowRunningQueryMessage ? (
+                      <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
+                        <p
+                          className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
+                          aria-live="polite"
+                        >
+                          Working on your query
+                          <span
+                            className="ml-1 inline-block w-4 text-left"
+                            aria-hidden="true"
+                          >
+                            {".".repeat(runningDotsCount)}
+                          </span>
+                        </p>
+                      </div>
+                    ) : null}
+                    {isReconnecting ? (
+                      <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
+                        <p
+                          data-testid="stream-reconnect-status"
+                          className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
+                          aria-live="polite"
+                        >
+                          <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
+                          {reconnectStatusText ?? "Reconnecting stream..."}
+                        </p>
+                      </div>
+                    ) : null}
+                    <div
+                      ref={dropRef}
+                      className={cn(
+                        "bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
+                        dragOver
+                          ? "border-primary border-2 border-dotted"
+                          : "border border-solid",
+                      )}
+                    >
+                      <form
+                        onSubmit={handleSubmit}
+                        className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2"
+                      >
+                        <ContentBlocksPreview
+                          blocks={contentBlocks}
+                          onRemove={removeBlock}
+                        />
+                        <textarea
+                          value={input}
+                          onChange={(e) => setInput(e.target.value)}
+                          onPaste={handlePaste}
+                          onKeyDown={(e) => {
+                            if (
+                              e.key === "Enter" &&
+                              !e.shiftKey &&
+                              !e.metaKey &&
+                              !e.nativeEvent.isComposing
+                            ) {
+                              e.preventDefault();
+                              const el = e.target as HTMLElement | undefined;
+                              const form = el?.closest("form");
+                              form?.requestSubmit();
+                            }
+                          }}
+                          placeholder="Type your message..."
+                          className="field-sizing-content max-h-[40vh] resize-none overflow-y-auto border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
+                        />
+
+                        <div className="flex items-center gap-6 p-2 pt-4">
+                          <Label
+                            htmlFor="file-input"
+                            className={cn(
+                              "flex items-center gap-2",
+                              isUploading ? "cursor-wait" : "cursor-pointer",
+                            )}
+                            aria-disabled={isUploading}
+                          >
+                            <Plus className="text-muted-foreground size-5" />
+                            <span className="text-muted-foreground text-sm">
+                              Upload PDF or Image
+                            </span>
+                            {isUploading && (
+                              <span className="text-muted-foreground ml-2 flex items-center gap-2 text-sm">
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                                Uploading...
+                              </span>
+                            )}
+                          </Label>
+                          <input
+                            id="file-input"
+                            type="file"
+                            onChange={handleFileUpload}
+                            multiple
+                            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                            className="hidden"
+                            disabled={isUploading}
+                          />
+                          {effectiveIsLoading ? (
+                            <Button
+                              type="button"
+                              key="stop"
+                              onClick={() => void handleCancel()}
+                              className="ml-auto"
+                            >
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                              Cancel
+                            </Button>
+                          ) : (
+                            <Button
+                              type="submit"
+                              className="ml-auto shadow-md transition-all"
+                              disabled={
+                                effectiveIsLoading ||
+                                isCurrentThreadBusyElsewhere ||
+                                isUploading ||
+                                (!input.trim() && contentBlocks.length === 0)
+                              }
+                            >
+                              Send
+                            </Button>
+                          )}
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                }
+              />
+            </StickToBottom>
+          </div>
+
+          {isLargeScreen ? (
+            <div
+              data-testid="resize-handle-chat-artifact"
+              className={cn(
+                "group relative hidden touch-none items-stretch justify-center select-none lg:flex",
+                showDesktopArtifactHandle
+                  ? "cursor-col-resize"
+                  : "pointer-events-none opacity-0",
+              )}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize chat and artifact panes"
+              aria-hidden={showDesktopArtifactHandle ? undefined : "true"}
+              tabIndex={showDesktopArtifactHandle ? 0 : -1}
+              onPointerDown={handleArtifactResizePointerDown}
+              onKeyDown={handleArtifactResizeKeyDown}
+            >
+              <span
+                className={cn(
+                  "bg-border pointer-events-none my-auto h-20 w-px rounded-full transition-colors",
+                  paneDragState.type === "artifact"
+                    ? "bg-primary"
+                    : "group-hover:bg-foreground/40",
+                )}
+              />
             </div>
-            <ArtifactContent className="[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 relative flex-grow overflow-y-scroll pr-1 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent" />
+          ) : null}
+
+          <div
+            data-testid="pane-artifact"
+            className={cn(
+              "relative flex min-w-0 flex-col border-l",
+              !artifactPaneOpen && "pointer-events-none",
+            )}
+          >
+            <div className="absolute inset-0 flex min-w-0 flex-col overflow-hidden">
+              <div className="grid grid-cols-[1fr_auto_auto] gap-2 border-b p-4">
+                <ArtifactTitle className="truncate overflow-hidden" />
+                {isLargeScreen ? (
+                  <button
+                    type="button"
+                    data-testid="artifact-expand-toggle"
+                    aria-label={
+                      isArtifactExpandedMode
+                        ? "Restore pane layout"
+                        : "Expand artifact panel"
+                    }
+                    onClick={toggleArtifactExpanded}
+                    className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                  >
+                    {isArtifactExpandedMode ? (
+                      <Minimize2 className="size-5" />
+                    ) : (
+                      <Maximize2 className="size-5" />
+                    )}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleArtifactClose}
+                  className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                >
+                  <XIcon className="size-5" />
+                </button>
+              </div>
+              <ArtifactContent className="[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 relative flex-grow overflow-y-scroll pr-1 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent" />
+              {manualArtifactOpen && !artifactOpen ? (
+                <div className="text-muted-foreground p-4 text-sm">
+                  Artifact panel
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

@@ -201,7 +201,7 @@ function ThreadList({
           >
             {editingThreadId === t.thread_id ? (
               <form
-                className="bg-card border-border flex w-[280px] items-center gap-0.5 rounded-md border p-1"
+                className="bg-card border-border flex w-full items-center gap-0.5 rounded-md border p-1"
                 onSubmit={(e) => {
                   e.preventDefault();
                   onRenameSubmit(t);
@@ -246,7 +246,7 @@ function ThreadList({
                   variant="ghost"
                   data-thread-id={t.thread_id}
                   data-thread-active={isActive ? "true" : "false"}
-                  className={`w-[280px] items-center justify-start gap-2 pr-9 text-left font-normal ${
+                  className={`w-full items-center justify-start gap-2 pr-9 text-left font-normal ${
                     isActive
                       ? "bg-accent text-accent-foreground hover:bg-accent"
                       : ""
@@ -310,7 +310,7 @@ function ThreadHistoryLoading() {
       {Array.from({ length: 30 }).map((_, i) => (
         <Skeleton
           key={`skeleton-${i}`}
-          className="h-10 w-[280px]"
+          className="h-10 w-full"
         />
       ))}
     </div>
@@ -518,8 +518,7 @@ export default function ThreadHistory() {
   const hasUnseenThread = useMemo(() => {
     return threads.some((thread) => {
       const isBusy =
-        busyByThreadId[thread.thread_id] ||
-        isThreadActiveStatus(thread.status);
+        busyByThreadId[thread.thread_id] || isThreadActiveStatus(thread.status);
       if (isBusy) return false;
       if (thread.thread_id === currentThreadId) return false;
       const updatedAtMs = getThreadUpdatedAtMs(thread);
@@ -616,7 +615,7 @@ export default function ThreadHistory() {
 
   return (
     <>
-      <div className="shadow-inner-right border-border hidden h-screen w-[300px] shrink-0 flex-col items-start justify-start gap-6 border-r-[1px] lg:flex">
+      <div className="shadow-inner-right border-border hidden h-screen w-full shrink-0 flex-col items-start justify-start gap-6 border-r-[1px] lg:flex">
         <div className="flex w-full items-center justify-between px-4 pt-1.5">
           <h1 className="text-left text-xl font-semibold tracking-tight">
             Chat History

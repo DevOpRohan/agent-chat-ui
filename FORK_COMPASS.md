@@ -52,6 +52,7 @@ Tracking anchor commits:
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
+- 2026-02-09: Add desktop three-pane layout controls for chat history, chat/composer, and artifact views: horizontal drag-resize handles for history↔chat and chat↔artifact boundaries, artifact full-width expand/restore toggle in the artifact header, and width restoration when leaving full-width mode. Includes pane-layout Playwright coverage and responsive guardrails so the behavior stays desktop-only (`>=1024px`). Files: `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `tests/pane-layout.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-09: Cap composer textarea growth at a viewport-based threshold and enable internal scrolling after the limit so long multi-line drafts do not consume the full screen. File: `src/components/thread/index.tsx`.
 - 2026-02-08: Add app-level stream reconnect controller for mid-run disconnect recovery (no manual refresh), extend stream error classification with recoverable disconnect signatures, keep composer/intermediate loading UX aligned during reconnect, harden run ownership transitions across thread switches, and make history running indicator semantics strictly backend `busy`. Added reconnect-focused E2E coverage scaffold. Files: `src/hooks/use-stream-auto-reconnect.ts`, `src/lib/stream-error-classifier.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/history/index.tsx`, `tests/auto-reconnect-disconnect.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-08: Add cross-tab observer mode for active threads and harden stream error classification so expected interrupt/breakpoint signals (including human breakpoint and cancel/abort-style errors) do not show generic fatal toasts. Active-run state in another tab now keeps draft text editable while disabling send for that thread, observer lock release aligns to active `busy` status so it clears after cancellation/interrupt transitions, and composer UX now includes explicit fallback copy plus a reload action for stale cross-tab/cross-browser/device sync. Running-thread submit/regenerate blocking toast behavior remains intact and is asserted in E2E. Files: `src/lib/stream-error-classifier.ts`, `src/components/thread/index.tsx`, `tests/cross-tab-observer.spec.ts`, `tests/submit-guard.spec.ts`, `README.md`, `FORK_COMPASS.md`.
@@ -214,6 +215,7 @@ Tracking anchor commits:
 - Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
 - Intermediate reasoning/tool content now routes through one `Intermediate Step` launcher in the chat message area and renders full ordered details in the right artifact pane, including tool calls, tool results, and streaming status text.
 - Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
+- Desktop layout now supports draggable pane boundaries (history↔chat and chat↔artifact) and an artifact full-width expand/restore control in the artifact header; leaving full-width mode restores prior pane widths, while reload resets pane widths to defaults.
 - Tail AI message rendering now applies a monotonic guard for the active thread/branch so final assistant text does not shrink if SDK history refetch temporarily returns a shorter snapshot than live stream output.
 - Benign React `#185` stream errors are filtered from the generic run-error toast path to avoid false failure alerts for users.
 - Markdown code blocks now use `rehype-pretty-code` (`shiki`) with GitHub light/dark themes for stronger language coverage and consistent syntax color quality across streamed and final output.
@@ -324,6 +326,7 @@ Use this as a jump list when editing or debugging:
 
 **E2E coverage**
 
+- `tests/pane-layout.spec.ts`
 - `tests/final-stream-continuity.spec.ts`
 - `tests/auto-reconnect-disconnect.spec.ts`
 - `tests/cross-tab-observer.spec.ts`
