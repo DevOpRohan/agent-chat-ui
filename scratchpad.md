@@ -138,10 +138,15 @@
 - 2026-02-11T04:27:00Z | Manual scratchpad section merge | PASS | Recorded pane task context in current scratchpad baseline.
 
 ### Deploy/Test Run Log
-- Pending in this run.
+- 2026-02-11T04:28:00Z | `pnpm lint` | PASS | No lint errors; existing repository warnings unchanged.
+- 2026-02-11T04:29:00Z | `pnpm build` | PASS | Build/type-check succeeded with `.env/.env.local` loaded.
+- 2026-02-11T04:35:00Z | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 pnpm exec playwright test tests/pane-layout.spec.ts --project=chromium --workers=1 --reporter=line` | PASS | New pane layout spec passed locally (auth setup + pane spec).
+- 2026-02-11T04:33:00Z | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 pnpm exec playwright test tests/pane-layout.spec.ts tests/thread-history.spec.ts tests/final-stream-continuity.spec.ts tests/submit-guard.spec.ts tests/reconnect.spec.ts tests/cross-tab-observer.spec.ts tests/auto-reconnect-disconnect.spec.ts --project=chromium --workers=1 --reporter=line` | FAIL | 10 failures in reconnect/stream/history guard suites; local backend did not reach expected active-run `Cancel`/new `threadId` states in those scenarios.
+- 2026-02-11T04:36:00Z | Deploy step | SKIPPED | This run focused on code integration + local validation + push to `main`.
 
 ### Failed Hypotheses
-- None in this run.
+- Full local regression matrix would pass with current local runtime/backend behavior. | FAIL | Most long-run dependent suites failed because active-run conditions were not reached locally.
 
 ### Final Learning
 - Patch portability improves when scratchpad updates are append-only instead of context-replacing broad existing sections.
+- New pane-layout behavior is validated by dedicated Playwright coverage independent of long-run backend timing.
