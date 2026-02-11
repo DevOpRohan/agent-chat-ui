@@ -13,10 +13,12 @@ import {
 import { createPortal } from "react-dom";
 
 type Setter<T> = (value: T | ((value: T) => T)) => void;
+type ArtifactSurfaceMode = "default" | "iframe";
 
 const ArtifactSlotContext = createContext<{
   open: [string | null, Setter<string | null>];
   mounted: [string | null, Setter<string | null>];
+  surfaceMode: [ArtifactSurfaceMode, Setter<ArtifactSurfaceMode>];
 
   title: [HTMLElement | null, Setter<HTMLElement | null>];
   content: [HTMLElement | null, Setter<HTMLElement | null>];
@@ -33,10 +35,12 @@ const ArtifactSlot = (props: {
   id: string;
   children?: ReactNode;
   title?: ReactNode;
+  surfaceMode?: ArtifactSurfaceMode;
 }) => {
   const context = useContext(ArtifactSlotContext);
 
   const [ctxMounted, ctxSetMounted] = context.mounted;
+  const [, setSurfaceMode] = context.surfaceMode;
   const [content] = context.content;
   const [title] = context.title;
 
@@ -46,8 +50,20 @@ const ArtifactSlot = (props: {
   useEffect(() => {
     if (isEmpty) {
       ctxSetMounted((open) => (open === props.id ? null : open));
+      if (ctxMounted === props.id) {
+        setSurfaceMode("default");
+      }
     }
-  }, [isEmpty, ctxSetMounted, props.id]);
+  }, [ctxMounted, isEmpty, ctxSetMounted, props.id, setSurfaceMode]);
+
+  useEffect(() => {
+    if (!isMounted) return;
+    const mode = props.surfaceMode ?? "default";
+    setSurfaceMode(mode);
+    return () => {
+      setSurfaceMode((current) => (current === mode ? "default" : current));
+    };
+  }, [isMounted, props.surfaceMode, setSurfaceMode]);
 
   if (!isMounted) return null;
   return (
@@ -101,11 +117,12 @@ export function ArtifactProvider(props: { children?: ReactNode }) {
 
   const open = useState<string | null>(null);
   const mounted = useState<string | null>(null);
+  const surfaceMode = useState<ArtifactSurfaceMode>("default");
   const context = useState<Record<string, unknown>>({});
 
   return (
     <ArtifactSlotContext.Provider
-      value={{ open, mounted, title, content, context }}
+      value={{ open, mounted, surfaceMode, title, content, context }}
     >
       {props.children}
     </ArtifactSlotContext.Provider>
@@ -139,11 +156,16 @@ export function useArtifact() {
   );
 
   const ArtifactContent = useCallback(
-    (props: { title?: React.ReactNode; children: React.ReactNode }) => {
+    (props: {
+      title?: React.ReactNode;
+      children: React.ReactNode;
+      surfaceMode?: ArtifactSurfaceMode;
+    }) => {
       return (
         <ArtifactSlot
           id={id}
           title={props.title}
+          surfaceMode={props.surfaceMode}
         >
           {props.children}
         </ArtifactSlot>
@@ -177,6 +199,11 @@ export function useArtifactOpen() {
   const onClose = useCallback(() => setCtxOpen(null), [setCtxOpen]);
 
   return [open, onClose] as const;
+}
+
+export function useArtifactSurfaceMode() {
+  const context = useContext(ArtifactSlotContext);
+  return context.surfaceMode[0];
 }
 
 /**

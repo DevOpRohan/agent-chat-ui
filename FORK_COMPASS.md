@@ -39,19 +39,20 @@ Key differences in one sentence:
 ## 2) Diff Snapshot (Upstream vs Fork)
 
 - **Upstream status:** 0 commits behind
-- **Fork status:** 55 commits ahead
-- **Files changed vs upstream:** 68
-- **Net diff vs upstream:** +6292 / -958 lines
+- **Fork status:** 62 commits ahead
+- **Files changed vs upstream:** 77
+- **Net diff vs upstream:** +9637 / -1177 lines
 
 Tracking anchor commits:
 
-- **Fork HEAD:** `2d99f2e`
+- **Fork HEAD:** `c1c447d`
 - **Upstream main:** `1a0e8af`
 
 ---
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
+- 2026-02-11: Add local `topic_preview_artifact` rendering with a click-anywhere assistant card and right-pane `Topic Preview` iframe plus icon actions (`download`, `share`, `refresh`). Rendering now relies on backend `ui` events (no tool-result inference), with deterministic single-card behavior, full-height iframe pane treatment, and smooth-scroll hardening in the artifact surface. Added Playwright coverage for artifact panel behavior and scroll stability. Files: `src/components/thread/messages/topic-preview-artifact.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/artifact.tsx`, `src/components/thread/index.tsx`, `tests/topic-artifact-ui.spec.ts`, `tests/topic-artifact-smooth-scroll.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-11: Remove chat-pane horizontal overflow for long unbroken user tokens/URLs on top of the desktop resizable-pane layout by constraining the chat scroll container (`overflow-x: hidden`), tightening human bubble flex/width constraints, and hardening markdown long-token wrapping. Added deterministic Playwright coverage for long token/URL responsiveness (desktop + intermediate step + mobile). Files: `src/components/thread/index.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/markdown-styles.css`, `tests/chat-pane-responsive.spec.ts`, `FORK_COMPASS.md`.
 - 2026-02-09: Add desktop three-pane layout controls for chat history, chat/composer, and artifact views: horizontal drag-resize handles for history↔chat and chat↔artifact boundaries, artifact full-width expand/restore toggle in the artifact header, and width restoration when leaving full-width mode. Includes pane-layout Playwright coverage and responsive guardrails so the behavior stays desktop-only (`>=1024px`). Files: `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `tests/pane-layout.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-09: Cap composer textarea growth at a viewport-based threshold and enable internal scrolling after the limit so long multi-line drafts do not consume the full screen. File: `src/components/thread/index.tsx`.
@@ -217,6 +218,8 @@ Tracking anchor commits:
 - Intermediate reasoning/tool content now routes through one `Intermediate Step` launcher in the chat message area and renders full ordered details in the right artifact pane, including tool calls, tool results, and streaming status text.
 - Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
 - Desktop layout now supports draggable pane boundaries (history↔chat and chat↔artifact) and an artifact full-width expand/restore control in the artifact header; leaving full-width mode restores prior pane widths, while reload resets pane widths to defaults.
+- `topic_preview_artifact` UI events now render through a local component map in `LoadExternalComponent`, showing a click-anywhere artifact card in assistant turns that opens a right-pane iframe preview.
+- Topic artifact actions support JSON download, preview-link sharing (clipboard + toast), and iframe refresh with a deterministic reload token.
 - Tail AI message rendering now applies a monotonic guard for the active thread/branch so final assistant text does not shrink if SDK history refetch temporarily returns a shorter snapshot than live stream output.
 - Benign React `#185` stream errors are filtered from the generic run-error toast path to avoid false failure alerts for users.
 - Markdown code blocks now use `rehype-pretty-code` (`shiki`) with GitHub light/dark themes for stronger language coverage and consistent syntax color quality across streamed and final output.
@@ -316,6 +319,7 @@ Use this as a jump list when editing or debugging:
 
 - `src/components/thread/messages/tool-calls.tsx`
 - `src/components/thread/messages/ai.tsx`
+- `src/components/thread/messages/topic-preview-artifact.tsx`
 - `src/components/thread/markdown-text.tsx`
 - `src/components/thread/markdown-styles.css`
 - `src/components/thread/history/index.tsx`
@@ -334,6 +338,8 @@ Use this as a jump list when editing or debugging:
 - `tests/auto-reconnect-disconnect.spec.ts`
 - `tests/cross-tab-observer.spec.ts`
 - `tests/submit-guard.spec.ts`
+- `tests/topic-artifact-ui.spec.ts`
+- `tests/topic-artifact-smooth-scroll.spec.ts`
 
 **Config, build, deploy**
 
@@ -366,6 +372,15 @@ Use this as a jump list when editing or debugging:
 
 Commits unique to this fork (upstream/main..HEAD):
 
+- `c1c447d` fix(chat): prevent horizontal overflow with resizable panes
+- `9fb2055` docs: update scratchpad validation log for desktop pane rollout
+- `a0fa077` feat(ui): add desktop resizable 3-pane layout with artifact full-width toggle
+- `4ae25be` fix: cap composer growth with internal scrolling
+- `5cf791e` docs(agents): reference engineering principle workflow
+- `7406bcf` fix(stream): add zero-refresh reconnect UX and engineering playbook
+- `dd99e00` fix(thread): harden cross-tab observer UX and interrupt handling
+- `2d99f2e` fix(markdown): fail open on malformed latex rendering
+- `bcda5a0` docs: refresh fork compass for favicon branding sync
 - `44fe615` fix(branding): sync favicon and apple icon assets
 - `b9ad64f` docs: refresh fork compass after markdown link contrast fix
 - `a95bf63` fix(ui): restore markdown link contrast in dark mode

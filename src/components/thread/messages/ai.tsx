@@ -21,8 +21,12 @@ import { useArtifact } from "../artifact";
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses";
+import { TopicPreviewArtifact } from "./topic-preview-artifact";
 
 const REASONING_PREVIEW_CHARS = 500;
+const LOCAL_UI_COMPONENTS = {
+  topic_preview_artifact: TopicPreviewArtifact,
+};
 type OrderedContentPart =
   | {
       kind: "text";
@@ -613,9 +617,44 @@ function CustomComponent({
 }) {
   const artifact = useArtifact();
   const { values } = useStreamContext();
-  const customComponents = values.ui?.filter(
+  const uiMessages = values.ui ?? [];
+  const directMatches = uiMessages.filter(
     (ui) => ui.metadata?.message_id === message.id,
   );
+
+  const assistantMessageIds = new Set(
+    thread.messages
+      .filter((candidate) => candidate.type === "ai" && !!candidate.id)
+      .map((candidate) => candidate.id),
+  );
+
+  const latestAssistantMessage = [...thread.messages]
+    .reverse()
+    .find((candidate) => candidate.type === "ai" && !!candidate.id);
+
+  const messageIsLatestAssistant =
+    message.type === "ai" &&
+    !!message.id &&
+    latestAssistantMessage?.id === message.id;
+
+  const unmatchedTopicArtifact = messageIsLatestAssistant
+    ? [...uiMessages]
+        .reverse()
+        .find((ui) => {
+          if (ui.name !== "topic_preview_artifact") return false;
+          const linkedMessageId =
+            typeof ui.metadata?.message_id === "string"
+              ? ui.metadata.message_id
+              : null;
+          return !linkedMessageId || !assistantMessageIds.has(linkedMessageId);
+        })
+    : undefined;
+
+  const customComponents =
+    unmatchedTopicArtifact &&
+    !directMatches.some((candidate) => candidate.id === unmatchedTopicArtifact.id)
+      ? [...directMatches, unmatchedTopicArtifact]
+      : directMatches;
 
   if (!customComponents?.length) return null;
   return (
@@ -626,6 +665,7 @@ function CustomComponent({
           stream={thread}
           message={customComponent}
           meta={{ ui: customComponent, artifact }}
+          components={LOCAL_UI_COMPONENTS}
         />
       ))}
     </Fragment>

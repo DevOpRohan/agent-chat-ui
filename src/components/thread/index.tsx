@@ -49,6 +49,7 @@ import {
   ArtifactContent,
   ArtifactTitle,
   useArtifactContext,
+  useArtifactSurfaceMode,
 } from "./artifact";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { useTheme } from "next-themes";
@@ -283,6 +284,7 @@ function ScrollToBottom(props: { className?: string }) {
 export function Thread() {
   const { resolvedTheme } = useTheme();
   const [artifactContext, setArtifactContext] = useArtifactContext();
+  const artifactSurfaceMode = useArtifactSurfaceMode();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
   const [manualArtifactOpen, setManualArtifactOpen] = useState(false);
 
@@ -392,6 +394,7 @@ export function Thread() {
   } | null>(null);
   const artifactWidthInitializedRef = useRef(false);
   const artifactPaneOpen = artifactOpen || manualArtifactOpen;
+  const isIframeArtifactSurface = artifactSurfaceMode === "iframe";
   const isArtifactExpandedMode =
     isLargeScreen && artifactPaneOpen && artifactExpanded;
   const showDesktopHistoryPane =
@@ -1533,8 +1536,8 @@ export function Thread() {
             )}
           >
             <div className="absolute inset-0 flex min-w-0 flex-col overflow-hidden">
-              <div className="grid grid-cols-[1fr_auto_auto] gap-2 border-b p-4">
-                <ArtifactTitle className="truncate overflow-hidden" />
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b p-4">
+                <ArtifactTitle className="min-w-0 overflow-hidden" />
                 {isLargeScreen ? (
                   <button
                     type="button"
@@ -1562,7 +1565,15 @@ export function Thread() {
                   <XIcon className="size-5" />
                 </button>
               </div>
-              <ArtifactContent className="[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 relative flex-grow overflow-y-scroll pr-1 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent" />
+              <ArtifactContent
+                data-testid="artifact-content"
+                className={cn(
+                  "relative flex-grow min-h-0",
+                  isIframeArtifactSurface
+                    ? "overflow-hidden pr-0 [scrollbar-gutter:auto]"
+                    : "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 overflow-y-scroll pr-1 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
+                )}
+              />
               {manualArtifactOpen && !artifactOpen ? (
                 <div className="text-muted-foreground p-4 text-sm">
                   Artifact panel
