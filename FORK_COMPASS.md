@@ -1,6 +1,6 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-02-09_  
+_Last updated: 2026-02-11_  
 _Branch: main_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
@@ -52,6 +52,7 @@ Tracking anchor commits:
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
+- 2026-02-11: Remove chat-pane horizontal overflow for long unbroken user tokens/URLs on top of the desktop resizable-pane layout by constraining the chat scroll container (`overflow-x: hidden`), tightening human bubble flex/width constraints, and hardening markdown long-token wrapping. Added deterministic Playwright coverage for long token/URL responsiveness (desktop + intermediate step + mobile). Files: `src/components/thread/index.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/markdown-styles.css`, `tests/chat-pane-responsive.spec.ts`, `FORK_COMPASS.md`.
 - 2026-02-09: Add desktop three-pane layout controls for chat history, chat/composer, and artifact views: horizontal drag-resize handles for history↔chat and chat↔artifact boundaries, artifact full-width expand/restore toggle in the artifact header, and width restoration when leaving full-width mode. Includes pane-layout Playwright coverage and responsive guardrails so the behavior stays desktop-only (`>=1024px`). Files: `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `tests/pane-layout.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-09: Cap composer textarea growth at a viewport-based threshold and enable internal scrolling after the limit so long multi-line drafts do not consume the full screen. File: `src/components/thread/index.tsx`.
 - 2026-02-08: Add app-level stream reconnect controller for mid-run disconnect recovery (no manual refresh), extend stream error classification with recoverable disconnect signatures, keep composer/intermediate loading UX aligned during reconnect, harden run ownership transitions across thread switches, and make history running indicator semantics strictly backend `busy`. Added reconnect-focused E2E coverage scaffold. Files: `src/hooks/use-stream-auto-reconnect.ts`, `src/lib/stream-error-classifier.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/history/index.tsx`, `tests/auto-reconnect-disconnect.spec.ts`, `README.md`, `FORK_COMPASS.md`.
@@ -235,6 +236,7 @@ Tracking anchor commits:
 - Thread history items show run-in-progress spinners and unseen completion dots using localStorage last-seen tracking.
 - History polling now uses a lighter `/threads/search` payload (`select` fields, no `values`), pauses when history is not visible, pauses while the tab is hidden, and avoids rerenders when thread signatures have not changed.
 - History list lazy-loads metadata in 20-thread batches on downward scroll and shows an inline `Loading more history...` spinner while the next batch fetches.
+- Chat scroll container now explicitly hides horizontal overflow, and both human bubble text and markdown text blocks apply safer long-token wrapping (`overflow-wrap:anywhere`) so long unbroken content does not push the chat pane horizontally, including with artifact pane open.
 
 ---
 
@@ -326,6 +328,7 @@ Use this as a jump list when editing or debugging:
 
 **E2E coverage**
 
+- `tests/chat-pane-responsive.spec.ts`
 - `tests/pane-layout.spec.ts`
 - `tests/final-stream-continuity.spec.ts`
 - `tests/auto-reconnect-disconnect.spec.ts`

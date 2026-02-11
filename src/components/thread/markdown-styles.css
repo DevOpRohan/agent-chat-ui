@@ -5,6 +5,8 @@
   padding: 0.2em 0.4em;
   border-radius: 3px;
   font-size: 0.9em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-content a {
@@ -22,6 +24,15 @@
   border-left: 4px solid var(--border);
   padding-left: 1rem;
   color: var(--muted-foreground);
+}
+
+.markdown-content p,
+.markdown-content li,
+.markdown-content blockquote,
+.markdown-content td,
+.markdown-content th {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-content pre {

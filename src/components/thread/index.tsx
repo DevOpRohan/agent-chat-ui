@@ -248,6 +248,7 @@ function StickyToBottomContent(props: {
   return (
     <div
       ref={context.scrollRef}
+      data-testid="chat-scroll-container"
       style={{ width: "100%", height: "100%" }}
       className={props.className}
     >
@@ -1308,11 +1309,11 @@ export function Thread() {
             <StickToBottom className="relative flex-1 overflow-hidden">
               <StickyToBottomContent
                 className={cn(
-                  "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
+                  "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 absolute inset-0 overflow-x-hidden overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
                   !chatStarted && "mt-[25vh] flex flex-col items-stretch",
                   chatStarted && "grid grid-rows-[1fr_auto]",
                 )}
-                contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
+                contentClassName="pt-8 pb-16 max-w-3xl min-w-0 mx-auto flex w-full flex-col gap-4"
                 content={
                   <>
                     {displayMessages

@@ -82,11 +82,16 @@ export function HumanMessage({
   return (
     <div
       className={cn(
-        "group ml-auto flex items-center gap-2",
-        isEditing && "w-full max-w-xl",
+        "group ml-auto flex w-full min-w-0 items-center justify-end gap-2",
+        isEditing && "max-w-xl",
       )}
     >
-      <div className={cn("flex flex-col gap-2", isEditing && "w-full")}>
+      <div
+        className={cn(
+          "flex max-w-full min-w-0 flex-col gap-2",
+          isEditing && "w-full",
+        )}
+      >
         {isEditing ? (
           <EditableContent
             value={value}
@@ -102,7 +107,11 @@ export function HumanMessage({
                   (acc, block, idx) => {
                     if (isPreviewableContentBlock(block)) {
                       acc.push(
-                        <MultimodalPreview key={idx} block={block} size="md" />,
+                        <MultimodalPreview
+                          key={idx}
+                          block={block}
+                          size="md"
+                        />,
                       );
                     }
                     return acc;
@@ -113,7 +122,7 @@ export function HumanMessage({
             )}
             {/* Render text if present, otherwise fallback to file/image name */}
             {contentString ? (
-              <p className="bg-muted ml-auto w-fit rounded-3xl px-4 py-2 whitespace-pre-wrap">
+              <p className="bg-muted ml-auto inline-block w-fit max-w-[min(100%,72ch)] rounded-3xl px-4 py-2 [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap">
                 {contentString}
               </p>
             ) : null}
