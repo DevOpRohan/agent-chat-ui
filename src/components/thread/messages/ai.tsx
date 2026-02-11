@@ -18,7 +18,7 @@ import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses";
 import { TopicPreviewArtifact } from "./topic-preview-artifact";
@@ -188,7 +188,7 @@ function ThinkingPanel({ text }: { text: string }) {
   const previewText = getReasoningPreview(text);
   const contentRef = useRef<HTMLPreElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
-  const [stickToBottom, setStickToBottom] = useState(true);
+  const stickToBottomRef = useRef(true);
 
   const scrollToBottom = () => {
     const el = contentRef.current;
@@ -197,15 +197,15 @@ function ThinkingPanel({ text }: { text: string }) {
   };
 
   useEffect(() => {
-    if (!isOpen || !stickToBottom) return;
+    if (!isOpen || !stickToBottomRef.current) return;
     scrollToBottom();
-  }, [previewText, isOpen, stickToBottom]);
+  }, [previewText, isOpen]);
 
   const handleScroll = () => {
     const el = contentRef.current;
     if (!el) return;
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setStickToBottom(distanceToBottom <= 20);
+    stickToBottomRef.current = distanceToBottom <= 20;
   };
 
   return (
@@ -215,7 +215,7 @@ function ThinkingPanel({ text }: { text: string }) {
         const opened = (event.currentTarget as HTMLDetailsElement).open;
         setIsOpen(opened);
         if (opened) {
-          setStickToBottom(true);
+          stickToBottomRef.current = true;
           window.requestAnimationFrame(scrollToBottom);
         }
       }}
@@ -476,6 +476,9 @@ function getOrderedContentParts(
 
   const parts: OrderedContentPart[] = [];
   const contentBlocks = message.content as unknown[];
+  let textPartIndex = 0;
+  let reasoningPartIndex = 0;
+  let toolCallPartIndex = 0;
 
   for (let idx = 0; idx < contentBlocks.length; idx += 1) {
     const block = contentBlocks[idx];
@@ -502,9 +505,10 @@ function getOrderedContentParts(
       if (reasoningText.length > 0) {
         parts.push({
           kind: "reasoning",
-          key: `reasoning-${idx}`,
+          key: `reasoning-${reasoningPartIndex}`,
           text: reasoningText,
         });
+        reasoningPartIndex += 1;
       }
       continue;
     }
@@ -514,18 +518,28 @@ function getOrderedContentParts(
         "\n\n",
       );
       if (textValue.length > 0) {
-        parts.push({ kind: "text", key: `text-${idx}`, text: textValue });
+        parts.push({
+          kind: "text",
+          key: `text-${textPartIndex}`,
+          text: textValue,
+        });
+        textPartIndex += 1;
       }
       continue;
     }
 
     if (isToolCallBlock) {
       const toolCall = parseToolCallFromContentBlock(record);
+      const toolCallId =
+        typeof toolCall.id === "string" && toolCall.id.trim().length > 0
+          ? toolCall.id.trim()
+          : undefined;
       parts.push({
         kind: "tool_calls",
-        key: `tool-call-${idx}`,
+        key: `tool-call-${toolCallId ?? toolCallPartIndex}`,
         toolCalls: [toolCall],
       });
+      toolCallPartIndex += 1;
     }
   }
 
@@ -608,16 +622,34 @@ function getIntermediateCopyText(parts: IntermediateContentPart[]): string {
   return chunks.join("\n\n");
 }
 
-function CustomComponent({
-  message,
-  thread,
-}: {
-  message: Message;
-  thread: ReturnType<typeof useStreamContext>;
-}) {
+function hasNonEmptyReasoningPart(part: IntermediateContentPart): boolean {
+  return part.kind === "reasoning" && part.text.trim().length > 0;
+}
+
+function mergeStreamingIntermediateParts(
+  currentParts: IntermediateContentPart[],
+  previousParts: IntermediateContentPart[],
+): IntermediateContentPart[] {
+  if (currentParts.length === 0) {
+    return previousParts;
+  }
+
+  if (currentParts.some(hasNonEmptyReasoningPart)) {
+    return currentParts;
+  }
+
+  const previousReasoningParts = previousParts.filter(hasNonEmptyReasoningPart);
+  if (previousReasoningParts.length === 0) {
+    return currentParts;
+  }
+
+  return [...previousReasoningParts, ...currentParts];
+}
+
+function CustomComponent({ message }: { message: Message }) {
   const artifact = useArtifact();
-  const { values } = useStreamContext();
-  const uiMessages = values.ui ?? [];
+  const thread = useStreamContext();
+  const uiMessages = thread.values.ui ?? [];
   const directMatches = uiMessages.filter(
     (ui) => ui.metadata?.message_id === message.id,
   );
@@ -638,21 +670,21 @@ function CustomComponent({
     latestAssistantMessage?.id === message.id;
 
   const unmatchedTopicArtifact = messageIsLatestAssistant
-    ? [...uiMessages]
-        .reverse()
-        .find((ui) => {
-          if (ui.name !== "topic_preview_artifact") return false;
-          const linkedMessageId =
-            typeof ui.metadata?.message_id === "string"
-              ? ui.metadata.message_id
-              : null;
-          return !linkedMessageId || !assistantMessageIds.has(linkedMessageId);
-        })
+    ? [...uiMessages].reverse().find((ui) => {
+        if (ui.name !== "topic_preview_artifact") return false;
+        const linkedMessageId =
+          typeof ui.metadata?.message_id === "string"
+            ? ui.metadata.message_id
+            : null;
+        return !linkedMessageId || !assistantMessageIds.has(linkedMessageId);
+      })
     : undefined;
 
   const customComponents =
     unmatchedTopicArtifact &&
-    !directMatches.some((candidate) => candidate.id === unmatchedTopicArtifact.id)
+    !directMatches.some(
+      (candidate) => candidate.id === unmatchedTopicArtifact.id,
+    )
       ? [...directMatches, unmatchedTopicArtifact]
       : directMatches;
 
@@ -696,6 +728,23 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
+function toolCallHasArgs(
+  toolCall: NonNullable<AIMessage["tool_calls"]>[number],
+): boolean {
+  const args = toolCall.args as unknown;
+  if (!args) return false;
+  if (typeof args === "string") {
+    return args.trim().length > 0;
+  }
+  if (Array.isArray(args)) {
+    return args.length > 0;
+  }
+  if (typeof args === "object") {
+    return Object.keys(args).length > 0;
+  }
+  return true;
+}
+
 function isAiOrToolMessage(message: Message | undefined): boolean {
   return message?.type === "ai" || message?.type === "tool";
 }
@@ -726,8 +775,7 @@ function getFallbackIntermediateParts(
     : [];
   const hasToolCalls = messageToolCalls.length > 0;
   const toolCallsHaveContents =
-    hasToolCalls &&
-    messageToolCalls.some((tc) => tc.args && Object.keys(tc.args).length > 0);
+    hasToolCalls && messageToolCalls.some((tc) => toolCallHasArgs(tc));
 
   const fallbackToolCalls =
     (hasToolCalls && toolCallsHaveContents && messageToolCalls) ||
@@ -912,20 +960,173 @@ function Interrupt({
   );
 }
 
-export function AssistantMessage({
-  message,
-  allMessages,
-  isLoading,
-  isReconnecting = false,
-  handleRegenerate,
-}: {
+type StreamContextType = ReturnType<typeof useStreamContext>;
+
+type AssistantMessageProps = {
   message: Message | undefined;
   allMessages: Message[];
   isLoading: boolean;
   isReconnecting?: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
-}) {
-  const thread = useStreamContext();
+  interrupt: StreamContextType["interrupt"];
+  getMessagesMetadata: StreamContextType["getMessagesMetadata"];
+  onSelectBranch: StreamContextType["setBranch"];
+  hasCustomComponentsForMessage: boolean;
+};
+
+type TailGroupSnapshot = {
+  ids: Set<string>;
+  signature: string;
+};
+
+function summarizeString(value: string): string {
+  const head = value.slice(0, 24);
+  const tail = value.slice(-24);
+  return `s:${value.length}:${head}:${tail}`;
+}
+
+function summarizeValue(
+  value: unknown,
+  depth = 0,
+  seen: WeakSet<object> = new WeakSet(),
+): string {
+  if (value == null) {
+    return "null";
+  }
+
+  if (typeof value === "string") {
+    return summarizeString(value);
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    if (depth >= 2) {
+      return `a:${value.length}`;
+    }
+    const sampled = value
+      .slice(0, 4)
+      .map((entry) => summarizeValue(entry, depth + 1, seen))
+      .join(",");
+    return `a:${value.length}:[${sampled}]`;
+  }
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (seen.has(record)) {
+      return "circular";
+    }
+    seen.add(record);
+    const keys = Object.keys(record).sort();
+    if (depth >= 2) {
+      return `o:${keys.join(",")}`;
+    }
+    const sampledEntries = keys
+      .slice(0, 6)
+      .map((key) => `${key}:${summarizeValue(record[key], depth + 1, seen)}`)
+      .join(",");
+    return `o:${keys.join(",")}:{${sampledEntries}}`;
+  }
+
+  return typeof value;
+}
+
+function getMessageSnapshot(message: Message): string {
+  const messageId = message.id ?? "no-id";
+  const contentSnapshot = summarizeValue(message.content ?? "");
+  const toolCallsSnapshot =
+    message.type === "ai"
+      ? summarizeValue((message as AIMessage).tool_calls ?? null)
+      : "";
+  return `${messageId}:${message.type}:${contentSnapshot}:${toolCallsSnapshot}`;
+}
+
+function getTailAiOrToolGroupSnapshot(messages: Message[]): TailGroupSnapshot {
+  const renderedMessages = getRenderableMessages(messages);
+  let tailIndex = -1;
+  for (let idx = renderedMessages.length - 1; idx >= 0; idx -= 1) {
+    if (isAiOrToolMessage(renderedMessages[idx])) {
+      tailIndex = idx;
+      break;
+    }
+  }
+
+  if (tailIndex < 0) {
+    return { ids: new Set<string>(), signature: "none" };
+  }
+
+  let startIndex = tailIndex;
+  while (
+    startIndex > 0 &&
+    isAiOrToolMessage(renderedMessages[startIndex - 1])
+  ) {
+    startIndex -= 1;
+  }
+
+  const ids = new Set<string>();
+  const signature = renderedMessages
+    .slice(startIndex, tailIndex + 1)
+    .map((message, idx) => {
+      const messageId = message.id ?? `idx-${startIndex + idx}`;
+      ids.add(messageId);
+      return `${messageId}:${getMessageSnapshot(message)}`;
+    })
+    .join("||");
+
+  return { ids, signature };
+}
+
+function areAssistantMessagePropsEqual(
+  previous: AssistantMessageProps,
+  next: AssistantMessageProps,
+): boolean {
+  const previousMessageId = previous.message?.id ?? null;
+  const nextMessageId = next.message?.id ?? null;
+  if (previousMessageId !== nextMessageId) return false;
+  if ((previous.message?.type ?? null) !== (next.message?.type ?? null)) {
+    return false;
+  }
+  if (previous.isLoading !== next.isLoading) return false;
+  if (previous.isReconnecting !== next.isReconnecting) return false;
+  if (previous.interrupt !== next.interrupt) return false;
+  if (previous.handleRegenerate !== next.handleRegenerate) return false;
+  if (previous.getMessagesMetadata !== next.getMessagesMetadata) return false;
+  if (previous.onSelectBranch !== next.onSelectBranch) return false;
+  if (
+    previous.hasCustomComponentsForMessage !==
+    next.hasCustomComponentsForMessage
+  ) {
+    return false;
+  }
+  if (previous.allMessages === next.allMessages) return true;
+
+  const messageId = next.message?.id ?? previous.message?.id;
+  if (!messageId) return true;
+
+  const previousTailGroup = getTailAiOrToolGroupSnapshot(previous.allMessages);
+  const nextTailGroup = getTailAiOrToolGroupSnapshot(next.allMessages);
+  const messageInTailGroup =
+    previousTailGroup.ids.has(messageId) || nextTailGroup.ids.has(messageId);
+  if (!messageInTailGroup) {
+    return true;
+  }
+
+  return previousTailGroup.signature === nextTailGroup.signature;
+}
+
+export const AssistantMessage = memo(function AssistantMessage({
+  message,
+  allMessages,
+  isLoading,
+  isReconnecting = false,
+  handleRegenerate,
+  interrupt,
+  getMessagesMetadata,
+  onSelectBranch,
+  hasCustomComponentsForMessage,
+}: AssistantMessageProps) {
   const renderedMessages = getRenderableMessages(allMessages);
   const currentMessageIndex = message?.id
     ? renderedMessages.findIndex(
@@ -938,9 +1139,10 @@ export function AssistantMessage({
   const hasNoAIOrToolMessages = !renderedMessages.find((m) =>
     isAiOrToolMessage(m),
   );
-  const meta = message ? thread.getMessagesMetadata(message) : undefined;
-  const threadInterrupt = thread.interrupt;
+  const meta = message ? getMessagesMetadata(message) : undefined;
+  const threadInterrupt = interrupt;
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
+  const intermediatePartsCacheRef = useRef<IntermediateContentPart[]>([]);
 
   const content = message?.content ?? [];
   const contentString = getContentString(content);
@@ -1016,25 +1218,34 @@ export function AssistantMessage({
     message.id === firstGroupMessageWithIntermediateId;
   const isCurrentGroupAtThreadTail =
     groupEndIndex >= 0 && groupEndIndex === renderedMessages.length - 1;
+  const shouldStabilizeIntermediateParts =
+    isCurrentGroupAtThreadTail && (isLoading || isReconnecting);
+  const stableGroupedIntermediateParts = shouldStabilizeIntermediateParts
+    ? mergeStreamingIntermediateParts(
+        groupedIntermediateParts,
+        intermediatePartsCacheRef.current,
+      )
+    : groupedIntermediateParts;
+  intermediatePartsCacheRef.current =
+    stableGroupedIntermediateParts.length > 0
+      ? stableGroupedIntermediateParts
+      : [];
   const groupHasRenderableText = groupedMessages.some((groupMessage) =>
     messageHasRenderableText(groupMessage),
   );
   const isGroupStreaming =
     (isLoading || isReconnecting) &&
     isCurrentGroupAtThreadTail &&
-    groupedIntermediateParts.length > 0 &&
+    stableGroupedIntermediateParts.length > 0 &&
     !groupHasRenderableText;
   const shouldRenderInlineActionsForIntermediate =
     shouldRenderGroupIntermediateTrigger &&
     isCurrentGroupAtThreadTail &&
     !groupHasRenderableText &&
-    groupedIntermediateParts.length > 0;
+    stableGroupedIntermediateParts.length > 0;
   const groupedIntermediateCopyContent = getIntermediateCopyText(
-    groupedIntermediateParts,
+    stableGroupedIntermediateParts,
   );
-  const hasCustomComponentsForMessage =
-    !!message &&
-    !!thread.values.ui?.some((ui) => ui.metadata?.message_id === message.id);
   const shouldRenderInterrupt =
     !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
   const shouldUseFastStreamingMarkdown =
@@ -1057,7 +1268,7 @@ export function AssistantMessage({
       <div className="flex w-full flex-col gap-2">
         {shouldRenderGroupIntermediateTrigger ? (
           <IntermediateStepsArtifactTrigger
-            parts={groupedIntermediateParts}
+            parts={stableGroupedIntermediateParts}
             isStreaming={isGroupStreaming}
             isReconnecting={isReconnecting}
             isLoading={isLoading}
@@ -1080,12 +1291,7 @@ export function AssistantMessage({
               </div>
             ))}
 
-            {message && (
-              <CustomComponent
-                message={message}
-                thread={thread}
-              />
-            )}
+            {message && <CustomComponent message={message} />}
 
             <Interrupt
               interrupt={threadInterrupt}
@@ -1103,7 +1309,7 @@ export function AssistantMessage({
                 <BranchSwitcher
                   branch={meta?.branch}
                   branchOptions={meta?.branchOptions}
-                  onSelect={(branch) => thread.setBranch(branch)}
+                  onSelect={(branch) => onSelectBranch(branch)}
                   isLoading={isLoading}
                 />
                 <CommandBar
@@ -1125,7 +1331,7 @@ export function AssistantMessage({
       </div>
     </div>
   );
-}
+}, areAssistantMessagePropsEqual);
 
 export function AssistantMessageLoading() {
   return (

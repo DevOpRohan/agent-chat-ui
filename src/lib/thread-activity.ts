@@ -10,6 +10,19 @@ const THREAD_BUSY_OWNER_STORAGE_KEY = "lg:thread:busy:owner";
 const THREAD_BUSY_EVENT = "lg:thread:busy:event";
 const THREAD_TAB_ID_STORAGE_KEY = "lg:thread:tabId";
 
+function shallowEqualRecord<T extends Record<string, unknown>>(
+  a: T,
+  b: T,
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
 function safeParseMap(raw: string | null): ThreadLastSeenMap {
   if (!raw) return {};
   try {
@@ -206,42 +219,60 @@ export function markThreadBusy(
   ownerTabId?: string,
 ): ThreadBusyMap {
   if (typeof window === "undefined") return {};
-  const map = getThreadBusyMap();
-  const ownerMap = getThreadBusyOwnerMap();
+  const currentMap = getThreadBusyMap();
+  const currentOwnerMap = getThreadBusyOwnerMap();
+  const nextMap = { ...currentMap };
+  const nextOwnerMap = { ...currentOwnerMap };
   if (busy) {
-    map[threadId] = true;
+    nextMap[threadId] = true;
     if (ownerTabId) {
-      ownerMap[threadId] = ownerTabId;
-    } else if (!ownerMap[threadId]) {
+      nextOwnerMap[threadId] = ownerTabId;
+    } else if (!nextOwnerMap[threadId]) {
       const currentTabId = getOrCreateThreadTabId();
       if (currentTabId) {
-        ownerMap[threadId] = currentTabId;
+        nextOwnerMap[threadId] = currentTabId;
       }
     }
   } else {
-    delete map[threadId];
-    delete ownerMap[threadId];
+    delete nextMap[threadId];
+    delete nextOwnerMap[threadId];
   }
-  setThreadBusyMap(map);
-  setThreadBusyOwnerMap(ownerMap);
+
+  if (
+    shallowEqualRecord(currentMap, nextMap) &&
+    shallowEqualRecord(currentOwnerMap, nextOwnerMap)
+  ) {
+    return currentMap;
+  }
+
+  setThreadBusyMap(nextMap);
+  setThreadBusyOwnerMap(nextOwnerMap);
   try {
     window.dispatchEvent(
-      new CustomEvent(THREAD_BUSY_EVENT, { detail: { map, ownerMap } }),
+      new CustomEvent(THREAD_BUSY_EVENT, {
+        detail: { map: nextMap, ownerMap: nextOwnerMap },
+      }),
     );
   } catch {
     // no-op
   }
-  return map;
+  return nextMap;
 }
 
 export function subscribeThreadBusy(
-  onChange: (state: { map: ThreadBusyMap; ownerMap: ThreadBusyOwnerMap }) => void,
+  onChange: (state: {
+    map: ThreadBusyMap;
+    ownerMap: ThreadBusyOwnerMap;
+  }) => void,
 ): () => void {
   if (typeof window === "undefined") return () => undefined;
 
   const handleCustomEvent = (event: Event) => {
     const detail = (
-      event as CustomEvent<{ map?: ThreadBusyMap; ownerMap?: ThreadBusyOwnerMap }>
+      event as CustomEvent<{
+        map?: ThreadBusyMap;
+        ownerMap?: ThreadBusyOwnerMap;
+      }>
     ).detail;
     if (detail?.map || detail?.ownerMap) {
       onChange({

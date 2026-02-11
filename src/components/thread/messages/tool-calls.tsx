@@ -1,5 +1,6 @@
 import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
-import { useState } from "react";
+import { parsePartialJson } from "@langchain/core/output_parsers";
+import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
@@ -7,21 +8,82 @@ function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
 }
 
+function normalizeToolArgs(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return {};
+    try {
+      const parsed = parsePartialJson(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Fall through to raw input shape.
+    }
+    return { input: value };
+  }
+
+  if (Array.isArray(value)) {
+    return { value };
+  }
+
+  if (typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+
+  return { value };
+}
+
+function getToolCallRenderKey(
+  toolCall: NonNullable<AIMessage["tool_calls"]>[number],
+  idx: number,
+): string {
+  if (typeof toolCall.id === "string" && toolCall.id.trim().length > 0) {
+    return toolCall.id.trim();
+  }
+
+  if (typeof toolCall.name === "string" && toolCall.name.trim().length > 0) {
+    return `${toolCall.name.trim()}-${idx}`;
+  }
+
+  return `tool-call-${idx}`;
+}
+
+function isInputOnlyArgs(args: Record<string, unknown>): boolean {
+  const keys = Object.keys(args);
+  return keys.length === 1 && keys[0] === "input";
+}
+
 export function ToolCalls({
   toolCalls,
 }: {
   toolCalls: AIMessage["tool_calls"];
 }) {
+  const argsCacheRef = useRef<Record<string, Record<string, unknown>>>({});
   if (!toolCalls || toolCalls.length === 0) return null;
 
   return (
     <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
       {toolCalls.map((tc, idx) => {
-        const args = tc.args as Record<string, any>;
+        const toolCallKey = getToolCallRenderKey(tc, idx);
+        const incomingArgs = normalizeToolArgs(tc.args);
+        const cachedArgs = argsCacheRef.current[toolCallKey];
+        const shouldUseCachedArgs =
+          !!cachedArgs &&
+          Object.keys(cachedArgs).length > 0 &&
+          (Object.keys(incomingArgs).length === 0 ||
+            isInputOnlyArgs(incomingArgs));
+        const args = shouldUseCachedArgs ? cachedArgs : incomingArgs;
+
+        if (Object.keys(args).length > 0) {
+          argsCacheRef.current[toolCallKey] = args;
+        }
         const hasArgs = Object.keys(args).length > 0;
         return (
           <div
-            key={idx}
+            key={toolCallKey}
             className="border-border overflow-hidden rounded-lg border"
           >
             <div className="bg-muted/50 border-border border-b px-4 py-2">
@@ -37,10 +99,10 @@ export function ToolCalls({
             {hasArgs ? (
               <table className="divide-border min-w-full divide-y">
                 <tbody className="divide-border divide-y">
-                  {Object.entries(args).map(([key, value], argIdx) => (
-                    <tr key={argIdx}>
+                  {Object.entries(args).map(([argKey, value]) => (
+                    <tr key={argKey}>
                       <td className="text-foreground px-4 py-2 text-sm font-medium whitespace-nowrap">
-                        {key}
+                        {argKey}
                       </td>
                       <td className="text-muted-foreground px-4 py-2 text-sm">
                         <pre className="bg-card text-card-foreground border-border max-h-[320px] overflow-auto rounded border px-3 py-2 font-mono text-sm break-words whitespace-pre-wrap">

@@ -8,6 +8,29 @@ import {
   type ThreadBusyOwnerMap,
 } from "@/lib/thread-activity";
 
+function shallowEqualBusyMap(a: ThreadBusyMap, b: ThreadBusyMap): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+function shallowEqualBusyOwnerMap(
+  a: ThreadBusyOwnerMap,
+  b: ThreadBusyOwnerMap,
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
 export function useThreadBusy() {
   const [busyByThreadId, setBusyByThreadId] = useState<ThreadBusyMap>(() =>
     getThreadBusyMap(),
@@ -17,12 +40,22 @@ export function useThreadBusy() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setBusyByThreadId(getThreadBusyMap());
-    setBusyOwnerByThreadId(getThreadBusyOwnerMap());
+    const currentMap = getThreadBusyMap();
+    const currentOwnerMap = getThreadBusyOwnerMap();
+    setBusyByThreadId((prev) =>
+      shallowEqualBusyMap(prev, currentMap) ? prev : currentMap,
+    );
+    setBusyOwnerByThreadId((prev) =>
+      shallowEqualBusyOwnerMap(prev, currentOwnerMap) ? prev : currentOwnerMap,
+    );
 
     return subscribeThreadBusy(({ map, ownerMap }) => {
-      setBusyByThreadId(map);
-      setBusyOwnerByThreadId(ownerMap);
+      setBusyByThreadId((prev) =>
+        shallowEqualBusyMap(prev, map) ? prev : map,
+      );
+      setBusyOwnerByThreadId((prev) =>
+        shallowEqualBusyOwnerMap(prev, ownerMap) ? prev : ownerMap,
+      );
     });
   }, []);
 
