@@ -1,4 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
 
 const STREAM_ROUTE_PATTERN =
   /\/threads\/[^/]+\/runs(?:\/[^/]+)?\/stream(?:\?|$)/;
@@ -26,7 +27,10 @@ async function readThreadId(page: Page): Promise<string | null> {
   return new URL(page.url()).searchParams.get("threadId");
 }
 
-async function waitForThreadId(page: Page, timeoutMs = 30_000): Promise<string> {
+async function waitForThreadId(
+  page: Page,
+  timeoutMs = 30_000,
+): Promise<string> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const threadId = await readThreadId(page);
@@ -82,7 +86,11 @@ async function openFreshThread(page: Page): Promise<void> {
 }
 
 async function prepareFreshPage(page: Page): Promise<void> {
-  await page.goto("/?chatHistoryOpen=true");
+  const gate = await gotoAndDetectChatEnvironment(
+    page,
+    "/?chatHistoryOpen=true",
+  );
+  test.skip(!gate.ok, gate.reason);
   await clearStaleClientState(page);
   await page.reload();
   await openFreshThread(page);
@@ -123,9 +131,7 @@ async function startLongRun(
 
     const threadId = await waitForThreadId(page);
 
-    const cancelVisible = await cancelButton
-      .isVisible()
-      .catch(() => false);
+    const cancelVisible = await cancelButton.isVisible().catch(() => false);
 
     if (cancelVisible) {
       return { threadId, cancelVisible: true };
@@ -184,7 +190,10 @@ async function waitForReconnectSignal(page: Page): Promise<void> {
           const composer = document.querySelector(
             '[data-testid="stream-reconnect-status"]',
           );
-          if (composer && composer.textContent?.toLowerCase().includes("reconnect")) {
+          if (
+            composer &&
+            composer.textContent?.toLowerCase().includes("reconnect")
+          ) {
             return true;
           }
 
@@ -226,21 +235,28 @@ test.describe("Auto reconnect UX after disconnect", () => {
       .toBe(started.threadId);
 
     await expect
-      .poll(async () => {
-        const nextLength = await readAssistantTextLength(page);
-        const sendVisible = await page
-          .getByRole("button", { name: "Send" })
-          .isVisible()
-          .catch(() => false);
-        const reconnectVisible = await page
-          .getByTestId("stream-reconnect-status")
-          .isVisible()
-          .catch(() => false);
-        return nextLength > beforeDisconnectLength || sendVisible || reconnectVisible;
-      }, {
-        timeout: 120_000,
-        message: "Stream did not progress after reconnect",
-      })
+      .poll(
+        async () => {
+          const nextLength = await readAssistantTextLength(page);
+          const sendVisible = await page
+            .getByRole("button", { name: "Send" })
+            .isVisible()
+            .catch(() => false);
+          const reconnectVisible = await page
+            .getByTestId("stream-reconnect-status")
+            .isVisible()
+            .catch(() => false);
+          return (
+            nextLength > beforeDisconnectLength ||
+            sendVisible ||
+            reconnectVisible
+          );
+        },
+        {
+          timeout: 120_000,
+          message: "Stream did not progress after reconnect",
+        },
+      )
       .toBe(true);
   });
 
@@ -262,17 +278,20 @@ test.describe("Auto reconnect UX after disconnect", () => {
     await context.unroute(STREAM_ROUTE_PATTERN);
 
     await expect
-      .poll(async () => {
-        const nextLength = await readAssistantTextLength(page);
-        const sendVisible = await page
-          .getByRole("button", { name: "Send" })
-          .isVisible()
-          .catch(() => false);
-        return nextLength > beforeDisconnectLength || sendVisible;
-      }, {
-        timeout: 120_000,
-        message: "Stream did not recover after removing route abort",
-      })
+      .poll(
+        async () => {
+          const nextLength = await readAssistantTextLength(page);
+          const sendVisible = await page
+            .getByRole("button", { name: "Send" })
+            .isVisible()
+            .catch(() => false);
+          return nextLength > beforeDisconnectLength || sendVisible;
+        },
+        {
+          timeout: 120_000,
+          message: "Stream did not recover after removing route abort",
+        },
+      )
       .toBe(true);
   });
 

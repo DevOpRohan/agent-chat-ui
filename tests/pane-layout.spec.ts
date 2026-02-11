@@ -1,4 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
+import {
+  detectChatEnvironment,
+  gotoAndDetectChatEnvironment,
+} from "./helpers/environment-gates";
 
 const DEFAULT_ARTIFACT_RATIO = 0.38;
 const ARTIFACT_MIN_WIDTH = 320;
@@ -88,7 +92,11 @@ test("desktop panes resize, artifact expands full width, and sizes reset after r
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/?chatHistoryOpen=true");
+  const gate = await gotoAndDetectChatEnvironment(
+    page,
+    "/?chatHistoryOpen=true",
+  );
+  test.skip(!gate.ok, gate.reason);
   await page.evaluate(() => {
     window.dispatchEvent(new Event("resize"));
   });
@@ -190,6 +198,8 @@ test("desktop panes resize, artifact expands full width, and sizes reset after r
   const preReloadArtifactWidth = await readPaneWidth(page, "pane-artifact");
 
   await page.reload();
+  const gateAfterReload = await detectChatEnvironment(page);
+  test.skip(!gateAfterReload.ok, gateAfterReload.reason);
   await expect(input).toBeVisible({ timeout: 60_000 });
   await ensureDesktopHistoryPaneVisible(page);
 

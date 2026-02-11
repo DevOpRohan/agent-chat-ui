@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
 
 function longPrompt(tag: string) {
   return `QA spinner check ${tag}. Create a very detailed 40-section report with 20 bullets per section and include dense explanations and examples. Do not summarize.`;
@@ -25,7 +26,11 @@ test.describe("QA: Thread history run indicators", () => {
     page,
   }) => {
     const tag = `qa-latency-${Date.now()}`;
-    await page.goto("/?chatHistoryOpen=true");
+    const gate = await gotoAndDetectChatEnvironment(
+      page,
+      "/?chatHistoryOpen=true",
+    );
+    test.skip(!gate.ok, gate.reason);
 
     // Warm up so the thread already exists in history before the measured run.
     await sendMessage(page, `warmup-${tag}`);
@@ -64,7 +69,11 @@ test.describe("QA: Thread history run indicators", () => {
     page,
   }) => {
     const tag = `qa-switch-${Date.now()}`;
-    await page.goto("/?chatHistoryOpen=true");
+    const gate = await gotoAndDetectChatEnvironment(
+      page,
+      "/?chatHistoryOpen=true",
+    );
+    test.skip(!gate.ok, gate.reason);
     await sendMessage(page, longPrompt(tag));
 
     const cancelButton = page.getByRole("button", { name: "Cancel" });

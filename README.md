@@ -150,6 +150,18 @@ pnpm test:e2e:qa:manual
 
 When manual mode is on, Playwright pauses once in setup. Complete login in the opened browser and click **Resume** in Playwright Inspector. The saved auth state is reused for the remaining tests in that run.
 
+E2E suites now gate themselves per environment:
+
+- If the app is behind IAP and auth is missing/invalid, tests auto-skip with an explicit reason instead of hard failing.
+- If the bootstrap setup screen is visible (missing runtime setup), tests auto-skip with a setup-required reason.
+
+To run full assertions on IAP-protected deploys, provide either:
+
+- `PLAYWRIGHT_AUTH_BEARER` with a valid IAP audience token, or
+- `PLAYWRIGHT_MANUAL_LOGIN=1` and complete setup login interactively.
+
+For specs that seed backend data (for example `chat-pane-responsive.spec.ts`), also set `PLAYWRIGHT_LANGGRAPH_API_URL`.
+
 ## Hiding Messages in the Chat
 
 You can control the visibility of messages within the Agent Chat UI in two main ways:

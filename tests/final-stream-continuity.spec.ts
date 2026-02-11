@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
 
 const DEFAULT_PROMPT =
   "Use at least one available tool before your final answer. Then provide a long response with 12 numbered sections and detailed bullet points.";
@@ -29,8 +30,10 @@ async function getLastAssistantBodyTextLength(page: Page): Promise<number> {
 test("final assistant stream stays monotonic after intermediate step completes", async ({
   page,
 }) => {
-  const prompt = process.env.PLAYWRIGHT_STREAM_CONTINUITY_PROMPT ?? DEFAULT_PROMPT;
-  await page.goto("/");
+  const prompt =
+    process.env.PLAYWRIGHT_STREAM_CONTINUITY_PROMPT ?? DEFAULT_PROMPT;
+  const gate = await gotoAndDetectChatEnvironment(page, "/");
+  test.skip(!gate.ok, gate.reason);
 
   await sendMessage(page, prompt);
 

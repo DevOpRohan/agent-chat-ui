@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
 
 function longPrompt(tag: string) {
   return `Submit guard ${tag}. Create a very detailed 40-section report with 20 bullets per section and include dense explanations and examples. Do not summarize.`;
@@ -10,7 +11,11 @@ test("same-thread submit is rejected while run is active and draft is preserved"
   const tag = `submit-guard-${Date.now()}`;
   const blockedPrompt = `blocked-while-running-${Date.now()}`;
 
-  await page.goto("/?chatHistoryOpen=true");
+  const gate = await gotoAndDetectChatEnvironment(
+    page,
+    "/?chatHistoryOpen=true",
+  );
+  test.skip(!gate.ok, gate.reason);
 
   const input = page.getByPlaceholder("Type your message...");
   await expect(input).toBeVisible({ timeout: 60_000 });
@@ -25,7 +30,9 @@ test("same-thread submit is rejected while run is active and draft is preserved"
   await input.evaluate((element) => {
     const form = element.closest("form");
     if (!form) return;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
   });
 
   await expect(page.getByText("Thread is still running")).toBeVisible({

@@ -1,11 +1,13 @@
 import { test, expect } from "@playwright/test";
+import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
 
 test("refresh resumes or keeps run active", async ({ page }) => {
   const prompt =
     process.env.PLAYWRIGHT_LONG_PROMPT ??
     "Write a very long, detailed story with multiple sections, including a summary at the end.";
 
-  await page.goto("/");
+  const gate = await gotoAndDetectChatEnvironment(page, "/");
+  test.skip(!gate.ok, gate.reason);
 
   const input = page.getByPlaceholder("Type your message...");
   await expect(input).toBeVisible({ timeout: 60_000 });

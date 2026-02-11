@@ -1,10 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
 
 test("thread history lists new thread", async ({ page }) => {
   const unique = `history-check-${Date.now()}`;
   const prompt = `Thread history check: ${unique}`;
 
-  await page.goto("/");
+  const gate = await gotoAndDetectChatEnvironment(page, "/");
+  test.skip(!gate.ok, gate.reason);
 
   const input = page.getByPlaceholder("Type your message...");
   await expect(input).toBeVisible({ timeout: 60_000 });

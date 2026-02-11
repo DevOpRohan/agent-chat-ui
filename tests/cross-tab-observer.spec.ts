@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
 
 function longPrompt(tag: string) {
   return `Cross-tab observer ${tag}. Create a very detailed 40-section report with 20 bullets per section and include dense explanations and examples. Do not summarize.`;
@@ -17,7 +18,11 @@ test("second tab observes active run without fatal stream error toast", async ({
   const tag = `cross-tab-${Date.now()}`;
   const draftText = `draft-${Date.now()}`;
 
-  await page.goto("/?chatHistoryOpen=true");
+  const gate = await gotoAndDetectChatEnvironment(
+    page,
+    "/?chatHistoryOpen=true",
+  );
+  test.skip(!gate.ok, gate.reason);
   await sendMessage(page, longPrompt(tag));
 
   const cancelButton = page.getByRole("button", { name: "Cancel" });
@@ -48,9 +53,7 @@ test("second tab observes active run without fatal stream error toast", async ({
   const sendButton = secondPage.getByRole("button", { name: "Send" });
   await expect(sendButton).toBeDisabled();
 
-  await expect(
-    secondPage.getByText(/Working on your query/),
-  ).toBeVisible();
+  await expect(secondPage.getByText(/Working on your query/)).toBeVisible();
 
   await secondPage.waitForTimeout(4_000);
   await expect(secondPage.getByText("Human Interrupt")).toHaveCount(0);
@@ -62,18 +65,23 @@ test("second tab observes active run without fatal stream error toast", async ({
   await expect(cancelButton).not.toBeVisible({ timeout: 30_000 });
 
   await expect
-    .poll(async () => {
-      try {
-        const refreshedInput = secondPage.getByPlaceholder("Type your message...");
-        await refreshedInput.fill(draftText);
-        return secondPage.getByRole("button", { name: "Send" }).isDisabled();
-      } catch {
-        return true;
-      }
-    }, {
-      timeout: 60_000,
-      message: "Expected send button to re-enable after active run ends",
-    })
+    .poll(
+      async () => {
+        try {
+          const refreshedInput = secondPage.getByPlaceholder(
+            "Type your message...",
+          );
+          await refreshedInput.fill(draftText);
+          return secondPage.getByRole("button", { name: "Send" }).isDisabled();
+        } catch {
+          return true;
+        }
+      },
+      {
+        timeout: 60_000,
+        message: "Expected send button to re-enable after active run ends",
+      },
+    )
     .toBe(false);
 
   await expect(

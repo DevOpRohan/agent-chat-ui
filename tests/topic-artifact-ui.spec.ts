@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
 
 const FIXTURE_TOPIC_JSON_URL =
   "https://storage.googleapis.com/question_crafter_public/topic_merged_20260207_230527_b4179f45.json";
@@ -15,16 +16,17 @@ async function sendPrompt(page: Page, prompt: string) {
 test("topic preview artifact renders card, opens pane, and supports actions", async ({
   page,
 }) => {
-  await page.goto("/");
+  const gate = await gotoAndDetectChatEnvironment(page, "/");
+  test.skip(!gate.ok, gate.reason);
   await sendPrompt(page, EXACT_PROMPT);
 
   const card = page.getByTestId("topic-preview-artifact-card");
   await expect(card).toBeVisible({ timeout: 180_000 });
   await expect(card).toHaveCount(1);
 
-  const renderedInAssistantColumn = await card.first().evaluate((node) =>
-    Boolean(node.closest("div.group.mr-auto")),
-  );
+  const renderedInAssistantColumn = await card
+    .first()
+    .evaluate((node) => Boolean(node.closest("div.group.mr-auto")));
   expect(renderedInAssistantColumn).toBeTruthy();
 
   await card.first().click();
@@ -37,7 +39,9 @@ test("topic preview artifact renders card, opens pane, and supports actions", as
   await expect(iframe).toBeVisible({ timeout: 120_000 });
 
   const heightRatio = await page.evaluate(() => {
-    const pane = document.querySelector<HTMLElement>('[data-testid="pane-artifact"]');
+    const pane = document.querySelector<HTMLElement>(
+      '[data-testid="pane-artifact"]',
+    );
     const iframeNode = document.querySelector<HTMLElement>(
       '[data-testid="topic-preview-artifact-iframe"]',
     );
@@ -50,14 +54,20 @@ test("topic preview artifact renders card, opens pane, and supports actions", as
   expect(heightRatio).not.toBeNull();
   expect(heightRatio ?? 0).toBeGreaterThan(0.8);
 
-  const refreshButton = page.getByTestId("topic-preview-artifact-action-refresh");
+  const refreshButton = page.getByTestId(
+    "topic-preview-artifact-action-refresh",
+  );
   const srcBeforeRefresh = await iframe.getAttribute("src");
   await refreshButton.click();
   await expect
-    .poll(async () => page.getByTestId("topic-preview-artifact-iframe").getAttribute("src"), {
-      timeout: 30_000,
-      message: "Expected topic preview iframe src to change after refresh",
-    })
+    .poll(
+      async () =>
+        page.getByTestId("topic-preview-artifact-iframe").getAttribute("src"),
+      {
+        timeout: 30_000,
+        message: "Expected topic preview iframe src to change after refresh",
+      },
+    )
     .not.toBe(srcBeforeRefresh);
 
   const shareButton = page.getByTestId("topic-preview-artifact-action-share");
@@ -66,7 +76,9 @@ test("topic preview artifact renders card, opens pane, and supports actions", as
     timeout: 10_000,
   });
 
-  const downloadButton = page.getByTestId("topic-preview-artifact-action-download");
+  const downloadButton = page.getByTestId(
+    "topic-preview-artifact-action-download",
+  );
   const popupPromise = page.waitForEvent("popup", { timeout: 30_000 });
   await downloadButton.click();
   const popup = await popupPromise;
@@ -74,5 +86,7 @@ test("topic preview artifact renders card, opens pane, and supports actions", as
   await popup.close();
 
   const assistantMessages = page.locator("div.group.mr-auto");
-  await expect(assistantMessages.last()).not.toContainText(FIXTURE_TOPIC_JSON_URL);
+  await expect(assistantMessages.last()).not.toContainText(
+    FIXTURE_TOPIC_JSON_URL,
+  );
 });
