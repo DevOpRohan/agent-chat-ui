@@ -1313,7 +1313,8 @@ export function Thread() {
               <StickyToBottomContent
                 className={cn(
                   "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 absolute inset-0 overflow-x-hidden overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
-                  !chatStarted && "mt-[25vh] flex flex-col items-stretch",
+                  !chatStarted &&
+                    "mt-[clamp(4rem,20vh,25vh)] flex flex-col items-stretch",
                   chatStarted && "grid grid-rows-[1fr_auto]",
                 )}
                 contentClassName="pt-8 pb-16 max-w-3xl min-w-0 mx-auto flex w-full flex-col gap-4"
@@ -1411,34 +1412,36 @@ export function Thread() {
                     >
                       <form
                         onSubmit={handleSubmit}
-                        className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2"
+                        className="mx-auto flex max-h-[min(55vh,34rem)] max-w-3xl flex-col gap-2 overflow-hidden"
                       >
-                        <ContentBlocksPreview
-                          blocks={contentBlocks}
-                          onRemove={removeBlock}
-                        />
-                        <textarea
-                          value={input}
-                          onChange={(e) => setInput(e.target.value)}
-                          onPaste={handlePaste}
-                          onKeyDown={(e) => {
-                            if (
-                              e.key === "Enter" &&
-                              !e.shiftKey &&
-                              !e.metaKey &&
-                              !e.nativeEvent.isComposing
-                            ) {
-                              e.preventDefault();
-                              const el = e.target as HTMLElement | undefined;
-                              const form = el?.closest("form");
-                              form?.requestSubmit();
-                            }
-                          }}
-                          placeholder="Type your message..."
-                          className="field-sizing-content max-h-[40vh] resize-none overflow-y-auto border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
-                        />
+                        <div className="min-h-0 overflow-y-auto">
+                          <ContentBlocksPreview
+                            blocks={contentBlocks}
+                            onRemove={removeBlock}
+                          />
+                          <textarea
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onPaste={handlePaste}
+                            onKeyDown={(e) => {
+                              if (
+                                e.key === "Enter" &&
+                                !e.shiftKey &&
+                                !e.metaKey &&
+                                !e.nativeEvent.isComposing
+                              ) {
+                                e.preventDefault();
+                                const el = e.target as HTMLElement | undefined;
+                                const form = el?.closest("form");
+                                form?.requestSubmit();
+                              }
+                            }}
+                            placeholder="Type your message..."
+                            className="field-sizing-content max-h-[40vh] min-h-[3.5rem] w-full resize-none overflow-y-auto border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
+                          />
+                        </div>
 
-                        <div className="flex items-center gap-6 p-2 pt-4">
+                        <div className="flex shrink-0 items-center gap-6 p-2 pt-4">
                           <Label
                             htmlFor="file-input"
                             className={cn(
@@ -1568,7 +1571,7 @@ export function Thread() {
               <ArtifactContent
                 data-testid="artifact-content"
                 className={cn(
-                  "relative flex-grow min-h-0",
+                  "relative min-h-0 flex-grow",
                   isIframeArtifactSurface
                     ? "overflow-hidden pr-0 [scrollbar-gutter:auto]"
                     : "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 overflow-y-scroll pr-1 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",

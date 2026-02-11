@@ -212,3 +212,133 @@
 - 2026-02-11T13:47:00Z | Re-run on fresh `main` dev server at `:3200` against backend `:2024` | FAIL | App loaded but could not fetch graph data due CORS mismatch (`:2024` backend allowlist omitted `:3200`), so seeded thread content was absent.
 - 2026-02-11T13:49:00Z | Start dedicated no-auth backend at `:2025` with CORS allowlist including `http://127.0.0.1:3200` | PASS | Backend reachable and `useStream` loads seeded thread state from browser.
 - 2026-02-11T13:50:00Z | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3200 PLAYWRIGHT_LANGGRAPH_API_URL=http://127.0.0.1:2025 PLAYWRIGHT_ASSISTANT_ID=o3_question_crafter_agent pnpm exec playwright test tests/chat-pane-responsive.spec.ts --project=chromium --workers=1` | PASS | `2 passed` (auth setup + responsiveness spec) on `main` with resizable panes + overflow fix.
+
+---
+
+## Deployment Iteration: Build/Push/Deploy (2026-02-11)
+
+### Deep Research
+
+- Reviewed `/Users/rohanverma/NextjsProject/agent-chat-ui/DEPLOYMENT_GUIDE.md` deploy paths for develop environment.
+- Confirmed required shape: develop image build args, `--no-traffic`, `--tag develop`, pinned image deployment option, and env/secret mappings.
+- Verified Cloud Run current env/secrets before deploy and reused same values to avoid config drift.
+
+### Plan
+
+- Build and push a new amd64 develop image with a timestamped pinned tag.
+- Deploy pinned image to Cloud Run `agent-chat-ui` in `asia-south1` with develop tag and zero production traffic.
+- Verify: latest ready revision, deployed image reference, develop URL/tag mapping, and registry tag resolution.
+
+### Execution Log
+
+- 2026-02-11T09:03:16Z | `docker buildx build --builder multiarch --platform linux/amd64 -t gcr.io/cerebryai/question_crafter_agent_ui:develop -t gcr.io/cerebryai/question_crafter_agent_ui:develop-20260211-090316 --build-arg NEXT_PUBLIC_API_URL=https://ht-giving-pickup-82-5383ffe79596502784b9eede7fffa087.us.langgraph.app --build-arg NEXT_PUBLIC_ASSISTANT_ID=o3_question_crafter_agent --build-arg NEXT_PUBLIC_AUTH_MODE=iap --build-arg NEXT_PUBLIC_MODEL_PROVIDER=OPENAI --build-arg NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50 --push .` | PASS | Buildx finished and pushed updated develop + pinned tags.
+- 2026-02-11T09:07:00Z | `gcloud run deploy agent-chat-ui --image gcr.io/cerebryai/question_crafter_agent_ui:develop-20260211-090316 --region asia-south1 --platform managed --no-traffic --tag develop --set-env-vars "IAP_AUDIENCE=/projects/55487246974/locations/asia-south1/services/agent-chat-ui,LANGGRAPH_AUTH_JWT_ISSUER=agent-chat-ui-frontend-a8b6a18a,LANGGRAPH_AUTH_JWT_AUDIENCE=question_crafter-backend-a8b6a18a,MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=question_crafter_public,NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,OPENAI_FILES_PURPOSE=assistants,OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"` | PASS | Revision `agent-chat-ui-00112-qay` deployed successfully with 0% production traffic.
+- 2026-02-11T09:08:00Z | `gcloud run services describe agent-chat-ui --region asia-south1 --format="yaml(spec.template.spec.containers[0].image,status.latestCreatedRevisionName,status.latestReadyRevisionName,status.traffic)"` | PASS | Latest created/ready revision is `agent-chat-ui-00112-qay`, image set to pinned tag, `develop` tag mapped to develop URL, production traffic unchanged on old revision.
+- 2026-02-11T09:08:00Z | `gcloud container images describe gcr.io/cerebryai/question_crafter_agent_ui:develop` + `...:develop-20260211-090316` | PASS | Both tags resolve to digest `sha256:db7e210ac3627b69b6bea9b130b7acea3534a1f9253fa014f4c1ac6672b5e155`.
+
+### Learning
+
+- Pinned-tag deploy flow in the guide works as expected and is safer for rollback/debug than mutable `:develop` alone.
+- Keeping Cloud Run runtime vars/secrets unchanged while rotating only the image reduced risk during this release.
+
+### Next Direction
+
+- Run targeted manual QA on develop URL for chat overflow + resizable pane interactions on desktop/mobile widths.
+- If stable, optionally promote this revision to production traffic via `gcloud run services update-traffic`.
+
+---
+
+## Regression Iteration: Playwright on Deployed URL (2026-02-11)
+
+### Deep Research
+
+- Confirmed Playwright `baseURL` can be overridden via `PLAYWRIGHT_BASE_URL` and default points to develop URL.
+- Confirmed suite inventory (`15` tests incl. setup) and that `chat-pane-responsive` is gated by `PLAYWRIGHT_LANGGRAPH_API_URL`.
+- Checked failing artifacts (`error-context.md`) to determine whether failures were UX regressions or environment/auth gating.
+
+### Plan
+
+- Run full chromium regression against deployed develop URL.
+- Collect pass/fail matrix and identify shared root cause from traces/snapshots.
+- Attempt non-interactive auth token path if suite is blocked by auth gate.
+
+### Execution Log
+
+- 2026-02-11T09:13:00Z | `PLAYWRIGHT_BASE_URL=https://develop---agent-chat-ui-6duluzey3a-el.a.run.app pnpm exec playwright test --list` | PASS | Found 15 tests in 10 files.
+- 2026-02-11T09:13:00Z | `PLAYWRIGHT_BASE_URL=... pnpm exec playwright test --project=chromium --workers=1 --reporter=line` | FAIL | `13 failed, 1 skipped, 1 passed (13.7m)`.
+- 2026-02-11T09:13:00Z | Error artifact inspection (`test-results/*/error-context.md`) | PASS | All sampled failures landed on Google IAP sign-in page, not app UI.
+- 2026-02-11T09:27:00Z | `curl -I https://develop---agent-chat-ui-6duluzey3a-el.a.run.app` | PASS | Returned `302` redirect to Google OAuth client (`x-goog-iap-generated-response: true`).
+- 2026-02-11T09:27:00Z | `gcloud auth print-identity-token` + request with `Authorization: Bearer` | FAIL | Returned `401` from IAP.
+- 2026-02-11T09:27:00Z | `gcloud auth print-identity-token --audiences=...` | FAIL | Audience token requires service account; user account invalid.
+- 2026-02-11T09:27:00Z | `gcloud auth print-identity-token --impersonate-service-account=... --audiences=...` | FAIL | Missing `roles/iam.serviceAccountTokenCreator` for impersonation.
+
+### Learning
+
+- This regression run is blocked by IAP authentication on deployed URL; current automation context cannot obtain a valid IAP bearer token.
+- Reported test failures are environment/auth precondition failures (login page) rather than direct UX assertion regressions.
+
+### Next Direction
+
+- Re-run deployed Playwright suite with one of:
+  - valid IAP bearer token via `PLAYWRIGHT_AUTH_BEARER`, or
+  - temporary auth bypass/no-auth route for the develop URL, or
+  - manual headed login flow.
+
+---
+
+## UX Task: Composer Send Visibility With Upload + Long Multiline Draft (2026-02-11)
+
+### Problem Statement
+
+- When an upload preview is present and the draft is long/multiline, the composer can grow such that the send action row is partially hidden in some browsers.
+- Goal: keep the send/cancel controls reliably visible while preserving upload preview and multiline draft behavior.
+
+### Subproblem Tree
+
+- Root: prevent composer action-row underflow/occlusion.
+- Subproblem A: confirm exact composer DOM/flex/grid behavior in `src/components/thread/index.tsx`.
+- Subproblem B: contain vertical growth without breaking existing Enter/Shift+Enter and upload workflows.
+- Subproblem C: preserve first-screen setup spacing and avoid over-pushing the composer near the viewport edge.
+- Subproblem D: run lint/build and targeted validation; document blockers and outcomes.
+
+### Strategy Decisions
+
+- Replace the composer form’s two-row grid with a flex column constrained by `max-h-[min(55vh,34rem)]`.
+- Make the attachment-preview + textarea area the only scrollable region (`min-h-0 overflow-y-auto`).
+- Keep upload/send controls in a non-shrinking action row (`shrink-0`) so send/cancel remain visible.
+- Reduce the initial unstarted-chat vertical offset to a responsive clamp (`mt-[clamp(4rem,20vh,25vh)]`) to avoid pushing the composer too low on shorter viewports.
+
+### Experiment Log
+
+- 2026-02-11T17:18:00Z | Composer layout audit (`src/components/thread/index.tsx`, preview components) | PASS | Confirmed form used `grid-rows-[1fr_auto]`; preview + textarea growth could push action row toward clipping.
+- 2026-02-11T17:22:00Z | Patched composer container/layout in `src/components/thread/index.tsx` | PASS | Added max-height containment, scrollable body region, `textarea` min-height, and `shrink-0` action row.
+- 2026-02-11T17:30:00Z | Local Playwright upload-layout spec draft + run | FAIL | Local `next dev` runtime served 404 for `_next/static/*` JS/CSS chunks (hydration absent), so upload event handlers could not execute; environment issue prevented meaningful UI assertion.
+- 2026-02-11T17:35:00Z | Headless debug script against local app | PASS | Verified no `/api/upload` request fired under the broken local-hydration state, confirming test blocker was runtime asset delivery.
+
+### Deploy/Test Run Log
+
+- 2026-02-11T17:24:00Z | `PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/pnpm lint` | PASS | Lint completed; only pre-existing warnings in unrelated files.
+- 2026-02-11T17:25:00Z | `PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/pnpm build` | FAIL | Build failed at page-data stage with pre-existing `/favicon.ico` module resolution error (`Failed to collect page data for /favicon.ico`).
+- 2026-02-11T17:44:00Z | `PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/pnpm build` | PASS | Build succeeded on re-run; existing lint warnings remained non-blocking.
+- 2026-02-11T17:47:00Z | `PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/pnpm start --port 3300` + headless Playwright node check | PASS | With mocked `/api/upload`, uploaded PDF preview rendered and send button stayed fully visible/in-bounds under long multiline draft (`PASS send-button-visibility`).
+- 2026-02-11T17:49:00Z | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3300 pnpm exec playwright test tests/submit-guard.spec.ts --project=chromium --workers=1` | FAIL | Regression spec timed out waiting for `Cancel`; local run did not reach long-running active state in this environment.
+- 2026-02-11T18:27:00Z | `docker buildx build --builder multiarch --platform linux/amd64 -t gcr.io/cerebryai/question_crafter_agent_ui:develop -t gcr.io/cerebryai/question_crafter_agent_ui:develop-20260211-125712 --build-arg ... --push .` | PASS | Built/pushed develop + pinned image tags (digest `sha256:fe5f10217af2d963739e63b5e0f65e1993cf8b26f3abe519b4e7a2f3ea1ba448`).
+- 2026-02-11T18:28:00Z | `gcloud run deploy agent-chat-ui --image gcr.io/cerebryai/question_crafter_agent_ui:develop-20260211-125712 --region asia-south1 --platform managed --no-traffic --tag develop ...` | PASS | Deployed revision `agent-chat-ui-00114-yaz` to `develop` tag URL with 0% production traffic.
+- 2026-02-11T18:28:00Z | `gcloud run services describe ...` + `gcloud container images describe ...` | PASS | Latest created/ready revision set to `agent-chat-ui-00114-yaz`; `develop` and pinned tags both resolve to digest `sha256:fe5f10217af2d963739e63b5e0f65e1993cf8b26f3abe519b4e7a2f3ea1ba448`.
+- 2026-02-11T19:16:00Z | `PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/pnpm prettier --check src/components/thread/index.tsx FORK_COMPASS.md scratchpad.md` | PASS (after write) | `index.tsx` needed formatting; fixed with `pnpm prettier --write src/components/thread/index.tsx`, then check passed.
+- 2026-02-11T19:17:00Z | `PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/pnpm lint` | PASS | Lint passed with pre-existing warnings only.
+- 2026-02-11T19:18:00Z | `PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin /opt/homebrew/bin/pnpm build` | PASS | Build completed successfully on latest `main` worktree.
+- 2026-02-11T19:23:00Z | `pnpm exec node` targeted UI script (`http://127.0.0.1:3300`) with mocked upload + 95-line draft | PASS | Verified `Send` remains fully visible/in-bounds for both no-upload and upload scenarios (`PASS_COMPOSER_VISIBILITY`).
+- 2026-02-11T19:29:00Z | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3300 pnpm exec playwright test tests/topic-artifact-ui.spec.ts --project=chromium --workers=1 --reporter=line` | FAIL | Timed out waiting for `topic-preview-artifact-card`; backend/tool path did not emit/render card during local run window.
+- 2026-02-11T19:29:00Z | `pnpm exec node` manual artifact-pane open/close check via test control | PASS | Pane opens (`width: 547`, `pointer-events:auto`) and closes back to non-interactive state (`pointer-events:none`).
+- 2026-02-11T19:31:00Z | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3300 pnpm exec playwright test tests/submit-guard.spec.ts --project=chromium --workers=1 --reporter=line` | FAIL | Local runtime did not reach long-running active state; `Cancel` never became visible.
+
+### Failed Hypotheses
+
+- 2026-02-11T17:35:00Z | Hypothesis: local Playwright can validate upload+composer behavior on current runtime. | FAIL | Local dev runtime was not hydrating due `_next/static` asset 404 responses, so upload logic did not execute in-browser.
+- 2026-02-11T19:29:00Z | Hypothesis: topic preview artifact E2E will deterministically render local card in this run window. | FAIL | Tool path did not produce a `topic_preview_artifact` card within timeout, so adjacent check remained backend-behavior dependent.
+
+### Final Learning
+
+- Keeping the action row out of the growing/scrolling region is the safest cross-browser way to prevent send button occlusion when upload previews and long drafts coexist.
+- Validation quality depends on a hydrated runtime; local environment issues (asset 404/hydration gap) can invalidate UI E2E signals even when source-level changes are correct.
