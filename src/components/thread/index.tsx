@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
 import { useStreamContext } from "@/providers/Stream";
 import { Button } from "../ui/button";
-import { Checkpoint, Message } from "@langchain/langgraph-sdk";
+import { Checkpoint, Message, Run } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import {
@@ -24,6 +24,7 @@ import {
 } from "@/lib/ensure-tool-responses";
 import { QuestionCrafterLogoSVG } from "../icons/question-crafter";
 import {
+  AlertTriangle,
   ArrowDown,
   LoaderCircle,
   Maximize2,
@@ -91,6 +92,95 @@ function isThreadActiveStatus(
   return status === "busy";
 }
 
+type ThreadStatusWarning = {
+  kind: "cancelled" | "incomplete" | "timeout" | "error";
+  title: string;
+  description: string;
+  statusKey: string;
+};
+
+function normalizeThreadStatusValue(
+  status: string | null | undefined,
+): string | null {
+  if (!status) return null;
+  return status.trim().toLowerCase();
+}
+
+function toTimestampMs(value: string | null | undefined): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function selectFreshestRun(runs: Run[]): Run | null {
+  if (runs.length === 0) return null;
+  return [...runs].sort((a, b) => {
+    const aTs = Math.max(
+      toTimestampMs(a.updated_at),
+      toTimestampMs(a.created_at),
+    );
+    const bTs = Math.max(
+      toTimestampMs(b.updated_at),
+      toTimestampMs(b.created_at),
+    );
+    return bTs - aTs;
+  })[0];
+}
+
+function getStatusWarning(
+  status: string | null | undefined,
+  source: "thread" | "run",
+): ThreadStatusWarning | null {
+  // SDK statuses: thread = idle|busy|interrupted|error, run = pending|running|success|error|timeout|interrupted.
+  const normalizedStatus = normalizeThreadStatusValue(status);
+  if (!normalizedStatus) return null;
+
+  if (
+    normalizedStatus.includes("cancelled") ||
+    normalizedStatus.includes("canceled")
+  ) {
+    return {
+      kind: "cancelled",
+      title: "Run was cancelled",
+      description:
+        "Please retry once. If it still fails, raise a ticket to the engineering team.",
+      statusKey: `${source}:${normalizedStatus}`,
+    };
+  }
+
+  if (normalizedStatus.includes("incomplete")) {
+    return {
+      kind: "incomplete",
+      title: "Run is incomplete",
+      description:
+        "Please retry once. If it remains incomplete, raise a ticket to the engineering team.",
+      statusKey: `${source}:${normalizedStatus}`,
+    };
+  }
+
+  if (normalizedStatus.includes("timeout")) {
+    return {
+      kind: "timeout",
+      title: "Run timed out",
+      description:
+        "Please retry once. If it still times out, raise a ticket to the engineering team.",
+      statusKey: `${source}:${normalizedStatus}`,
+    };
+  }
+
+  if (normalizedStatus === "error" || normalizedStatus.includes("error")) {
+    return {
+      kind: "error",
+      title: "Run failed",
+      description:
+        "Please retry once. If it fails again, raise a ticket to the engineering team.",
+      statusKey: `${source}:${normalizedStatus}`,
+    };
+  }
+
+  return null;
+}
+
 function readStoredRunId(threadId: string | null): string | null {
   if (!threadId || typeof window === "undefined") return null;
   try {
@@ -113,6 +203,7 @@ const ARTIFACT_MAX_RATIO = 0.62;
 const CHAT_MIN_WIDTH_PX = 360;
 const RESIZE_STEP_PX = 24;
 const RESIZE_HANDLE_WIDTH_PX = 10;
+const RUN_STATUS_LIST_LIMIT = 10;
 
 type BusyState = {
   loadingThreadId: string | null;
@@ -418,6 +509,7 @@ export function Thread() {
   const { busyByThreadId, busyOwnerByThreadId, markBusy } = useThreadBusy();
   const [busyState, setBusyState] = useState<BusyState>(EMPTY_BUSY_STATE);
   const [threadStatus, setThreadStatus] = useState<string | null>(null);
+  const [latestRunStatus, setLatestRunStatus] = useState<string | null>(null);
   const loadingThreadId = busyState.loadingThreadId;
   const ownedBusyThreadId = busyState.ownedBusyThreadId;
   const isCurrentThreadLoading =
@@ -448,6 +540,22 @@ export function Thread() {
   const isCurrentThreadBusyElsewhere =
     isBusyElsewhereFromLocalSignal || isBusyElsewhereFromServerSignal;
   const shouldShowRunningQueryMessage = isCurrentThreadBusyElsewhere;
+  const statusWarning = useMemo(() => {
+    const threadWarning = getStatusWarning(threadStatus, "thread");
+    const runWarning = getStatusWarning(latestRunStatus, "run");
+
+    // Prefer explicit terminal cancellation/incomplete signals from thread status
+    // when present, then fall back to run-level status.
+    if (
+      threadWarning &&
+      (threadWarning.kind === "cancelled" ||
+        threadWarning.kind === "incomplete")
+    ) {
+      return threadWarning;
+    }
+
+    return runWarning ?? threadWarning;
+  }, [latestRunStatus, threadStatus]);
   const {
     isReconnecting,
     statusText: reconnectStatusText,
@@ -461,10 +569,18 @@ export function Thread() {
     isCurrentThreadOwnedByTab,
   });
   const effectiveIsLoading = isCurrentThreadLoading || isReconnecting;
+  const visibleStatusWarning = useMemo(
+    () =>
+      isThreadActiveStatus(threadStatus) || effectiveIsLoading
+        ? null
+        : statusWarning,
+    [threadStatus, effectiveIsLoading, statusWarning],
+  );
   const effectiveIsLoadingRef = useRef(effectiveIsLoading);
   const isThreadBusyInAnyTabRef = useRef(isThreadBusyInAnyTab);
 
   const lastError = useRef<string | undefined>(undefined);
+  const lastWarnedThreadStatusKey = useRef<string | null>(null);
   const previousBusyStateRef = useRef(busyState);
   const previouslyObservedBusyThreadId = useRef<string | null>(null);
   const pendingNewThreadOwnership = useRef<{
@@ -708,6 +824,7 @@ export function Thread() {
   useEffect(() => {
     if (!threadId) {
       setThreadStatus(null);
+      setLatestRunStatus(null);
       return;
     }
 
@@ -721,6 +838,21 @@ export function Thread() {
         setThreadStatus((prev) =>
           prev === currentThread.status ? prev : currentThread.status,
         );
+
+        let freshestRunStatus: string | null = null;
+        try {
+          const recentRuns = await stream.client.runs.list(threadId, {
+            limit: RUN_STATUS_LIST_LIMIT,
+          });
+          freshestRunStatus = selectFreshestRun(recentRuns)?.status ?? null;
+        } catch {
+          freshestRunStatus = null;
+        }
+        if (cancelled) return;
+        setLatestRunStatus((prev) =>
+          prev === freshestRunStatus ? prev : freshestRunStatus,
+        );
+
         const shouldPollFast =
           isThreadActiveStatus(currentThread.status) ||
           effectiveIsLoadingRef.current ||
@@ -744,6 +876,32 @@ export function Thread() {
       }
     };
   }, [threadId, stream.client]);
+
+  useEffect(() => {
+    if (!threadId) {
+      lastWarnedThreadStatusKey.current = null;
+      return;
+    }
+
+    if (isThreadActiveStatus(threadStatus) || effectiveIsLoading) {
+      lastWarnedThreadStatusKey.current = null;
+      return;
+    }
+
+    if (!visibleStatusWarning) return;
+
+    const statusKey = `${threadId}:${visibleStatusWarning.statusKey}`;
+    if (lastWarnedThreadStatusKey.current === statusKey) {
+      return;
+    }
+    lastWarnedThreadStatusKey.current = statusKey;
+
+    toast(visibleStatusWarning.title, {
+      description: visibleStatusWarning.description,
+      closeButton: true,
+      duration: 12000,
+    });
+  }, [effectiveIsLoading, threadId, threadStatus, visibleStatusWarning]);
 
   useEffect(() => {
     if (!threadId) {
@@ -1517,6 +1675,21 @@ export function Thread() {
                         >
                           <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
                           {reconnectStatusText ?? "Reconnecting stream..."}
+                        </p>
+                      </div>
+                    ) : null}
+                    {visibleStatusWarning ? (
+                      <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
+                        <p
+                          data-testid="thread-status-warning"
+                          className="inline-flex max-w-full items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-100"
+                          aria-live="polite"
+                        >
+                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                          <span className="whitespace-normal">
+                            <strong>{visibleStatusWarning.title}:</strong>{" "}
+                            {visibleStatusWarning.description}
+                          </span>
                         </p>
                       </div>
                     ) : null}

@@ -91,6 +91,44 @@ function isThreadActiveStatus(
   return status === "busy";
 }
 
+function normalizeThreadStatus(
+  status: Thread["status"] | string | null | undefined,
+): string | null {
+  if (typeof status !== "string") return null;
+  const normalized = status.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function getThreadAttentionStatusKey(
+  status: Thread["status"] | string | null | undefined,
+): "cancelled" | "incomplete" | "timeout" | "error" | "interrupted" | null {
+  // SDK thread statuses include busy|idle|interrupted|error; keep custom fallbacks for deployed backends.
+  const normalizedStatus = normalizeThreadStatus(status);
+  if (!normalizedStatus) return null;
+  if (
+    normalizedStatus.includes("cancelled") ||
+    normalizedStatus.includes("canceled")
+  ) {
+    return "cancelled";
+  }
+  if (normalizedStatus.includes("incomplete")) {
+    return "incomplete";
+  }
+  if (normalizedStatus.includes("timeout")) {
+    return "timeout";
+  }
+  if (normalizedStatus === "error" || normalizedStatus.includes("error")) {
+    return "error";
+  }
+  if (
+    normalizedStatus === "interrupted" ||
+    normalizedStatus.includes("interrupt")
+  ) {
+    return "interrupted";
+  }
+  return null;
+}
+
 function areThreadListsEquivalent(prev: Thread[], next: Thread[]): boolean {
   if (prev.length !== next.length) return false;
   for (let idx = 0; idx < prev.length; idx += 1) {
@@ -108,7 +146,9 @@ function ThreadList({
   lastSeenByThreadId,
   baselineMs,
   busyByThreadId,
+  seenAttentionStatusByThreadId,
   markSeen,
+  markAttentionStatusSeen,
   onThreadClick,
   hasMore,
   isLoadingMore,
@@ -127,7 +167,9 @@ function ThreadList({
   lastSeenByThreadId: Record<string, number>;
   baselineMs: number;
   busyByThreadId: Record<string, boolean>;
+  seenAttentionStatusByThreadId: Record<string, string>;
   markSeen: (threadId: string, updatedAtMs?: number) => void;
+  markAttentionStatusSeen: (threadId: string, statusKey: string | null) => void;
   onThreadClick?: (threadId: string) => void;
   hasMore: boolean;
   isLoadingMore: boolean;
@@ -164,11 +206,28 @@ function ThreadList({
         const isBusy =
           busyByThreadId[t.thread_id] || isThreadActiveStatus(t.status);
         const isActive = t.thread_id === currentThreadId;
+        const attentionStatusKey =
+          !isBusy && !isActive ? getThreadAttentionStatusKey(t.status) : null;
+        const hasAttentionStatus =
+          !!attentionStatusKey &&
+          seenAttentionStatusByThreadId[t.thread_id] !== attentionStatusKey;
+        const attentionAriaLabel = hasAttentionStatus
+          ? attentionStatusKey === "cancelled"
+            ? "Run cancelled"
+            : attentionStatusKey === "incomplete"
+              ? "Run incomplete"
+              : attentionStatusKey === "timeout"
+                ? "Run timed out"
+                : attentionStatusKey === "error"
+                  ? "Run failed"
+                  : "Run interrupted"
+          : "New activity";
         const isUnseen =
-          !isBusy &&
-          updatedAtMs !== null &&
-          updatedAtMs > lastSeenMs &&
-          !isActive;
+          (!isBusy &&
+            updatedAtMs !== null &&
+            updatedAtMs > lastSeenMs &&
+            !isActive) ||
+          hasAttentionStatus;
         const indicator = isBusy ? (
           <span
             className="flex h-4 w-4 items-center justify-center"
@@ -184,7 +243,7 @@ function ThreadList({
           <span
             className="flex h-4 w-4 items-center justify-center"
             role="img"
-            aria-label="New activity"
+            aria-label={attentionAriaLabel}
           >
             <span className="size-2 rounded-full bg-emerald-500" />
           </span>
@@ -254,6 +313,7 @@ function ThreadList({
                   onClick={(e) => {
                     e.preventDefault();
                     onRenameCancel();
+                    markAttentionStatusSeen(t.thread_id, attentionStatusKey);
                     markSeen(t.thread_id, updatedAtMs ?? undefined);
                     onThreadClick?.(t.thread_id);
                     if (t.thread_id === currentThreadId) return;
@@ -350,11 +410,25 @@ export default function ThreadHistory() {
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
+  const [seenAttentionStatusByThreadId, setSeenAttentionStatusByThreadId] =
+    useState<Record<string, string>>({});
 
   const resetRename = useCallback(() => {
     setEditingThreadId(null);
     setRenameDraft("");
   }, []);
+
+  const markAttentionStatusSeen = useCallback(
+    (targetThreadId: string, statusKey: string | null) => {
+      if (!statusKey) return;
+      setSeenAttentionStatusByThreadId((previous) =>
+        previous[targetThreadId] === statusKey
+          ? previous
+          : { ...previous, [targetThreadId]: statusKey },
+      );
+    },
+    [],
+  );
 
   const handleNewThread = useCallback(() => {
     setThreadId(null);
@@ -521,6 +595,13 @@ export default function ThreadHistory() {
         busyByThreadId[thread.thread_id] || isThreadActiveStatus(thread.status);
       if (isBusy) return false;
       if (thread.thread_id === currentThreadId) return false;
+      const attentionStatusKey = getThreadAttentionStatusKey(thread.status);
+      if (
+        attentionStatusKey &&
+        seenAttentionStatusByThreadId[thread.thread_id] !== attentionStatusKey
+      ) {
+        return true;
+      }
       const updatedAtMs = getThreadUpdatedAtMs(thread);
       if (updatedAtMs === null) return false;
       const lastSeenMs = lastSeenByThreadId[thread.thread_id] ?? baselineMs;
@@ -532,6 +613,7 @@ export default function ThreadHistory() {
     lastSeenByThreadId,
     baselineMs,
     busyByThreadId,
+    seenAttentionStatusByThreadId,
   ]);
 
   useEffect(() => {
@@ -595,13 +677,40 @@ export default function ThreadHistory() {
       (thread) => thread.thread_id === currentThreadId,
     );
     if (!currentThread) return;
+    markAttentionStatusSeen(
+      currentThreadId,
+      getThreadAttentionStatusKey(currentThread.status),
+    );
     const updatedAtMs = getThreadUpdatedAtMs(currentThread);
     if (updatedAtMs === null) return;
     const lastSeenMs = lastSeenByThreadId[currentThreadId] ?? baselineMs;
     if (updatedAtMs > lastSeenMs) {
       markSeen(currentThreadId, updatedAtMs);
     }
-  }, [currentThreadId, threads, lastSeenByThreadId, baselineMs, markSeen]);
+  }, [
+    baselineMs,
+    currentThreadId,
+    lastSeenByThreadId,
+    markAttentionStatusSeen,
+    markSeen,
+    threads,
+  ]);
+
+  useEffect(() => {
+    setSeenAttentionStatusByThreadId((previous) => {
+      const threadIds = new Set(threads.map((thread) => thread.thread_id));
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [existingThreadId, statusKey] of Object.entries(previous)) {
+        if (threadIds.has(existingThreadId)) {
+          next[existingThreadId] = statusKey;
+          continue;
+        }
+        changed = true;
+      }
+      return changed ? next : previous;
+    });
+  }, [threads]);
 
   useEffect(() => {
     if (!editingThreadId) return;
@@ -657,7 +766,9 @@ export default function ThreadHistory() {
             lastSeenByThreadId={lastSeenByThreadId}
             baselineMs={baselineMs}
             busyByThreadId={busyByThreadId}
+            seenAttentionStatusByThreadId={seenAttentionStatusByThreadId}
             markSeen={markSeen}
+            markAttentionStatusSeen={markAttentionStatusSeen}
             hasMore={threadsHasMore}
             isLoadingMore={threadsLoadingMore}
             onLoadMore={loadMoreThreads}
@@ -709,7 +820,9 @@ export default function ThreadHistory() {
                 lastSeenByThreadId={lastSeenByThreadId}
                 baselineMs={baselineMs}
                 busyByThreadId={busyByThreadId}
+                seenAttentionStatusByThreadId={seenAttentionStatusByThreadId}
                 markSeen={markSeen}
+                markAttentionStatusSeen={markAttentionStatusSeen}
                 onThreadClick={() => setChatHistoryOpen((o) => !o)}
                 hasMore={threadsHasMore}
                 isLoadingMore={threadsLoadingMore}

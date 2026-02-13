@@ -1,6 +1,6 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-02-11_  
+_Last updated: 2026-02-13_  
 _Branch: main_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
@@ -52,6 +52,8 @@ Tracking anchor commits:
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
+- 2026-02-13: Align status handling with LangGraph SDK status enums and preserve custom fallback states. Chat warning logic now evaluates thread status (`idle`/`busy`/`interrupted`/`error`) plus freshest run status (`pending`/`running`/`success`/`error`/`timeout`/`interrupted`) and still supports non-standard `cancelled`/`canceled`/`incomplete` values; warning states show retry-once + engineering-ticket guidance with one-time toast dedupe. File: `src/components/thread/index.tsx`.
+- 2026-02-13: Extend history-row activity indicator behavior so non-active threads with attention statuses (SDK-aligned `error`/`interrupted` plus custom terminal warning statuses `cancelled`/`canceled`, `incomplete`, `timeout`) show the green squiggle marker until viewed/opened, making cross-thread follow-up easier when a run did not complete cleanly. File: `src/components/thread/history/index.tsx`.
 - 2026-02-11: Follow-up tool-call streaming stability fix for intermediate artifacts: normalized transient `tool_call.args` shapes, cached non-empty args to prevent `{}`/`input` oscillation during token updates, stabilized intermediate part keys, preserved previous non-empty reasoning during tail streaming regressions, and reduced assistant tail-group comparator work by replacing full serialization with bounded structural summaries. Files: `src/components/thread/messages/tool-calls.tsx`, `src/components/thread/messages/ai.tsx`, `scratchpad.md`, `FORK_COMPASS.md`.
 - 2026-02-11: Fix streaming stability loops causing intermittent React `#185`/max-depth failures and thinking-panel flicker by making busy-map writes idempotent, adding shallow-equality guards in `useThreadBusy`, replacing interdependent busy effects in `Thread` with deterministic derived-state sync + transition side-effects, decoupling thread-status polling cadence from loading-toggle effect restarts, memoizing `AssistantMessage` with message-scope-aware tail-group comparison, and ref-ifying `ThinkingPanel` stick-to-bottom scroll state. Files: `src/lib/thread-activity.ts`, `src/hooks/use-thread-busy.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `plan.md`, `scratchpad.md`, `FORK_COMPASS.md`.
 - 2026-02-11: Add local `topic_preview_artifact` rendering with a click-anywhere assistant card and right-pane `Topic Preview` iframe plus icon actions (`download`, `share`, `refresh`). Rendering now relies on backend `ui` events (no tool-result inference), with deterministic single-card behavior, full-height iframe pane treatment, and smooth-scroll hardening in the artifact surface. Added Playwright coverage for artifact panel behavior and scroll stability. Files: `src/components/thread/messages/topic-preview-artifact.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/artifact.tsx`, `src/components/thread/index.tsx`, `tests/topic-artifact-ui.spec.ts`, `tests/topic-artifact-smooth-scroll.spec.ts`, `README.md`, `FORK_COMPASS.md`.
@@ -215,6 +217,8 @@ Tracking anchor commits:
 - When the same thread is open in another tab while a run is active, the non-owning tab enters observer mode for that thread: send is disabled, draft typing remains enabled, expected interrupt/breakpoint/cancel stream signals are suppressed from generic fatal error toasts, and the composer offers a reload action to recover from stale sync across tabs/browsers/devices.
 - Mid-run disconnects for the run-owning tab now trigger app-level reconnect attempts (run-id resolution + bounded retry/backoff) without forcing a page refresh.
 - During reconnect, composer loading/cancel state and assistant intermediate-step status stay in loading mode (`reconnecting...`) until stream resumes or run ends.
+- Status warning UX now aligns with SDK statuses: warning guidance is derived from thread status + freshest run status, including standard failure states (`error`, `timeout`) and custom fallbacks (`cancelled`/`canceled`, `incomplete`), with retry-once then engineering-ticket copy.
+- History rows surface attention statuses (`error`, `interrupted`, `timeout`, `cancelled`/`canceled`, `incomplete`) with the same green activity squiggle when the thread is not currently open; the marker clears once that thread is opened/viewed.
 - Composer input still auto-expands for multi-line drafts, but now stops growing at `40vh` and becomes internally scrollable beyond that threshold; when upload previews + long drafts are combined, composer height is contained and only the preview/input body scrolls so the send/cancel action row remains visible.
 - Local run ownership/busy markers are no longer cleared aggressively during thread switches, reducing false observer-mode transitions and preserving reconnect authority for the owning tab.
 - Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
