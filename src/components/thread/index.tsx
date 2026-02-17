@@ -53,8 +53,8 @@ import {
   useArtifactContext,
   useArtifactSurfaceMode,
 } from "./artifact";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { useTheme } from "next-themes";
+import { ThreadSettings } from "./thread-settings";
 import {
   classifyStreamError,
   getStreamErrorDetails,
@@ -471,6 +471,8 @@ function ScrollToBottom(props: { className?: string }) {
   );
 }
 
+const ENTER_TO_SEND_STORAGE_KEY = "lg:chat:enterToSend";
+
 export function Thread() {
   const { resolvedTheme } = useTheme();
   const [artifactContext, setArtifactContext] = useArtifactContext();
@@ -484,6 +486,7 @@ export function Thread() {
     parseAsBoolean.withDefault(false),
   );
   const [input, setInput] = useState("");
+  const [enterToSend, setEnterToSend] = useState(true);
   const {
     contentBlocks,
     setContentBlocks,
@@ -496,6 +499,17 @@ export function Thread() {
     isUploading,
   } = useFileUpload();
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(ENTER_TO_SEND_STORAGE_KEY);
+    if (stored === "false") {
+      setEnterToSend(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(ENTER_TO_SEND_STORAGE_KEY, String(enterToSend));
+  }, [enterToSend]);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
   const stream = useStreamContext();
@@ -1523,7 +1537,10 @@ export function Thread() {
                     </Button>
                   )}
                 </div>
-                <ThemeToggle />
+                <ThreadSettings
+                  enterToSend={enterToSend}
+                  onEnterToSendChange={setEnterToSend}
+                />
               </div>
             )}
             {chatStarted && (
@@ -1568,7 +1585,10 @@ export function Thread() {
                   </motion.button>
                 </div>
                 <div className="ml-auto">
-                  <ThemeToggle />
+                  <ThreadSettings
+                    enterToSend={enterToSend}
+                    onEnterToSendChange={setEnterToSend}
+                  />
                 </div>
 
                 <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
@@ -1718,9 +1738,9 @@ export function Thread() {
                             onKeyDown={(e) => {
                               if (
                                 e.key === "Enter" &&
-                                !e.shiftKey &&
-                                !e.metaKey &&
-                                !e.nativeEvent.isComposing
+                                !e.nativeEvent.isComposing &&
+                                ((!e.shiftKey && enterToSend) ||
+                                  ((e.metaKey || e.ctrlKey) && !enterToSend))
                               ) {
                                 e.preventDefault();
                                 const el = e.target as HTMLElement | undefined;
