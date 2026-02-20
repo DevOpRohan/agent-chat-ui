@@ -39,13 +39,13 @@ Key differences in one sentence:
 ## 2) Diff Snapshot (Upstream vs Fork)
 
 - **Upstream status:** 0 commits behind
-- **Fork status:** 62 commits ahead
-- **Files changed vs upstream:** 77
-- **Net diff vs upstream:** +9637 / -1177 lines
+- **Fork status:** 69 commits ahead
+- **Files changed vs upstream:** 87
+- **Net diff vs upstream:** +12644 / -1218 lines
 
 Tracking anchor commits:
 
-- **Fork HEAD:** `c1c447d`
+- **Fork HEAD:** `37b305f`
 - **Upstream main:** `1a0e8af`
 
 ---
@@ -384,6 +384,13 @@ Use this as a jump list when editing or debugging:
 
 Commits unique to this fork (upstream/main..HEAD):
 
+- `37b305f` fix: reconcile completed runs after stream disconnect
+- `11d2d8e` feat(ui): add thread settings with enter-to-send toggle
+- `2d4ea98` feat(status): align langgraph status handling and attention indicators
+- `333fa8a` fix(stream): stabilize busy sync and tool-call streaming UX
+- `1a005cb` test(e2e): make suites environment-aware for auth/setup gates
+- `904d69d` fix(ui): keep composer actions visible with uploads
+- `583ae8b` feat(ui): add explicit topic preview artifact rendering and pane UX
 - `c1c447d` fix(chat): prevent horizontal overflow with resizable panes
 - `9fb2055` docs: update scratchpad validation log for desktop pane rollout
 - `a0fa077` feat(ui): add desktop resizable 3-pane layout with artifact full-width toggle
