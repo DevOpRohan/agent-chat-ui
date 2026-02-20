@@ -7,8 +7,20 @@ const FAST_RETRY_WINDOW_MS = 60_000;
 const PASSIVE_RETRY_INTERVAL_MS = 30_000;
 const FAST_RETRY_DELAYS_MS = [800, 1_500, 2_500, 4_000, 6_000, 8_000];
 const RUN_LIST_LIMIT = 10;
+const TERMINAL_RUN_FRESHNESS_WINDOW_MS = 10 * 60_000;
+const MAX_FINAL_RECONCILE_ATTEMPTS = 3;
 
 type StreamLike = ReturnType<typeof useStreamContext>;
+type RunResolutionSource =
+  | "session_storage"
+  | "running"
+  | "pending"
+  | "latest";
+type ResolvedRunCandidate = {
+  runId: string;
+  status: string | null;
+  source: RunResolutionSource;
+};
 
 export type StreamReconnectPhase =
   | "idle"
@@ -64,6 +76,16 @@ function selectFreshestRun(runs: Run[]): Run | null {
     );
     return bTs - aTs;
   })[0];
+}
+
+function getRunUpdatedAtMs(run: Run): number {
+  return Math.max(toTimestampMs(run.updated_at), toTimestampMs(run.created_at));
+}
+
+function isRunFreshEnough(run: Run, maxAgeMs: number): boolean {
+  const updatedAtMs = getRunUpdatedAtMs(run);
+  if (updatedAtMs <= 0) return false;
+  return Date.now() - updatedAtMs <= maxAgeMs;
 }
 
 function readStoredRunId(threadId: string): string | null {
@@ -222,11 +244,19 @@ export function useStreamAutoReconnect({
     setState(INITIAL_STATE);
   }, []);
 
-  const resolveActiveRunId = useCallback(
-    async (targetThreadId: string): Promise<string | null> => {
+  const resolveRunForRecovery = useCallback(
+    async (
+      targetThreadId: string,
+      options?: { includeTerminalFallback?: boolean },
+    ): Promise<ResolvedRunCandidate | null> => {
+      const includeTerminalFallback = options?.includeTerminalFallback ?? false;
       const sessionRunId = readStoredRunId(targetThreadId);
       if (sessionRunId) {
-        return sessionRunId;
+        return {
+          runId: sessionRunId,
+          source: "session_storage",
+          status: null,
+        };
       }
 
       let firstError: unknown;
@@ -238,7 +268,11 @@ export function useStreamAutoReconnect({
         });
         const freshestRunningRun = selectFreshestRun(runningRuns);
         if (freshestRunningRun?.run_id) {
-          return freshestRunningRun.run_id;
+          return {
+            runId: freshestRunningRun.run_id,
+            source: "running",
+            status: freshestRunningRun.status,
+          };
         }
       } catch (error) {
         firstError = error;
@@ -251,11 +285,38 @@ export function useStreamAutoReconnect({
         });
         const freshestPendingRun = selectFreshestRun(pendingRuns);
         if (freshestPendingRun?.run_id) {
-          return freshestPendingRun.run_id;
+          return {
+            runId: freshestPendingRun.run_id,
+            source: "pending",
+            status: freshestPendingRun.status,
+          };
         }
       } catch (error) {
         if (!firstError) {
           firstError = error;
+        }
+      }
+
+      if (includeTerminalFallback) {
+        try {
+          const recentRuns = await stream.client.runs.list(targetThreadId, {
+            limit: RUN_LIST_LIMIT,
+          });
+          const freshestRun = selectFreshestRun(recentRuns);
+          if (
+            freshestRun?.run_id &&
+            isRunFreshEnough(freshestRun, TERMINAL_RUN_FRESHNESS_WINDOW_MS)
+          ) {
+            return {
+              runId: freshestRun.run_id,
+              source: "latest",
+              status: freshestRun.status,
+            };
+          }
+        } catch (error) {
+          if (!firstError) {
+            firstError = error;
+          }
         }
       }
 
@@ -278,6 +339,7 @@ export function useStreamAutoReconnect({
 
       const startAtMs = Date.now();
       let attempt = 0;
+      let joinedSuccessfully = false;
 
       while (!controller.signal.aborted) {
         const latest = latestRef.current;
@@ -301,30 +363,33 @@ export function useStreamAutoReconnect({
           statusText: `Reconnecting stream (attempt ${attempt})...`,
         }));
 
-        let runId: string | null = null;
+        let runCandidate: ResolvedRunCandidate | null = null;
         let encounteredError: unknown;
         try {
-          runId = await resolveActiveRunId(targetThreadId);
+          runCandidate = await resolveRunForRecovery(targetThreadId, {
+            includeTerminalFallback: false,
+          });
         } catch (error) {
           encounteredError = error;
         }
 
         if (controller.signal.aborted) return;
 
-        if (runId) {
+        if (runCandidate?.runId) {
           try {
             setState((prev) => ({
               ...prev,
               isReconnecting: true,
               phase: "joining_stream",
               attemptCount: attempt,
-              activeRunId: runId,
+              activeRunId: runCandidate.runId,
               statusText: `Reconnecting stream (attempt ${attempt})...`,
             }));
 
-            await stream.joinStream(runId);
+            await stream.joinStream(runCandidate.runId);
             if (controller.signal.aborted) return;
 
+            joinedSuccessfully = true;
             controllerRef.current = null;
             setState((prev) => ({
               ...prev,
@@ -332,7 +397,7 @@ export function useStreamAutoReconnect({
               phase: "idle",
               statusText: null,
               attemptCount: attempt,
-              activeRunId: runId,
+              activeRunId: runCandidate.runId,
             }));
             return;
           } catch (error) {
@@ -394,14 +459,136 @@ export function useStreamAutoReconnect({
         }
       }
 
+      const latest = latestRef.current;
+      const shouldTryFinalReconciliation =
+        !joinedSuccessfully &&
+        !controller.signal.aborted &&
+        threadId === targetThreadId &&
+        !latest.isLoading &&
+        (!latest.isCurrentThreadBusyElsewhere ||
+          latest.isCurrentThreadOwnedByTab);
+
+      if (shouldTryFinalReconciliation) {
+        for (
+          let reconcileAttempt = 1;
+          reconcileAttempt <= MAX_FINAL_RECONCILE_ATTEMPTS;
+          reconcileAttempt += 1
+        ) {
+          const latestState = latestRef.current;
+          const reconciliationEligible =
+            !controller.signal.aborted &&
+            threadId === targetThreadId &&
+            !latestState.isLoading &&
+            (!latestState.isCurrentThreadBusyElsewhere ||
+              latestState.isCurrentThreadOwnedByTab);
+          if (!reconciliationEligible) {
+            break;
+          }
+
+          setState((prev) => ({
+            ...prev,
+            isReconnecting: true,
+            phase: "resolving_run",
+            attemptCount: Math.max(1, attempt),
+            statusText: "Finalizing latest response...",
+          }));
+
+          let runCandidate: ResolvedRunCandidate | null = null;
+          let encounteredError: unknown;
+          try {
+            runCandidate = await resolveRunForRecovery(targetThreadId, {
+              includeTerminalFallback: true,
+            });
+          } catch (error) {
+            encounteredError = error;
+          }
+
+          if (controller.signal.aborted) return;
+          if (!runCandidate?.runId) {
+            break;
+          }
+
+          try {
+            setState((prev) => ({
+              ...prev,
+              isReconnecting: true,
+              phase: "joining_stream",
+              attemptCount: Math.max(1, attempt),
+              activeRunId: runCandidate.runId,
+              statusText: "Finalizing latest response...",
+            }));
+
+            await stream.joinStream(runCandidate.runId);
+            if (controller.signal.aborted) return;
+
+            joinedSuccessfully = true;
+            controllerRef.current = null;
+            setState((prev) => ({
+              ...prev,
+              isReconnecting: false,
+              phase: "idle",
+              statusText: null,
+              attemptCount: Math.max(1, attempt),
+              activeRunId: runCandidate.runId,
+            }));
+            return;
+          } catch (error) {
+            if (isAbortError(error)) {
+              return;
+            }
+            encounteredError = error;
+          }
+
+          if (controller.signal.aborted) return;
+
+          const classification = classifyStreamError(encounteredError, {
+            hasInterrupt: false,
+          });
+          if (classification === "expected_interrupt_or_breakpoint") {
+            controllerRef.current = null;
+            setState(INITIAL_STATE);
+            return;
+          }
+
+          const shouldRetry =
+            classification === "recoverable_disconnect" &&
+            reconcileAttempt < MAX_FINAL_RECONCILE_ATTEMPTS;
+          if (!shouldRetry) {
+            break;
+          }
+
+          setState((prev) => ({
+            ...prev,
+            isReconnecting: true,
+            phase: "passive_wait",
+            attemptCount: Math.max(1, attempt),
+            statusText: "Waiting to finalize response...",
+          }));
+          try {
+            await waitForPassiveRetryTrigger(controller.signal);
+          } catch (error) {
+            if (isAbortError(error)) return;
+            throw error;
+          }
+        }
+      }
+
       if (controllerRef.current === controller) {
         controllerRef.current = null;
       }
       setState((prev) =>
-        prev.isReconnecting ? INITIAL_STATE : { ...prev, phase: "idle" },
+        prev.isReconnecting
+          ? INITIAL_STATE
+          : {
+              ...prev,
+              phase: "idle",
+              statusText: null,
+              activeRunId: null,
+              attemptCount: 0,
+            },
       );
     },
-    [resolveActiveRunId, stream, threadId],
+    [resolveRunForRecovery, stream, threadId],
   );
 
   useEffect(() => {
@@ -416,11 +603,26 @@ export function useStreamAutoReconnect({
 
   useEffect(() => {
     if (threadStatus === "busy") return;
-    if (stateRef.current.activeRunId == null && !stateRef.current.isReconnecting) {
-      return;
-    }
-    stopReconnect();
-  }, [threadStatus, stopReconnect]);
+    setState((prev) => {
+      if (prev.isReconnecting) return prev;
+      if (
+        prev.activeRunId == null &&
+        prev.phase === "idle" &&
+        prev.statusText == null &&
+        prev.attemptCount === 0
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        activeRunId: null,
+        phase: "idle",
+        statusText: null,
+        attemptCount: 0,
+      };
+    });
+  }, [threadStatus]);
 
   useEffect(() => {
     if (previousThreadIdRef.current === threadId) return;
@@ -433,19 +635,8 @@ export function useStreamAutoReconnect({
       if (!stateRef.current.isReconnecting) {
         void startReconnectLoop(threadId!);
       }
-      return;
     }
-
-    if (stateRef.current.isReconnecting && !stream.isLoading) {
-      stopReconnect();
-    }
-  }, [
-    shouldAttemptReconnect,
-    startReconnectLoop,
-    stopReconnect,
-    stream.isLoading,
-    threadId,
-  ]);
+  }, [shouldAttemptReconnect, startReconnectLoop, threadId]);
 
   useEffect(
     () => () => {

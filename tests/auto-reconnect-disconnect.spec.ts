@@ -236,28 +236,14 @@ test.describe("Auto reconnect UX after disconnect", () => {
 
     await expect
       .poll(
-        async () => {
-          const nextLength = await readAssistantTextLength(page);
-          const sendVisible = await page
-            .getByRole("button", { name: "Send" })
-            .isVisible()
-            .catch(() => false);
-          const reconnectVisible = await page
-            .getByTestId("stream-reconnect-status")
-            .isVisible()
-            .catch(() => false);
-          return (
-            nextLength > beforeDisconnectLength ||
-            sendVisible ||
-            reconnectVisible
-          );
-        },
+        async () => readAssistantTextLength(page),
         {
           timeout: 120_000,
-          message: "Stream did not progress after reconnect",
+          message:
+            "Assistant output did not catch up after reconnect without refresh",
         },
       )
-      .toBe(true);
+      .toBeGreaterThan(beforeDisconnectLength + 40);
   });
 
   test("recovers after aborting reconnect stream requests and unroute", async ({
@@ -279,20 +265,14 @@ test.describe("Auto reconnect UX after disconnect", () => {
 
     await expect
       .poll(
-        async () => {
-          const nextLength = await readAssistantTextLength(page);
-          const sendVisible = await page
-            .getByRole("button", { name: "Send" })
-            .isVisible()
-            .catch(() => false);
-          return nextLength > beforeDisconnectLength || sendVisible;
-        },
+        async () => readAssistantTextLength(page),
         {
           timeout: 120_000,
-          message: "Stream did not recover after removing route abort",
+          message:
+            "Assistant output did not recover after removing route abort",
         },
       )
-      .toBe(true);
+      .toBeGreaterThan(beforeDisconnectLength + 20);
   });
 
   test("cancel stays available during reconnect and can terminate run", async ({

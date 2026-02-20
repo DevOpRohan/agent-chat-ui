@@ -87,9 +87,18 @@ function isRecoverableDisconnectError(text: string): boolean {
     text.includes("err_internet_disconnected") ||
     text.includes("err_network_changed") ||
     text.includes("addressunreachable") ||
+    text.includes("eof") ||
+    text.includes("socket hang up") ||
+    text.includes("stream ended unexpectedly") ||
     text.includes("connection reset") ||
     text.includes("connection was reset") ||
     text.includes("connection was lost") ||
+    text.includes("bad gateway") ||
+    text.includes("service unavailable") ||
+    text.includes("gateway timeout") ||
+    text.includes(" 502") ||
+    text.includes(" 503") ||
+    text.includes(" 504") ||
     text.includes("timed out") ||
     text.includes("timeout")
   );

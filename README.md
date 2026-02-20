@@ -74,7 +74,7 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > Topic workflows can render a local `topic_preview_artifact` card in the assistant area. Clicking it opens the right artifact pane with a `Topic Preview` iframe and icon actions for JSON download, preview-link sharing, and iframe refresh.
 
 > [!NOTE]
-> Mid-stream disconnects now auto-recover in-app (no manual page refresh) for runs owned by the current tab. During recovery, loading UX stays consistent: composer keeps `Cancel`, history uses true backend `busy` state for running spinner behavior, and intermediate-step status can show reconnecting state while stream rejoin is in progress.
+> Mid-stream disconnects now auto-recover in-app (no manual page refresh) for runs owned by the current tab. During recovery, loading UX stays consistent: composer keeps `Cancel`, history uses true backend `busy` state for running spinner behavior, intermediate-step status can show reconnecting state while stream rejoin is in progress, and a final reconciliation pass hydrates full assistant output even if the run finishes while the stream was disconnected.
 
 > [!NOTE]
 > The chat now includes a light/dark mode toggle in the top-right of the UI (and on the setup screen). Theme preference is persisted via `next-themes`.
