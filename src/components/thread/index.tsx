@@ -45,7 +45,10 @@ import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import { getOrCreateThreadTabId, markThreadSeen } from "@/lib/thread-activity";
 import { useThreadBusy } from "@/hooks/use-thread-busy";
 import { useStableStreamMessages } from "@/hooks/use-stable-stream-messages";
-import { useStreamAutoReconnect } from "@/hooks/use-stream-auto-reconnect";
+import {
+  useStreamAutoReconnect,
+  type ReconnectIntent,
+} from "@/hooks/use-stream-auto-reconnect";
 import {
   useArtifactOpen,
   ArtifactContent,
@@ -193,6 +196,25 @@ function readStoredRunId(threadId: string | null): string | null {
   }
 }
 
+function shouldSurfaceRecoverableReconnectStatus(
+  name: string | undefined,
+  message: string | undefined,
+): boolean {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return true;
+  }
+
+  const text = `${name ?? ""} ${message ?? ""}`.toLowerCase();
+  if (!text) return false;
+
+  return (
+    text.includes("internet disconnected") ||
+    text.includes("err_internet_disconnected") ||
+    text.includes("err_network_changed") ||
+    text.includes("addressunreachable")
+  );
+}
+
 const DEFAULT_HISTORY_WIDTH_PX = 300;
 const HISTORY_MIN_WIDTH_PX = 220;
 const HISTORY_MAX_WIDTH_PX = 480;
@@ -204,6 +226,8 @@ const CHAT_MIN_WIDTH_PX = 360;
 const RESIZE_STEP_PX = 24;
 const RESIZE_HANDLE_WIDTH_PX = 10;
 const RUN_STATUS_LIST_LIMIT = 10;
+const RECONNECT_INTENT_TTL_MS = 12_000;
+const RECOVERABLE_DISCONNECT_INTENT_GRACE_MS = 1_500;
 
 type BusyState = {
   loadingThreadId: string | null;
@@ -524,6 +548,9 @@ export function Thread() {
   const [busyState, setBusyState] = useState<BusyState>(EMPTY_BUSY_STATE);
   const [threadStatus, setThreadStatus] = useState<string | null>(null);
   const [latestRunStatus, setLatestRunStatus] = useState<string | null>(null);
+  const [reconnectIntent, setReconnectIntent] = useState<ReconnectIntent | null>(
+    null,
+  );
   const loadingThreadId = busyState.loadingThreadId;
   const ownedBusyThreadId = busyState.ownedBusyThreadId;
   const isCurrentThreadLoading =
@@ -570,9 +597,28 @@ export function Thread() {
 
     return runWarning ?? threadWarning;
   }, [latestRunStatus, threadStatus]);
+  const startupReconnectIntentThreadRef = useRef<string | null>(null);
+  const previousReconnectIntentThreadRef = useRef<string | null>(threadId);
+  const recoverableIntentTimeoutRef = useRef<number | null>(null);
+  const reconnectSignalRef = useRef({
+    threadId,
+    threadStatus,
+    isLoading,
+    isCurrentThreadBusyElsewhere,
+    isCurrentThreadOwnedByTab,
+  });
+  const clearRecoverableIntentTimeout = useCallback(() => {
+    if (recoverableIntentTimeoutRef.current === null) return;
+    window.clearTimeout(recoverableIntentTimeoutRef.current);
+    recoverableIntentTimeoutRef.current = null;
+  }, []);
+  const consumeReconnectIntent = useCallback((intentId: string) => {
+    setReconnectIntent((prev) => (prev?.id === intentId ? null : prev));
+  }, []);
   const {
     isReconnecting,
     statusText: reconnectStatusText,
+    showReconnectStatus,
     activeRunId,
     stopReconnect,
   } = useStreamAutoReconnect({
@@ -581,6 +627,8 @@ export function Thread() {
     threadStatus,
     isCurrentThreadBusyElsewhere,
     isCurrentThreadOwnedByTab,
+    reconnectIntent,
+    consumeReconnectIntent,
   });
   const effectiveIsLoading = isCurrentThreadLoading || isReconnecting;
   const visibleStatusWarning = useMemo(
@@ -831,6 +879,99 @@ export function Thread() {
   }, [threadId, claimThreadOwnership]);
 
   useEffect(() => {
+    if (previousReconnectIntentThreadRef.current === threadId) return;
+    previousReconnectIntentThreadRef.current = threadId;
+    startupReconnectIntentThreadRef.current = null;
+    clearRecoverableIntentTimeout();
+    setReconnectIntent(null);
+  }, [clearRecoverableIntentTimeout, threadId]);
+
+  useEffect(() => {
+    const shouldKeepPendingIntent =
+      threadStatus === "busy" &&
+      !isLoading &&
+      (!isCurrentThreadBusyElsewhere || isCurrentThreadOwnedByTab);
+    if (shouldKeepPendingIntent) return;
+    clearRecoverableIntentTimeout();
+  }, [
+    clearRecoverableIntentTimeout,
+    isCurrentThreadBusyElsewhere,
+    isCurrentThreadOwnedByTab,
+    isLoading,
+    threadStatus,
+  ]);
+
+  useEffect(
+    () => () => {
+      clearRecoverableIntentTimeout();
+    },
+    [clearRecoverableIntentTimeout],
+  );
+
+  useEffect(() => {
+    if (!reconnectIntent) return;
+    const ageMs = Date.now() - reconnectIntent.createdAtMs;
+    if (ageMs >= RECONNECT_INTENT_TTL_MS) {
+      setReconnectIntent((prev) =>
+        prev?.id === reconnectIntent.id ? null : prev,
+      );
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setReconnectIntent((prev) =>
+        prev?.id === reconnectIntent.id ? null : prev,
+      );
+    }, RECONNECT_INTENT_TTL_MS - ageMs);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [reconnectIntent]);
+
+  useEffect(() => {
+    if (!threadId) return;
+    if (threadStatus !== "busy") return;
+    if (isLoading) return;
+    if (!isCurrentThreadOwnedByTab) return;
+    if (startupReconnectIntentThreadRef.current === threadId) return;
+    if (!readStoredRunId(threadId)) return;
+
+    startupReconnectIntentThreadRef.current = threadId;
+    setReconnectIntent((prev) => {
+      if (
+        prev &&
+        prev.threadId === threadId &&
+        prev.reason === "recoverable_disconnect"
+      ) {
+        return prev;
+      }
+      return {
+        id: uuidv4(),
+        threadId,
+        reason: "startup_resume",
+        createdAtMs: Date.now(),
+        showStatus: false,
+      };
+    });
+  }, [isCurrentThreadOwnedByTab, isLoading, threadId, threadStatus]);
+
+  useEffect(() => {
+    reconnectSignalRef.current = {
+      threadId,
+      threadStatus,
+      isLoading,
+      isCurrentThreadBusyElsewhere,
+      isCurrentThreadOwnedByTab,
+    };
+  }, [
+    isCurrentThreadBusyElsewhere,
+    isCurrentThreadOwnedByTab,
+    isLoading,
+    threadId,
+    threadStatus,
+  ]);
+
+  useEffect(() => {
     effectiveIsLoadingRef.current = effectiveIsLoading;
     isThreadBusyInAnyTabRef.current = isThreadBusyInAnyTab;
   }, [effectiveIsLoading, isThreadBusyInAnyTab]);
@@ -1039,6 +1180,10 @@ export function Thread() {
       const classification = classifyStreamError(stream.error, {
         hasInterrupt: !!stream.interrupt,
       });
+      const shouldShowRecoverableStatus = shouldSurfaceRecoverableReconnectStatus(
+        name,
+        message,
+      );
 
       if (classification === "benign_react_185") {
         console.warn(
@@ -1066,6 +1211,28 @@ export function Thread() {
       }
 
       if (classification === "recoverable_disconnect") {
+        if (threadId) {
+          clearRecoverableIntentTimeout();
+          const targetThreadId = threadId;
+          recoverableIntentTimeoutRef.current = window.setTimeout(() => {
+            recoverableIntentTimeoutRef.current = null;
+            const latest = reconnectSignalRef.current;
+            const shouldCreateIntent =
+              latest.threadId === targetThreadId &&
+              latest.threadStatus === "busy" &&
+              !latest.isLoading &&
+              (!latest.isCurrentThreadBusyElsewhere ||
+                latest.isCurrentThreadOwnedByTab);
+            if (!shouldCreateIntent) return;
+            setReconnectIntent({
+              id: uuidv4(),
+              threadId: targetThreadId,
+              reason: "recoverable_disconnect",
+              createdAtMs: Date.now(),
+              showStatus: shouldShowRecoverableStatus,
+            });
+          }, RECOVERABLE_DISCONNECT_INTENT_GRACE_MS);
+        }
         console.info("Recoverable disconnect detected; reconnecting stream", {
           name,
           message,
@@ -1087,7 +1254,12 @@ export function Thread() {
     } catch {
       // no-op
     }
-  }, [stream.error, stream.interrupt, threadId]);
+  }, [
+    clearRecoverableIntentTimeout,
+    stream.error,
+    stream.interrupt,
+    threadId,
+  ]);
 
   // TODO: this should be part of the useStream hook
   const prevMessageLength = useRef(0);
@@ -1278,7 +1450,9 @@ export function Thread() {
       }
     }
 
+    clearRecoverableIntentTimeout();
     stopReconnect();
+    setReconnectIntent(null);
     pendingNewThreadOwnership.current.pending = false;
     pendingNewThreadOwnership.current.startedAtMs = 0;
 
@@ -1686,7 +1860,7 @@ export function Thread() {
                         </p>
                       </div>
                     ) : null}
-                    {isReconnecting ? (
+                    {isReconnecting && showReconnectStatus ? (
                       <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
                         <p
                           data-testid="stream-reconnect-status"

@@ -9,8 +9,17 @@ const FAST_RETRY_DELAYS_MS = [800, 1_500, 2_500, 4_000, 6_000, 8_000];
 const RUN_LIST_LIMIT = 10;
 const TERMINAL_RUN_FRESHNESS_WINDOW_MS = 10 * 60_000;
 const MAX_FINAL_RECONCILE_ATTEMPTS = 3;
+const RECONNECT_INTENT_MAX_AGE_MS = 12_000;
 
 type StreamLike = ReturnType<typeof useStreamContext>;
+export type ReconnectIntentReason = "recoverable_disconnect" | "startup_resume";
+export type ReconnectIntent = {
+  id: string;
+  threadId: string;
+  reason: ReconnectIntentReason;
+  createdAtMs: number;
+  showStatus: boolean;
+};
 type RunResolutionSource =
   | "session_storage"
   | "running"
@@ -35,6 +44,8 @@ type StreamReconnectState = {
   attemptCount: number;
   statusText: string | null;
   activeRunId: string | null;
+  reconnectReason: ReconnectIntentReason | null;
+  shouldShowStatus: boolean;
 };
 
 type UseStreamAutoReconnectParams = {
@@ -43,10 +54,13 @@ type UseStreamAutoReconnectParams = {
   threadStatus: string | null;
   isCurrentThreadBusyElsewhere: boolean;
   isCurrentThreadOwnedByTab: boolean;
+  reconnectIntent: ReconnectIntent | null;
+  consumeReconnectIntent: (intentId: string) => void;
 };
 
 type UseStreamAutoReconnectResult = StreamReconnectState & {
   stopReconnect: () => void;
+  showReconnectStatus: boolean;
 };
 
 const INITIAL_STATE: StreamReconnectState = {
@@ -55,6 +69,8 @@ const INITIAL_STATE: StreamReconnectState = {
   attemptCount: 0,
   statusText: null,
   activeRunId: null,
+  reconnectReason: null,
+  shouldShowStatus: false,
 };
 
 function toTimestampMs(value: string | null | undefined): number {
@@ -193,6 +209,8 @@ export function useStreamAutoReconnect({
   threadStatus,
   isCurrentThreadBusyElsewhere,
   isCurrentThreadOwnedByTab,
+  reconnectIntent,
+  consumeReconnectIntent,
 }: UseStreamAutoReconnectParams): UseStreamAutoReconnectResult {
   const [state, setState] = useState<StreamReconnectState>(INITIAL_STATE);
   const controllerRef = useRef<AbortController | null>(null);
@@ -205,14 +223,20 @@ export function useStreamAutoReconnect({
     isCurrentThreadOwnedByTab,
   });
 
+  const hasValidReconnectIntent = useMemo(() => {
+    if (!reconnectIntent || !threadId) return false;
+    if (reconnectIntent.threadId !== threadId) return false;
+    return Date.now() - reconnectIntent.createdAtMs <= RECONNECT_INTENT_MAX_AGE_MS;
+  }, [reconnectIntent, threadId]);
+
   const shouldAttemptReconnect = useMemo(
     () =>
-      !!threadId &&
+      hasValidReconnectIntent &&
       threadStatus === "busy" &&
       !stream.isLoading &&
       (!isCurrentThreadBusyElsewhere || isCurrentThreadOwnedByTab),
     [
-      threadId,
+      hasValidReconnectIntent,
       threadStatus,
       stream.isLoading,
       isCurrentThreadBusyElsewhere,
@@ -330,7 +354,11 @@ export function useStreamAutoReconnect({
   );
 
   const startReconnectLoop = useCallback(
-    async (targetThreadId: string) => {
+    async (
+      targetThreadId: string,
+      reconnectReason: ReconnectIntentReason,
+      shouldShowStatus: boolean,
+    ) => {
       if (!targetThreadId) return;
 
       controllerRef.current?.abort();
@@ -360,7 +388,11 @@ export function useStreamAutoReconnect({
           isReconnecting: true,
           phase: "resolving_run",
           attemptCount: attempt,
-          statusText: `Reconnecting stream (attempt ${attempt})...`,
+          reconnectReason,
+          shouldShowStatus,
+          statusText: shouldShowStatus
+            ? `Reconnecting stream (attempt ${attempt})...`
+            : null,
         }));
 
         let runCandidate: ResolvedRunCandidate | null = null;
@@ -383,7 +415,11 @@ export function useStreamAutoReconnect({
               phase: "joining_stream",
               attemptCount: attempt,
               activeRunId: runCandidate.runId,
-              statusText: `Reconnecting stream (attempt ${attempt})...`,
+              reconnectReason,
+              shouldShowStatus,
+              statusText: shouldShowStatus
+                ? `Reconnecting stream (attempt ${attempt})...`
+                : null,
             }));
 
             await stream.joinStream(runCandidate.runId);
@@ -398,6 +434,8 @@ export function useStreamAutoReconnect({
               statusText: null,
               attemptCount: attempt,
               activeRunId: runCandidate.runId,
+              reconnectReason: null,
+              shouldShowStatus: false,
             }));
             return;
           } catch (error) {
@@ -419,6 +457,10 @@ export function useStreamAutoReconnect({
           return;
         }
 
+        if (classification !== "recoverable_disconnect") {
+          break;
+        }
+
         const elapsedMs = Date.now() - startAtMs;
         const withinFastWindow = elapsedMs < FAST_RETRY_WINDOW_MS;
 
@@ -433,7 +475,11 @@ export function useStreamAutoReconnect({
             isReconnecting: true,
             phase: "retry_wait",
             attemptCount: attempt,
-            statusText: `Reconnecting in ${waitLabel}s...`,
+            reconnectReason,
+            shouldShowStatus,
+            statusText: shouldShowStatus
+              ? `Reconnecting in ${waitLabel}s...`
+              : null,
           }));
           try {
             await waitWithAbort(delayMs, controller.signal);
@@ -449,7 +495,11 @@ export function useStreamAutoReconnect({
           isReconnecting: true,
           phase: "passive_wait",
           attemptCount: attempt,
-          statusText: "Waiting for connection to resume...",
+          reconnectReason,
+          shouldShowStatus,
+          statusText: shouldShowStatus
+            ? "Waiting for connection to resume..."
+            : null,
         }));
         try {
           await waitForPassiveRetryTrigger(controller.signal);
@@ -490,7 +540,9 @@ export function useStreamAutoReconnect({
             isReconnecting: true,
             phase: "resolving_run",
             attemptCount: Math.max(1, attempt),
-            statusText: "Finalizing latest response...",
+            reconnectReason,
+            shouldShowStatus,
+            statusText: shouldShowStatus ? "Finalizing latest response..." : null,
           }));
 
           let runCandidate: ResolvedRunCandidate | null = null;
@@ -515,7 +567,11 @@ export function useStreamAutoReconnect({
               phase: "joining_stream",
               attemptCount: Math.max(1, attempt),
               activeRunId: runCandidate.runId,
-              statusText: "Finalizing latest response...",
+              reconnectReason,
+              shouldShowStatus,
+              statusText: shouldShowStatus
+                ? "Finalizing latest response..."
+                : null,
             }));
 
             await stream.joinStream(runCandidate.runId);
@@ -530,6 +586,8 @@ export function useStreamAutoReconnect({
               statusText: null,
               attemptCount: Math.max(1, attempt),
               activeRunId: runCandidate.runId,
+              reconnectReason: null,
+              shouldShowStatus: false,
             }));
             return;
           } catch (error) {
@@ -562,7 +620,11 @@ export function useStreamAutoReconnect({
             isReconnecting: true,
             phase: "passive_wait",
             attemptCount: Math.max(1, attempt),
-            statusText: "Waiting to finalize response...",
+            reconnectReason,
+            shouldShowStatus,
+            statusText: shouldShowStatus
+              ? "Waiting to finalize response..."
+              : null,
           }));
           try {
             await waitForPassiveRetryTrigger(controller.signal);
@@ -585,6 +647,8 @@ export function useStreamAutoReconnect({
               statusText: null,
               activeRunId: null,
               attemptCount: 0,
+              reconnectReason: null,
+              shouldShowStatus: false,
             },
       );
     },
@@ -595,7 +659,14 @@ export function useStreamAutoReconnect({
     if (stream.isLoading) {
       setState((prev) =>
         prev.isReconnecting
-          ? { ...prev, isReconnecting: false, phase: "idle", statusText: null }
+          ? {
+              ...prev,
+              isReconnecting: false,
+              phase: "idle",
+              statusText: null,
+              reconnectReason: null,
+              shouldShowStatus: false,
+            }
           : prev,
       );
     }
@@ -620,6 +691,8 @@ export function useStreamAutoReconnect({
         phase: "idle",
         statusText: null,
         attemptCount: 0,
+        reconnectReason: null,
+        shouldShowStatus: false,
       };
     });
   }, [threadStatus]);
@@ -631,12 +704,23 @@ export function useStreamAutoReconnect({
   }, [threadId, stopReconnect]);
 
   useEffect(() => {
-    if (shouldAttemptReconnect) {
+    if (shouldAttemptReconnect && reconnectIntent) {
       if (!stateRef.current.isReconnecting) {
-        void startReconnectLoop(threadId!);
+        consumeReconnectIntent(reconnectIntent.id);
+        void startReconnectLoop(
+          threadId!,
+          reconnectIntent.reason,
+          reconnectIntent.showStatus,
+        );
       }
     }
-  }, [shouldAttemptReconnect, startReconnectLoop, threadId]);
+  }, [
+    consumeReconnectIntent,
+    reconnectIntent,
+    shouldAttemptReconnect,
+    startReconnectLoop,
+    threadId,
+  ]);
 
   useEffect(
     () => () => {
@@ -648,6 +732,7 @@ export function useStreamAutoReconnect({
 
   return {
     ...state,
+    showReconnectStatus: state.isReconnecting && state.shouldShowStatus,
     stopReconnect,
   };
 }
