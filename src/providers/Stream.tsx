@@ -31,6 +31,7 @@ import {
   isIapAuthMode,
 } from "@/lib/auth-token";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
+import { writeShadowRunId } from "@/lib/stream-run-shadow";
 import { THREAD_HISTORY_PAGE_SIZE, useThreads } from "./Thread";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
@@ -146,6 +147,9 @@ const StreamSession = ({
     fetchStateHistory: true,
     callerOptions,
     defaultHeaders,
+    onCreated: (run) => {
+      writeShadowRunId(run.thread_id, run.run_id);
+    },
     onCustomEvent: (event, options) => {
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
         options.mutate((prev) => {

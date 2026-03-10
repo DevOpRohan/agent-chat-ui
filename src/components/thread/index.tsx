@@ -43,6 +43,12 @@ import { Label } from "../ui/label";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import { getOrCreateThreadTabId, markThreadSeen } from "@/lib/thread-activity";
+import {
+  clearShadowRunId,
+  readRecoveryRunId,
+  readSdkRunId,
+  readShadowRunId,
+} from "@/lib/stream-run-shadow";
 import { useThreadBusy } from "@/hooks/use-thread-busy";
 import { useStableStreamMessages } from "@/hooks/use-stable-stream-messages";
 import {
@@ -184,18 +190,6 @@ function getStatusWarning(
   return null;
 }
 
-function readStoredRunId(threadId: string | null): string | null {
-  if (!threadId || typeof window === "undefined") return null;
-  try {
-    const runId = window.sessionStorage.getItem(`lg:stream:${threadId}`);
-    if (!runId) return null;
-    const normalized = runId.trim();
-    return normalized.length > 0 ? normalized : null;
-  } catch {
-    return null;
-  }
-}
-
 function shouldSurfaceRecoverableReconnectStatus(
   name: string | undefined,
   message: string | undefined,
@@ -228,6 +222,8 @@ const RESIZE_HANDLE_WIDTH_PX = 10;
 const RUN_STATUS_LIST_LIMIT = 10;
 const RECONNECT_INTENT_TTL_MS = 12_000;
 const RECOVERABLE_DISCONNECT_INTENT_GRACE_MS = 1_500;
+const SILENT_STREAM_END_GRACE_MS = 3_500;
+const EXPECTED_STREAM_STOP_TTL_MS = 15_000;
 
 type BusyState = {
   loadingThreadId: string | null;
@@ -548,9 +544,8 @@ export function Thread() {
   const [busyState, setBusyState] = useState<BusyState>(EMPTY_BUSY_STATE);
   const [threadStatus, setThreadStatus] = useState<string | null>(null);
   const [latestRunStatus, setLatestRunStatus] = useState<string | null>(null);
-  const [reconnectIntent, setReconnectIntent] = useState<ReconnectIntent | null>(
-    null,
-  );
+  const [reconnectIntent, setReconnectIntent] =
+    useState<ReconnectIntent | null>(null);
   const loadingThreadId = busyState.loadingThreadId;
   const ownedBusyThreadId = busyState.ownedBusyThreadId;
   const isCurrentThreadLoading =
@@ -600,9 +595,16 @@ export function Thread() {
   const startupReconnectIntentThreadRef = useRef<string | null>(null);
   const previousReconnectIntentThreadRef = useRef<string | null>(threadId);
   const recoverableIntentTimeoutRef = useRef<number | null>(null);
+  const silentStreamEndTimeoutRef = useRef<number | null>(null);
+  const previousStreamLoadingRef = useRef(isLoading);
+  const expectedStreamStopRef = useRef<{
+    threadId: string;
+    createdAtMs: number;
+  } | null>(null);
   const reconnectSignalRef = useRef({
     threadId,
     threadStatus,
+    latestRunStatus,
     isLoading,
     isCurrentThreadBusyElsewhere,
     isCurrentThreadOwnedByTab,
@@ -611,6 +613,11 @@ export function Thread() {
     if (recoverableIntentTimeoutRef.current === null) return;
     window.clearTimeout(recoverableIntentTimeoutRef.current);
     recoverableIntentTimeoutRef.current = null;
+  }, []);
+  const clearSilentStreamEndTimeout = useCallback(() => {
+    if (silentStreamEndTimeoutRef.current === null) return;
+    window.clearTimeout(silentStreamEndTimeoutRef.current);
+    silentStreamEndTimeoutRef.current = null;
   }, []);
   const consumeReconnectIntent = useCallback((intentId: string) => {
     setReconnectIntent((prev) => (prev?.id === intentId ? null : prev));
@@ -883,8 +890,10 @@ export function Thread() {
     previousReconnectIntentThreadRef.current = threadId;
     startupReconnectIntentThreadRef.current = null;
     clearRecoverableIntentTimeout();
+    clearSilentStreamEndTimeout();
+    expectedStreamStopRef.current = null;
     setReconnectIntent(null);
-  }, [clearRecoverableIntentTimeout, threadId]);
+  }, [clearRecoverableIntentTimeout, clearSilentStreamEndTimeout, threadId]);
 
   useEffect(() => {
     const shouldKeepPendingIntent =
@@ -904,8 +913,9 @@ export function Thread() {
   useEffect(
     () => () => {
       clearRecoverableIntentTimeout();
+      clearSilentStreamEndTimeout();
     },
-    [clearRecoverableIntentTimeout],
+    [clearRecoverableIntentTimeout, clearSilentStreamEndTimeout],
   );
 
   useEffect(() => {
@@ -934,14 +944,15 @@ export function Thread() {
     if (isLoading) return;
     if (!isCurrentThreadOwnedByTab) return;
     if (startupReconnectIntentThreadRef.current === threadId) return;
-    if (!readStoredRunId(threadId)) return;
+    if (!readSdkRunId(threadId)) return;
 
     startupReconnectIntentThreadRef.current = threadId;
     setReconnectIntent((prev) => {
       if (
         prev &&
         prev.threadId === threadId &&
-        prev.reason === "recoverable_disconnect"
+        (prev.reason === "recoverable_disconnect" ||
+          prev.reason === "silent_stream_end")
       ) {
         return prev;
       }
@@ -959,16 +970,95 @@ export function Thread() {
     reconnectSignalRef.current = {
       threadId,
       threadStatus,
+      latestRunStatus,
       isLoading,
       isCurrentThreadBusyElsewhere,
       isCurrentThreadOwnedByTab,
     };
   }, [
+    latestRunStatus,
     isCurrentThreadBusyElsewhere,
     isCurrentThreadOwnedByTab,
     isLoading,
     threadId,
     threadStatus,
+  ]);
+
+  useEffect(() => {
+    const previousIsLoading = previousStreamLoadingRef.current;
+    previousStreamLoadingRef.current = isLoading;
+
+    if (isLoading) {
+      clearSilentStreamEndTimeout();
+      expectedStreamStopRef.current = null;
+      return;
+    }
+
+    if (!previousIsLoading) {
+      const expectedStop = expectedStreamStopRef.current;
+      if (
+        expectedStop &&
+        Date.now() - expectedStop.createdAtMs > EXPECTED_STREAM_STOP_TTL_MS
+      ) {
+        expectedStreamStopRef.current = null;
+      }
+      return;
+    }
+
+    if (!threadId) return;
+    if (!isCurrentThreadOwnedByTab) return;
+    if (stream.error || stream.interrupt) return;
+
+    const expectedStop = expectedStreamStopRef.current;
+    if (
+      expectedStop &&
+      expectedStop.threadId === threadId &&
+      Date.now() - expectedStop.createdAtMs <= EXPECTED_STREAM_STOP_TTL_MS
+    ) {
+      expectedStreamStopRef.current = null;
+      return;
+    }
+
+    if (!readShadowRunId(threadId)) return;
+
+    clearSilentStreamEndTimeout();
+    const targetThreadId = threadId;
+    silentStreamEndTimeoutRef.current = window.setTimeout(() => {
+      silentStreamEndTimeoutRef.current = null;
+      const latest = reconnectSignalRef.current;
+      const runStillActive =
+        latest.latestRunStatus === "running" ||
+        latest.latestRunStatus === "pending";
+      const shouldCreateIntent =
+        latest.threadId === targetThreadId &&
+        !latest.isLoading &&
+        (!latest.isCurrentThreadBusyElsewhere ||
+          latest.isCurrentThreadOwnedByTab) &&
+        (latest.threadStatus === "busy" || runStillActive);
+
+      if (!shouldCreateIntent) return;
+
+      setReconnectIntent((prev) => {
+        if (prev && prev.threadId === targetThreadId) {
+          return prev;
+        }
+
+        return {
+          id: uuidv4(),
+          threadId: targetThreadId,
+          reason: "silent_stream_end",
+          createdAtMs: Date.now(),
+          showStatus: false,
+        };
+      });
+    }, SILENT_STREAM_END_GRACE_MS);
+  }, [
+    clearSilentStreamEndTimeout,
+    isCurrentThreadOwnedByTab,
+    isLoading,
+    stream.error,
+    stream.interrupt,
+    threadId,
   ]);
 
   useEffect(() => {
@@ -1180,10 +1270,8 @@ export function Thread() {
       const classification = classifyStreamError(stream.error, {
         hasInterrupt: !!stream.interrupt,
       });
-      const shouldShowRecoverableStatus = shouldSurfaceRecoverableReconnectStatus(
-        name,
-        message,
-      );
+      const shouldShowRecoverableStatus =
+        shouldSurfaceRecoverableReconnectStatus(name, message);
 
       if (classification === "benign_react_185") {
         console.warn(
@@ -1254,12 +1342,7 @@ export function Thread() {
     } catch {
       // no-op
     }
-  }, [
-    clearRecoverableIntentTimeout,
-    stream.error,
-    stream.interrupt,
-    threadId,
-  ]);
+  }, [clearRecoverableIntentTimeout, stream.error, stream.interrupt, threadId]);
 
   // TODO: this should be part of the useStream hook
   const prevMessageLength = useRef(0);
@@ -1434,7 +1517,14 @@ export function Thread() {
 
   const handleCancel = async () => {
     const activeThreadId = threadId;
-    const runIdForCancel = activeRunId ?? readStoredRunId(activeThreadId);
+    const runIdForCancel = activeRunId ?? readRecoveryRunId(activeThreadId);
+
+    if (activeThreadId) {
+      expectedStreamStopRef.current = {
+        threadId: activeThreadId,
+        createdAtMs: Date.now(),
+      };
+    }
 
     try {
       await stream.stop();
@@ -1451,12 +1541,14 @@ export function Thread() {
     }
 
     clearRecoverableIntentTimeout();
+    clearSilentStreamEndTimeout();
     stopReconnect();
     setReconnectIntent(null);
     pendingNewThreadOwnership.current.pending = false;
     pendingNewThreadOwnership.current.startedAtMs = 0;
 
     if (activeThreadId) {
+      clearShadowRunId(activeThreadId);
       markBusy(activeThreadId, false);
       setBusyState((previous) => {
         if (

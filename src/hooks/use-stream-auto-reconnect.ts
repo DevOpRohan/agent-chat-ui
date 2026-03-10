@@ -1,6 +1,7 @@
 import type { Run } from "@langchain/langgraph-sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { classifyStreamError } from "@/lib/stream-error-classifier";
+import { readRecoveryRunId } from "@/lib/stream-run-shadow";
 import type { useStreamContext } from "@/providers/Stream";
 
 const FAST_RETRY_WINDOW_MS = 60_000;
@@ -12,7 +13,10 @@ const MAX_FINAL_RECONCILE_ATTEMPTS = 3;
 const RECONNECT_INTENT_MAX_AGE_MS = 12_000;
 
 type StreamLike = ReturnType<typeof useStreamContext>;
-export type ReconnectIntentReason = "recoverable_disconnect" | "startup_resume";
+export type ReconnectIntentReason =
+  | "recoverable_disconnect"
+  | "startup_resume"
+  | "silent_stream_end";
 export type ReconnectIntent = {
   id: string;
   threadId: string;
@@ -20,11 +24,7 @@ export type ReconnectIntent = {
   createdAtMs: number;
   showStatus: boolean;
 };
-type RunResolutionSource =
-  | "session_storage"
-  | "running"
-  | "pending"
-  | "latest";
+type RunResolutionSource = "session_storage" | "running" | "pending" | "latest";
 type ResolvedRunCandidate = {
   runId: string;
   status: string | null;
@@ -104,18 +104,6 @@ function isRunFreshEnough(run: Run, maxAgeMs: number): boolean {
   return Date.now() - updatedAtMs <= maxAgeMs;
 }
 
-function readStoredRunId(threadId: string): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const runId = window.sessionStorage.getItem(`lg:stream:${threadId}`);
-    if (!runId) return null;
-    const normalized = runId.trim();
-    return normalized.length > 0 ? normalized : null;
-  } catch {
-    return null;
-  }
-}
-
 function buildAbortError(): Error {
   try {
     return new DOMException("Reconnect aborted", "AbortError");
@@ -127,14 +115,12 @@ function buildAbortError(): Error {
 }
 
 function isAbortError(error: unknown): boolean {
-  return (
-    error instanceof DOMException
-      ? error.name === "AbortError"
-      : typeof error === "object" &&
-          error !== null &&
-          "name" in error &&
-          (error as { name?: string }).name === "AbortError"
-  );
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: string }).name === "AbortError";
 }
 
 async function waitWithAbort(ms: number, signal: AbortSignal): Promise<void> {
@@ -226,23 +212,31 @@ export function useStreamAutoReconnect({
   const hasValidReconnectIntent = useMemo(() => {
     if (!reconnectIntent || !threadId) return false;
     if (reconnectIntent.threadId !== threadId) return false;
-    return Date.now() - reconnectIntent.createdAtMs <= RECONNECT_INTENT_MAX_AGE_MS;
+    return (
+      Date.now() - reconnectIntent.createdAtMs <= RECONNECT_INTENT_MAX_AGE_MS
+    );
   }, [reconnectIntent, threadId]);
 
-  const shouldAttemptReconnect = useMemo(
-    () =>
-      hasValidReconnectIntent &&
-      threadStatus === "busy" &&
-      !stream.isLoading &&
-      (!isCurrentThreadBusyElsewhere || isCurrentThreadOwnedByTab),
-    [
-      hasValidReconnectIntent,
-      threadStatus,
-      stream.isLoading,
-      isCurrentThreadBusyElsewhere,
-      isCurrentThreadOwnedByTab,
-    ],
-  );
+  const shouldAttemptReconnect = useMemo(() => {
+    if (!hasValidReconnectIntent) return false;
+    if (stream.isLoading) return false;
+    if (isCurrentThreadBusyElsewhere && !isCurrentThreadOwnedByTab) {
+      return false;
+    }
+
+    if (reconnectIntent?.reason === "silent_stream_end") {
+      return true;
+    }
+
+    return threadStatus === "busy";
+  }, [
+    hasValidReconnectIntent,
+    reconnectIntent,
+    threadStatus,
+    stream.isLoading,
+    isCurrentThreadBusyElsewhere,
+    isCurrentThreadOwnedByTab,
+  ]);
 
   useEffect(() => {
     stateRef.current = state;
@@ -274,7 +268,7 @@ export function useStreamAutoReconnect({
       options?: { includeTerminalFallback?: boolean },
     ): Promise<ResolvedRunCandidate | null> => {
       const includeTerminalFallback = options?.includeTerminalFallback ?? false;
-      const sessionRunId = readStoredRunId(targetThreadId);
+      const sessionRunId = readRecoveryRunId(targetThreadId);
       if (sessionRunId) {
         return {
           runId: sessionRunId,
@@ -542,7 +536,9 @@ export function useStreamAutoReconnect({
             attemptCount: Math.max(1, attempt),
             reconnectReason,
             shouldShowStatus,
-            statusText: shouldShowStatus ? "Finalizing latest response..." : null,
+            statusText: shouldShowStatus
+              ? "Finalizing latest response..."
+              : null,
           }));
 
           let runCandidate: ResolvedRunCandidate | null = null;
