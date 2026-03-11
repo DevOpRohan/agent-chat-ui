@@ -21,12 +21,15 @@ import { useArtifact } from "../artifact";
 import { memo, useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses";
+import { MarkdownArtifact } from "./markdown-artifact";
 import { TopicPreviewArtifact } from "./topic-preview-artifact";
 
 const REASONING_PREVIEW_CHARS = 500;
 const LOCAL_UI_COMPONENTS = {
+  markdown_artifact: MarkdownArtifact,
   topic_preview_artifact: TopicPreviewArtifact,
 };
+const LOCAL_UI_COMPONENT_NAMES = new Set(Object.keys(LOCAL_UI_COMPONENTS));
 type OrderedContentPart =
   | {
       kind: "text";
@@ -671,7 +674,12 @@ function CustomComponent({ message }: { message: Message }) {
 
   const unmatchedTopicArtifact = messageIsLatestAssistant
     ? [...uiMessages].reverse().find((ui) => {
-        if (ui.name !== "topic_preview_artifact") return false;
+        if (
+          typeof ui.name !== "string" ||
+          !LOCAL_UI_COMPONENT_NAMES.has(ui.name)
+        ) {
+          return false;
+        }
         const linkedMessageId =
           typeof ui.metadata?.message_id === "string"
             ? ui.metadata.message_id

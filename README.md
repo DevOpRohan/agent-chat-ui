@@ -74,6 +74,9 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > Topic workflows can render a local `topic_preview_artifact` card in the assistant area. Clicking it opens the right artifact pane with a `Topic Preview` iframe and icon actions for JSON download, preview-link sharing, and iframe refresh.
 
 > [!NOTE]
+> Markdown workflows can render a local `markdown_artifact` card in the assistant area. Clicking it opens the right artifact pane with rendered markdown/LaTeX plus actions for opening the raw `.md`, sharing the link, and refreshing the preview.
+
+> [!NOTE]
 > Mid-stream disconnects now auto-recover in-app (no manual page refresh) for runs owned by the current tab. During recovery, loading UX stays consistent: composer keeps `Cancel`, history uses true backend `busy` state for running spinner behavior, and a final reconciliation pass hydrates full assistant output even if the run finishes while the stream was disconnected. Reconnect/finalizing status copy is now shown only for confirmed disconnect signals (startup resume and low-confidence transport churn reconcile silently).
 
 > [!NOTE]

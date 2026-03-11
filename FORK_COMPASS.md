@@ -1,6 +1,6 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-03-10_  
+_Last updated: 2026-03-11_  
 _Branch: main_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
@@ -53,6 +53,7 @@ Tracking anchor commits:
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
 - 2026-03-10: Harden stream recovery for silent clean-close failures that do not surface `stream.error`. The client now shadows latest run IDs outside the SDK's resumable storage, detects suspicious owned-stream endings after a grace window, and performs hidden reconnect/final reconciliation when the backend still reports the thread/run as active. Added clean-EOF Playwright regression coverage that closes the initial stream without a fetch error. Files: `src/lib/stream-run-shadow.ts`, `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/hooks/use-stream-auto-reconnect.ts`, `tests/reconnect-silent-stream-close.spec.ts`, `FORK_COMPASS.md`.
+- 2026-03-11: Add explicit `markdown_artifact` UI rendering for QuestionCrafterAgent markdown/LaTeX artifacts. Assistant turns now show a click-anywhere markdown artifact card that opens a rendered markdown pane with raw-link, share, and refresh actions; markdown is fetched through a same-origin proxy route so previews do not depend on third-party CORS headers. Added Playwright coverage for markdown artifact panel behavior. Files: `src/components/thread/messages/markdown-artifact.tsx`, `src/components/thread/messages/ai.tsx`, `src/app/api/markdown-artifact/route.ts`, `tests/markdown-artifact-ui.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-20: Fix reconnect false-positive UX at normal stream tail by switching reconnect start to intent-gated flow. Reconnect now requires an explicit intent (recoverable disconnect or startup resume), startup resume reconciliation runs silently, and reconnect/finalizing status copy is shown only for high-confidence disconnect signals (offline/address-unreachable style events). Added negative E2E coverage that asserts healthy runs do not show reconnect badge while preserving forced-disconnect suites. Files: `src/components/thread/index.tsx`, `src/hooks/use-stream-auto-reconnect.ts`, `tests/reconnect-no-false-positive.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-20: Harden app-level stream recovery so the client performs terminal reconciliation when a run finishes while disconnected. Reconnect now resolves freshest eligible runs (including recent terminal fallback), performs bounded finalization retries on recoverable disconnects, and avoids premature reconnect cancellation on busy->idle transitions. Expanded recoverable stream error signatures (`502`/`503`/`504`, gateway/service-unavailable, EOF/socket hang-up), tightened reconnect E2E assertions to require assistant text catch-up, and added dedicated terminal-reconciliation coverage. Files: `src/hooks/use-stream-auto-reconnect.ts`, `src/lib/stream-error-classifier.ts`, `tests/auto-reconnect-disconnect.spec.ts`, `tests/reconnect-final-reconcile.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-13: Align status handling with LangGraph SDK status enums and preserve custom fallback states. Chat warning logic now evaluates thread status (`idle`/`busy`/`interrupted`/`error`) plus freshest run status (`pending`/`running`/`success`/`error`/`timeout`/`interrupted`) and still supports non-standard `cancelled`/`canceled`/`incomplete` values; warning states show retry-once + engineering-ticket guidance with one-time toast dedupe. File: `src/components/thread/index.tsx`.
@@ -232,6 +233,9 @@ Tracking anchor commits:
 - Desktop layout now supports draggable pane boundaries (history↔chat and chat↔artifact) and an artifact full-width expand/restore control in the artifact header; leaving full-width mode restores prior pane widths, while reload resets pane widths to defaults.
 - `topic_preview_artifact` UI events now render through a local component map in `LoadExternalComponent`, showing a click-anywhere artifact card in assistant turns that opens a right-pane iframe preview.
 - Topic artifact actions support JSON download, preview-link sharing (clipboard + toast), and iframe refresh with a deterministic reload token.
+- `markdown_artifact` UI events now render through the same local component map, showing a click-anywhere assistant card that opens a rendered markdown/LaTeX pane.
+- Markdown artifact previews are fetched through a same-origin `/api/markdown-artifact` proxy route so public `.md` files render reliably even when the upstream object store does not send browser-readable CORS headers.
+- Markdown artifact actions support raw-link open, link sharing (clipboard + toast), and manual preview refresh.
 - Tail AI message rendering now applies a monotonic guard for the active thread/branch so final assistant text does not shrink if SDK history refetch temporarily returns a shorter snapshot than live stream output.
 - Benign React `#185` stream errors are filtered from the generic run-error toast path to avoid false failure alerts for users.
 - Busy ownership synchronization now uses an idempotent busy marker source (`markThreadBusy` no-op short-circuit) plus shallow-equality busy subscriptions and deterministic local busy-state derivation to avoid cascading busy effects and React max-depth rerender loops during streaming/reconnect transitions.
@@ -333,6 +337,8 @@ Use this as a jump list when editing or debugging:
 
 - `src/components/thread/messages/tool-calls.tsx`
 - `src/components/thread/messages/ai.tsx`
+- `src/app/api/markdown-artifact/route.ts`
+- `src/components/thread/messages/markdown-artifact.tsx`
 - `src/components/thread/messages/topic-preview-artifact.tsx`
 - `src/components/thread/markdown-text.tsx`
 - `src/components/thread/markdown-styles.css`
@@ -354,6 +360,7 @@ Use this as a jump list when editing or debugging:
 - `tests/reconnect-no-false-positive.spec.ts`
 - `tests/cross-tab-observer.spec.ts`
 - `tests/submit-guard.spec.ts`
+- `tests/markdown-artifact-ui.spec.ts`
 - `tests/topic-artifact-ui.spec.ts`
 - `tests/topic-artifact-smooth-scroll.spec.ts`
 
