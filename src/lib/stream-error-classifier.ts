@@ -48,7 +48,10 @@ export function getStreamErrorDetails(error: unknown): StreamErrorDetails {
 
 function isReact185Error(text: string): boolean {
   return (
-    text.includes("minified react error #185") || text.includes("/errors/185")
+    text.includes("minified react error #185") ||
+    text.includes("/errors/185") ||
+    text.includes("maximum update depth exceeded") ||
+    text.includes("too many re-renders")
   );
 }
 
@@ -128,4 +131,10 @@ export function classifyStreamError(
   }
 
   return "fatal";
+}
+
+export function isReactRenderInstabilityError(error: unknown): boolean {
+  const details = getStreamErrorDetails(error);
+  const text = `${details.name ?? ""} ${details.message ?? ""}`.toLowerCase();
+  return isReact185Error(text);
 }

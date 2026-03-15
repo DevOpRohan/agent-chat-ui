@@ -78,6 +78,43 @@
 
 ---
 
+## UX Task: React #185 Finalization Fallback (2026-03-15)
+
+### Problem Statement
+
+- Tool-call-heavy streaming can still surface React `#185` / max-depth style instability, especially when the intermediate artifact is open.
+- Current behavior suppresses the React `#185` toast path but does not recover the run, so the backend may finish while the UI remains incomplete.
+- Goal: keep the thread shell alive, convert React-instability failures into a finalize-only backend polling flow, and add deterministic plus real-prompt Playwright coverage.
+
+### Strategy Decisions
+
+- Do not re-open the broad busy-state reducer rewrite from the old plan; the current branch already contains earlier state-loop mitigations.
+- Add a thread-message render boundary so React subtree crashes do not tear down the whole controller.
+- Route React-instability failures and reconnect exhaustion into a finalize-only fallback that hydrates terminal thread state via `threads.getState(...)`.
+- Keep live trigger/status UX immediate, but defer open artifact/thinking body rendering to reduce churn while streaming.
+- Add fresh test files instead of editing the currently dirty reconnect specs in the worktree.
+
+### Experiment Log
+
+- 2026-03-15T00:00:00Z | Re-read current `plan.md`, `Thread`, `AssistantMessage`, reconnect hook, and stream classifier | PASS | Confirmed earlier plan sections were partially stale relative to current branch state.
+- 2026-03-15T00:00:00Z | Added `ThreadRenderBoundary` and `use-run-finalization-fallback` | PASS | Runtime now has explicit containment + fallback primitives instead of only benign-error suppression.
+- 2026-03-15T00:00:00Z | Updated `Thread` and `AssistantMessage` integration | PASS | Finalization status, snapshot override, reconnect exhaustion handoff, and deferred open-artifact rendering are wired.
+- 2026-03-15T00:00:00Z | Added fresh Playwright specs for deterministic fallback and exact-prompt soak coverage | PASS | Avoided modifying the currently dirty reconnect test files.
+
+### Deploy/Test Run Log
+
+- Pending.
+
+### Failed Hypotheses
+
+- The older `ArtifactSlot isEmpty` oscillation theory remained the best primary explanation on the current branch. | FAIL | Current intermediate-step mounting path no longer makes that the strongest main-line fix target.
+
+### Final Learning
+
+- React-instability handling needs both containment and recovery. Treating React `#185` as “benign” without a post-failure control path leaves the backend run alive but the UI incomplete.
+
+---
+
 ## UX Task: Composer Growth Cap (2026-02-09)
 
 ### Problem Statement
@@ -410,6 +447,44 @@
 
 ---
 
+## UX Task: Playwright Suite Review + Complex Number Coverage (2026-03-15)
+
+### Problem Statement
+
+- Audit the current Playwright suite, keep required coverage, and remove only low-value local junk.
+- Preserve a complex-number regression path in the suite.
+- Ensure the complex-number regression can actually detect the current React `#185` / max-depth failure mode instead of only checking for visible UI state.
+
+### Strategy Decisions
+
+- Keep the existing spec set because each current file covers a distinct UX regression area (history, submit guard, pane layout, artifacts, reconnect, cross-tab, stream continuity).
+- Reduce reconnect-suite maintenance overhead by centralizing repeated thread/reset helpers into shared test helpers.
+- Add a focused complex-number intermediate-step spec rather than trying to recreate all previously untracked complex-number variants at once.
+- Detect React `#185` directly via Playwright page console/pageerror monitoring, because the app intentionally suppresses the generic toast for benign `#185` stream errors.
+- Remove only regenerable local artifacts (`.next`, `test-results`, editor swap/DS_Store), not env files, auth state, or dependencies.
+
+### Experiment Log
+
+- 2026-03-15T12:09:47+0530 | Reviewed Playwright inventory + config + environment gates | PASS | Confirmed suite targets develop by default and current specs map to distinct behaviors.
+- 2026-03-15T12:09:47+0530 | Added `tests/helpers/chat-thread.ts` | PASS | Consolidated duplicated reconnect/thread helper logic shared across reconnect/history specs.
+- 2026-03-15T12:09:47+0530 | Added `tests/complex-number-intermediate-click.spec.ts` | PASS | Restored explicit complex-number coverage focused on intermediate-step/artifact-pane behavior.
+- 2026-03-15T12:09:47+0530 | Initial complex-number Playwright run | FAIL | Spec opened the artifact pane successfully, but assertion used a strict `getByText("Intermediate Step")` locator that matched multiple nodes.
+- 2026-03-15T12:09:47+0530 | Added `tests/helpers/react-error-monitor.ts` and wired it into complex-number + final-stream-continuity specs | PASS | Tests now fail on console/pageerror signals matching React `#185`, `/errors/185`, max-depth, or rerender-loop signatures.
+- 2026-03-15T12:09:47+0530 | Tightened complex-number artifact assertion to scope inside `artifact-content` | PASS | Removed strict-mode ambiguity while keeping the same user-visible behavior check.
+
+### Test Run Log
+
+- 2026-03-15T12:09:47+0530 | `pnpm lint` | PASS | No lint errors; only pre-existing repository warnings remain.
+- 2026-03-15T12:09:47+0530 | `pnpm exec playwright test tests/complex-number-intermediate-click.spec.ts --project=chromium --workers=1` | PASS | Ran against develop base URL; setup + complex-number spec both passed with React-error monitoring enabled.
+- 2026-03-15T12:09:47+0530 | Earlier combined run with reconnect spec | PARTIAL | Complex-number spec exposed the strict-locator issue; reconnect spec run was interrupted once the isolated failure was identified.
+
+### Final Learning
+
+- The original complex-number spec shape was not sufficient to detect React `#185`; explicit console/pageerror monitoring is required because the app intentionally filters benign `#185` stream errors out of the generic toast path.
+- A focused complex-number intermediate-step spec is a good stable regression for current behavior, while broader complex-number recovery/follow-up variants can be layered on later if they are still needed.
+
+---
+
 ## UX Task: Tool-Call Streaming Flicker Follow-up (2026-02-11)
 
 ### Problem Statement
@@ -508,3 +583,37 @@
 ### Final Learning
 
 - 2026-02-20T16:09:38Z | Reliable reconnect validation should assert durable user outcomes (non-zero rendered assistant output, non-regressive output continuity, no fatal toast, actionable composer state) instead of fixed-size growth thresholds that are sensitive to backend completion timing.
+
+---
+
+## Deployment Note: Promote Current Develop Revision To Main (2026-03-15)
+
+### Goal
+
+- Make the currently deployed revision available on the main production URL as well.
+
+### Findings
+
+- `agent-chat-ui-00178-hoh` was already the active `develop`-tagged revision.
+- Main production traffic was still pinned to `agent-chat-ui-00122-8b2`.
+- Local production rebuild was blocked by external network instability during image build/push:
+  - first amd64 build stalled during GCR upload and never published tag `20260315-074116`
+  - fresh-builder retry hit repeated network fetch failures during Docker build dependency install (`TLS handshake timeout`, `ECONNRESET` from npm registry)
+
+### Strategy Update
+
+- Instead of waiting on another unstable rebuild, promote the already deployed current revision directly to main traffic.
+- This preserves the exact currently running build users already have on `develop` and satisfies the request to make "this one" the main revision as well.
+
+### Execution Log
+
+- 2026-03-15T07:41:16Z | `pnpm build` | PASS | Local Next.js production build passed with only existing warnings.
+- 2026-03-15T07:44:09Z | `docker buildx build --builder multiarch --platform linux/amd64 ... --push` | FAIL | Registry push stalled before publishing the timestamp tag.
+- 2026-03-15T07:54:59Z | `docker buildx build --builder prodmain --platform linux/amd64 --provenance=false --sbom=false ... --push` | FAIL | Docker build failed during `pnpm i` because upstream package fetches timed out/reset.
+- 2026-03-15T08:00:00Z | `gcloud run services update-traffic agent-chat-ui --region asia-south1 --to-revisions agent-chat-ui-00178-hoh=100` | PASS | Main production traffic now points to current revision `agent-chat-ui-00178-hoh`.
+
+### Result
+
+- Main URL: `https://agent-chat-ui-6duluzey3a-el.a.run.app`
+- Main traffic: `100%` -> `agent-chat-ui-00178-hoh`
+- Image digest: `gcr.io/cerebryai/question_crafter_agent_ui@sha256:616a260493409b3c583fceccaa5a361ea4cd790f654e7087987e96a103e0bf7d`

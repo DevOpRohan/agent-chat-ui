@@ -80,6 +80,9 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > Mid-stream disconnects now auto-recover in-app (no manual page refresh) for runs owned by the current tab. During recovery, loading UX stays consistent: composer keeps `Cancel`, history uses true backend `busy` state for running spinner behavior, and a final reconciliation pass hydrates full assistant output even if the run finishes while the stream was disconnected. Reconnect/finalizing status copy is now shown only for confirmed disconnect signals (startup resume and low-confidence transport churn reconcile silently).
 
 > [!NOTE]
+> If live tool/thinking streaming trips a React render-instability failure (`#185`, max-depth, or too-many-rerenders style errors), the chat shell now keeps the run controller alive, switches to finalize-only backend polling, and hydrates the completed assistant response without requiring a refresh. While that fallback is active, the composer and intermediate-step status stay in a loading/finalizing state instead of silently dropping the run.
+
+> [!NOTE]
 > The chat now includes a light/dark mode toggle in the top-right of the UI (and on the setup screen). Theme preference is persisted via `next-themes`.
 
 ## Environment Variables

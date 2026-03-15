@@ -56,6 +56,10 @@ import {
   type ReconnectIntent,
 } from "@/hooks/use-stream-auto-reconnect";
 import {
+  useRunFinalizationFallback,
+  type FinalizationFallbackIntent,
+} from "@/hooks/use-run-finalization-fallback";
+import {
   useArtifactOpen,
   ArtifactContent,
   ArtifactTitle,
@@ -67,7 +71,9 @@ import { ThreadSettings } from "./thread-settings";
 import {
   classifyStreamError,
   getStreamErrorDetails,
+  isReactRenderInstabilityError,
 } from "@/lib/stream-error-classifier";
+import { ThreadRenderBoundary } from "./render-crash-boundary";
 
 function showThreadRunningToast() {
   toast("Thread is still running", {
@@ -230,6 +236,10 @@ type BusyState = {
   ownedBusyThreadId: string | null;
 };
 
+type ThreadRenderFallbackProps = {
+  statusText: string;
+};
+
 type BusySignals = {
   threadId: string | null;
   tabId: string | null;
@@ -338,6 +348,17 @@ function toBounds(min: number, max: number) {
   const safeMax = Math.max(0, max);
   const safeMin = Math.min(Math.max(0, min), safeMax);
   return { min: safeMin, max: safeMax };
+}
+
+function ThreadRenderFallback({ statusText }: ThreadRenderFallbackProps) {
+  return (
+    <div className="flex w-full justify-start py-2">
+      <div className="bg-muted text-muted-foreground inline-flex max-w-full items-center gap-2 rounded-2xl border px-4 py-3 text-sm">
+        <LoaderCircle className="h-4 w-4 animate-spin" />
+        {statusText}
+      </div>
+    </div>
+  );
 }
 
 function getHistoryBounds(
@@ -533,12 +554,6 @@ export function Thread() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
   const stream = useStreamContext();
-  const messages = stream.messages;
-  const displayMessages = useStableStreamMessages({
-    messages,
-    threadId,
-    branch: stream.branch,
-  });
   const isLoading = stream.isLoading;
   const { busyByThreadId, busyOwnerByThreadId, markBusy } = useThreadBusy();
   const [busyState, setBusyState] = useState<BusyState>(EMPTY_BUSY_STATE);
@@ -546,6 +561,10 @@ export function Thread() {
   const [latestRunStatus, setLatestRunStatus] = useState<string | null>(null);
   const [reconnectIntent, setReconnectIntent] =
     useState<ReconnectIntent | null>(null);
+  const [finalizationIntent, setFinalizationIntent] =
+    useState<FinalizationFallbackIntent | null>(null);
+  const [renderBoundaryResetCounter, setRenderBoundaryResetCounter] =
+    useState(0);
   const loadingThreadId = busyState.loadingThreadId;
   const ownedBusyThreadId = busyState.ownedBusyThreadId;
   const isCurrentThreadLoading =
@@ -622,6 +641,51 @@ export function Thread() {
   const consumeReconnectIntent = useCallback((intentId: string) => {
     setReconnectIntent((prev) => (prev?.id === intentId ? null : prev));
   }, []);
+  const consumeFinalizationIntent = useCallback((intentId: string) => {
+    setFinalizationIntent((prev) => (prev?.id === intentId ? null : prev));
+  }, []);
+  const createFinalizationIntent = useCallback(
+    (
+      reason: FinalizationFallbackIntent["reason"],
+      options?: { runId?: string | null; targetThreadId?: string | null },
+    ) => {
+      const targetThreadId = options?.targetThreadId ?? threadId;
+      if (!targetThreadId) return;
+
+      const backendStillActive =
+        threadStatus === "busy" ||
+        latestRunStatus === "running" ||
+        latestRunStatus === "pending" ||
+        !!readRecoveryRunId(targetThreadId);
+      const hasAuthority =
+        !isCurrentThreadBusyElsewhere || isCurrentThreadOwnedByTab;
+
+      if (!backendStillActive || !hasAuthority) {
+        return;
+      }
+
+      setFinalizationIntent((previous) => {
+        if (previous?.threadId === targetThreadId) {
+          return previous;
+        }
+
+        return {
+          createdAtMs: Date.now(),
+          id: uuidv4(),
+          reason,
+          runId: options?.runId ?? readRecoveryRunId(targetThreadId) ?? null,
+          threadId: targetThreadId,
+        };
+      });
+    },
+    [
+      isCurrentThreadBusyElsewhere,
+      isCurrentThreadOwnedByTab,
+      latestRunStatus,
+      threadId,
+      threadStatus,
+    ],
+  );
   const {
     isReconnecting,
     statusText: reconnectStatusText,
@@ -634,10 +698,39 @@ export function Thread() {
     threadStatus,
     isCurrentThreadBusyElsewhere,
     isCurrentThreadOwnedByTab,
+    onExhausted: ({ runId, threadId: exhaustedThreadId }) => {
+      createFinalizationIntent("reconnect_exhausted", {
+        runId,
+        targetThreadId: exhaustedThreadId,
+      });
+    },
     reconnectIntent,
     consumeReconnectIntent,
   });
-  const effectiveIsLoading = isCurrentThreadLoading || isReconnecting;
+  const {
+    clearFinalSnapshot,
+    finalSnapshot,
+    isActive: isFinalizationFallbackActive,
+    statusText: finalizationStatusText,
+    stopFallback,
+  } = useRunFinalizationFallback({
+    stream,
+    threadId,
+    threadStatus,
+    latestRunStatus,
+    isCurrentThreadBusyElsewhere,
+    isCurrentThreadOwnedByTab,
+    intent: finalizationIntent,
+    consumeIntent: consumeFinalizationIntent,
+  });
+  const effectiveIsLoading =
+    isCurrentThreadLoading || isReconnecting || isFinalizationFallbackActive;
+  const messages = finalSnapshot?.messages ?? stream.messages;
+  const displayMessages = useStableStreamMessages({
+    messages,
+    threadId,
+    branch: stream.branch,
+  });
   const visibleStatusWarning = useMemo(
     () =>
       isThreadActiveStatus(threadStatus) || effectiveIsLoading
@@ -727,12 +820,15 @@ export function Thread() {
   const setThreadId = useCallback(
     (id: string | null) => {
       _setThreadId(id);
+      setFinalizationIntent(null);
+      clearFinalSnapshot();
+      setRenderBoundaryResetCounter((previous) => previous + 1);
 
       // close artifact and reset artifact context
       handleArtifactClose();
       setArtifactContext({});
     },
-    [_setThreadId, handleArtifactClose, setArtifactContext],
+    [_setThreadId, clearFinalSnapshot, handleArtifactClose, setArtifactContext],
   );
 
   useEffect(() => {
@@ -893,7 +989,15 @@ export function Thread() {
     clearSilentStreamEndTimeout();
     expectedStreamStopRef.current = null;
     setReconnectIntent(null);
-  }, [clearRecoverableIntentTimeout, clearSilentStreamEndTimeout, threadId]);
+    setFinalizationIntent(null);
+    clearFinalSnapshot();
+    setRenderBoundaryResetCounter((previous) => previous + 1);
+  }, [
+    clearFinalSnapshot,
+    clearRecoverableIntentTimeout,
+    clearSilentStreamEndTimeout,
+    threadId,
+  ]);
 
   useEffect(() => {
     const shouldKeepPendingIntent =
@@ -917,6 +1021,11 @@ export function Thread() {
     },
     [clearRecoverableIntentTimeout, clearSilentStreamEndTimeout],
   );
+
+  useEffect(() => {
+    if (!finalizationIntent) return;
+    stopReconnect();
+  }, [finalizationIntent, stopReconnect]);
 
   useEffect(() => {
     if (!reconnectIntent) return;
@@ -1065,6 +1174,16 @@ export function Thread() {
     effectiveIsLoadingRef.current = effectiveIsLoading;
     isThreadBusyInAnyTabRef.current = isThreadBusyInAnyTab;
   }, [effectiveIsLoading, isThreadBusyInAnyTab]);
+
+  useEffect(() => {
+    if (!finalSnapshot?.snapshotKey) return;
+    setRenderBoundaryResetCounter((previous) => previous + 1);
+  }, [finalSnapshot?.snapshotKey]);
+
+  useEffect(() => {
+    if (!isLoading) return;
+    clearFinalSnapshot();
+  }, [clearFinalSnapshot, isLoading]);
 
   useEffect(() => {
     if (!threadId) {
@@ -1275,9 +1394,10 @@ export function Thread() {
 
       if (classification === "benign_react_185") {
         console.warn(
-          "Ignoring benign React #185 stream error",
+          "React render instability surfaced through stream error; finalizing via backend polling",
           message ?? name ?? stream.error,
         );
+        createFinalizationIntent("react_185_stream_error");
         return;
       }
 
@@ -1342,7 +1462,13 @@ export function Thread() {
     } catch {
       // no-op
     }
-  }, [clearRecoverableIntentTimeout, stream.error, stream.interrupt, threadId]);
+  }, [
+    clearRecoverableIntentTimeout,
+    createFinalizationIntent,
+    stream.error,
+    stream.interrupt,
+    threadId,
+  ]);
 
   // TODO: this should be part of the useStream hook
   const prevMessageLength = useRef(0);
@@ -1405,6 +1531,9 @@ export function Thread() {
     if (await shouldBlockWhileCurrentThreadBusy("submit")) {
       return;
     }
+    setFinalizationIntent(null);
+    clearFinalSnapshot();
+    setRenderBoundaryResetCounter((previous) => previous + 1);
 
     const threadPreview = buildThreadPreview(input, contentBlocks.length);
     setFirstTokenReceived(false);
@@ -1490,6 +1619,9 @@ export function Thread() {
       if (await shouldBlockWhileCurrentThreadBusy("regenerate")) {
         return;
       }
+      setFinalizationIntent(null);
+      clearFinalSnapshot();
+      setRenderBoundaryResetCounter((previous) => previous + 1);
 
       // Do this so the loading state is correct
       prevMessageLength.current = prevMessageLength.current - 1;
@@ -1512,7 +1644,13 @@ export function Thread() {
         streamResumable: true,
       });
     },
-    [claimThreadOwnership, shouldBlockWhileCurrentThreadBusy, stream, threadId],
+    [
+      claimThreadOwnership,
+      clearFinalSnapshot,
+      shouldBlockWhileCurrentThreadBusy,
+      stream,
+      threadId,
+    ],
   );
 
   const handleCancel = async () => {
@@ -1543,7 +1681,11 @@ export function Thread() {
     clearRecoverableIntentTimeout();
     clearSilentStreamEndTimeout();
     stopReconnect();
+    stopFallback();
     setReconnectIntent(null);
+    setFinalizationIntent(null);
+    clearFinalSnapshot();
+    setRenderBoundaryResetCounter((previous) => previous + 1);
     pendingNewThreadOwnership.current.pending = false;
     pendingNewThreadOwnership.current.startedAtMs = 0;
 
@@ -1677,6 +1819,22 @@ export function Thread() {
     setChatHistoryOpen,
   ]);
 
+  const handleMessageRenderCrash = useCallback(
+    (error: unknown) => {
+      if (!isReactRenderInstabilityError(error)) {
+        console.error("Thread render boundary caught a non-recoverable error", error);
+        return;
+      }
+
+      console.warn(
+        "React render instability detected in thread message subtree; finalizing via backend polling.",
+        error,
+      );
+      createFinalizationIntent("react_render_crash");
+    },
+    [createFinalizationIntent],
+  );
+
   const uiMessageIdsByMessageId = useMemo(() => {
     const ids = new Set<string>();
     for (const uiMessage of stream.values.ui ?? []) {
@@ -1705,6 +1863,7 @@ export function Thread() {
     "grid-cols-[1fr_0fr] transition-all duration-500",
     artifactPaneOpen && "grid-cols-[3fr_2fr]",
   );
+  const renderBoundaryResetKey = `${threadId ?? "no-thread"}:${renderBoundaryResetCounter}:${finalSnapshot?.snapshotKey ?? "no-snapshot"}`;
 
   return (
     <div
@@ -1871,54 +2030,66 @@ export function Thread() {
                 )}
                 contentClassName="pt-8 pb-16 max-w-3xl min-w-0 mx-auto flex w-full flex-col gap-4"
                 content={
-                  <>
-                    {displayMessages
-                      .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                      .map((message, index) =>
-                        message.type === "human" ? (
-                          <HumanMessage
-                            key={message.id || `${message.type}-${index}`}
-                            message={message}
-                            isLoading={effectiveIsLoading}
-                          />
-                        ) : (
-                          <AssistantMessage
-                            key={message.id || `${message.type}-${index}`}
-                            message={message}
-                            allMessages={displayMessages}
-                            isLoading={effectiveIsLoading}
-                            isReconnecting={isReconnecting}
-                            handleRegenerate={handleRegenerate}
-                            interrupt={stream.interrupt}
-                            getMessagesMetadata={stream.getMessagesMetadata}
-                            onSelectBranch={stream.setBranch}
-                            hasCustomComponentsForMessage={
-                              !!message.id &&
-                              uiMessageIdsByMessageId.has(message.id)
-                            }
-                          />
-                        ),
-                      )}
-                    {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
-                      We need to render it outside of the messages list, since there are no messages to render */}
-                    {hasNoAIOrToolMessages && !!stream.interrupt && (
-                      <AssistantMessage
-                        key="interrupt-msg"
-                        message={undefined}
-                        allMessages={displayMessages}
-                        isLoading={effectiveIsLoading}
-                        isReconnecting={isReconnecting}
-                        handleRegenerate={handleRegenerate}
-                        interrupt={stream.interrupt}
-                        getMessagesMetadata={stream.getMessagesMetadata}
-                        onSelectBranch={stream.setBranch}
-                        hasCustomComponentsForMessage={false}
+                  <ThreadRenderBoundary
+                    fallback={
+                      <ThreadRenderFallback
+                        statusText={
+                          finalizationStatusText ?? "Finalizing latest response..."
+                        }
                       />
-                    )}
-                    {effectiveIsLoading && !firstTokenReceived && (
-                      <AssistantMessageLoading />
-                    )}
-                  </>
+                    }
+                    onError={handleMessageRenderCrash}
+                    resetKey={renderBoundaryResetKey}
+                  >
+                    <>
+                      {displayMessages
+                        .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
+                        .map((message, index) =>
+                          message.type === "human" ? (
+                            <HumanMessage
+                              key={message.id || `${message.type}-${index}`}
+                              message={message}
+                              isLoading={effectiveIsLoading}
+                            />
+                          ) : (
+                            <AssistantMessage
+                              key={message.id || `${message.type}-${index}`}
+                              message={message}
+                              allMessages={displayMessages}
+                              isLoading={effectiveIsLoading}
+                              isReconnecting={isReconnecting}
+                              isFinalizing={isFinalizationFallbackActive}
+                              handleRegenerate={handleRegenerate}
+                              interrupt={stream.interrupt}
+                              getMessagesMetadata={stream.getMessagesMetadata}
+                              onSelectBranch={stream.setBranch}
+                              hasCustomComponentsForMessage={
+                                !!message.id &&
+                                uiMessageIdsByMessageId.has(message.id)
+                              }
+                            />
+                          ),
+                        )}
+                      {hasNoAIOrToolMessages && !!stream.interrupt && (
+                        <AssistantMessage
+                          key="interrupt-msg"
+                          message={undefined}
+                          allMessages={displayMessages}
+                          isLoading={effectiveIsLoading}
+                          isReconnecting={isReconnecting}
+                          isFinalizing={isFinalizationFallbackActive}
+                          handleRegenerate={handleRegenerate}
+                          interrupt={stream.interrupt}
+                          getMessagesMetadata={stream.getMessagesMetadata}
+                          onSelectBranch={stream.setBranch}
+                          hasCustomComponentsForMessage={false}
+                        />
+                      )}
+                      {effectiveIsLoading && !firstTokenReceived && (
+                        <AssistantMessageLoading />
+                      )}
+                    </>
+                  </ThreadRenderBoundary>
                 }
                 footer={
                   <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 flex flex-col items-center gap-8 backdrop-blur">
@@ -1961,6 +2132,18 @@ export function Thread() {
                         >
                           <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
                           {reconnectStatusText ?? "Reconnecting stream..."}
+                        </p>
+                      </div>
+                    ) : null}
+                    {isFinalizationFallbackActive ? (
+                      <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
+                        <p
+                          data-testid="stream-finalization-status"
+                          className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
+                          aria-live="polite"
+                        >
+                          <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
+                          {finalizationStatusText ?? "Finalizing latest response..."}
                         </p>
                       </div>
                     ) : null}

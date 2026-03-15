@@ -54,6 +54,11 @@ type UseStreamAutoReconnectParams = {
   threadStatus: string | null;
   isCurrentThreadBusyElsewhere: boolean;
   isCurrentThreadOwnedByTab: boolean;
+  onExhausted?: (params: {
+    reconnectReason: ReconnectIntentReason;
+    runId: string | null;
+    threadId: string;
+  }) => void;
   reconnectIntent: ReconnectIntent | null;
   consumeReconnectIntent: (intentId: string) => void;
 };
@@ -195,6 +200,7 @@ export function useStreamAutoReconnect({
   threadStatus,
   isCurrentThreadBusyElsewhere,
   isCurrentThreadOwnedByTab,
+  onExhausted,
   reconnectIntent,
   consumeReconnectIntent,
 }: UseStreamAutoReconnectParams): UseStreamAutoReconnectResult {
@@ -362,6 +368,7 @@ export function useStreamAutoReconnect({
       const startAtMs = Date.now();
       let attempt = 0;
       let joinedSuccessfully = false;
+      let lastKnownRunId: string | null = null;
 
       while (!controller.signal.aborted) {
         const latest = latestRef.current;
@@ -402,6 +409,7 @@ export function useStreamAutoReconnect({
         if (controller.signal.aborted) return;
 
         if (runCandidate?.runId) {
+          lastKnownRunId = runCandidate.runId;
           try {
             setState((prev) => ({
               ...prev,
@@ -556,6 +564,8 @@ export function useStreamAutoReconnect({
             break;
           }
 
+          lastKnownRunId = runCandidate.runId;
+
           try {
             setState((prev) => ({
               ...prev,
@@ -634,6 +644,25 @@ export function useStreamAutoReconnect({
       if (controllerRef.current === controller) {
         controllerRef.current = null;
       }
+
+      const latestState = latestRef.current;
+      const shouldNotifyExhausted =
+        !joinedSuccessfully &&
+        !controller.signal.aborted &&
+        threadId === targetThreadId &&
+        (!latestState.isCurrentThreadBusyElsewhere ||
+          latestState.isCurrentThreadOwnedByTab) &&
+        (latestState.threadStatus === "busy" ||
+          latestState.isLoading ||
+          reconnectReason === "silent_stream_end");
+      if (shouldNotifyExhausted) {
+        onExhausted?.({
+          reconnectReason,
+          runId: lastKnownRunId,
+          threadId: targetThreadId,
+        });
+      }
+
       setState((prev) =>
         prev.isReconnecting
           ? INITIAL_STATE
@@ -648,7 +677,7 @@ export function useStreamAutoReconnect({
             },
       );
     },
-    [resolveRunForRecovery, stream, threadId],
+    [onExhausted, resolveRunForRecovery, stream, threadId],
   );
 
   useEffect(() => {

@@ -18,7 +18,13 @@ import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
-import { memo, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { LoaderCircle } from "lucide-react";
 import { DO_NOT_RENDER_ID_PREFIX } from "@/lib/ensure-tool-responses";
 import { MarkdownArtifact } from "./markdown-artifact";
@@ -189,6 +195,7 @@ function getReasoningPreview(text: string): string {
 
 function ThinkingPanel({ text }: { text: string }) {
   const previewText = getReasoningPreview(text);
+  const deferredPreviewText = useDeferredValue(previewText);
   const contentRef = useRef<HTMLPreElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const stickToBottomRef = useRef(true);
@@ -202,7 +209,7 @@ function ThinkingPanel({ text }: { text: string }) {
   useEffect(() => {
     if (!isOpen || !stickToBottomRef.current) return;
     scrollToBottom();
-  }, [previewText, isOpen]);
+  }, [deferredPreviewText, isOpen]);
 
   const handleScroll = () => {
     const el = contentRef.current;
@@ -231,7 +238,7 @@ function ThinkingPanel({ text }: { text: string }) {
         onScroll={handleScroll}
         className="[&::-webkit-scrollbar-thumb]:bg-border mt-2 max-h-48 overflow-y-auto pr-2 text-xs leading-relaxed break-words whitespace-pre-wrap [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent"
       >
-        {previewText}
+        {isOpen ? deferredPreviewText : previewText}
       </pre>
     </details>
   );
@@ -241,9 +248,14 @@ function getIntermediateRunningStatus(
   parts: IntermediateContentPart[],
   isStreaming: boolean,
   isReconnecting: boolean,
+  isFinalizing: boolean,
 ): string | null {
   if (parts.length === 0) {
     return null;
+  }
+
+  if (isFinalizing) {
+    return "finalizing...";
   }
 
   if (isReconnecting) {
@@ -328,6 +340,7 @@ function IntermediateStepsArtifactTrigger({
   parts,
   isStreaming,
   isReconnecting = false,
+  isFinalizing = false,
   isLoading,
   showActions,
   actionContent,
@@ -336,18 +349,21 @@ function IntermediateStepsArtifactTrigger({
   parts: IntermediateContentPart[];
   isStreaming: boolean;
   isReconnecting?: boolean;
+  isFinalizing?: boolean;
   isLoading: boolean;
   showActions?: boolean;
   actionContent?: string;
   handleRegenerate?: () => void;
 }) {
   const [IntermediateArtifactContent, intermediateArtifact] = useArtifact();
+  const deferredArtifactParts = useDeferredValue(parts);
   if (parts.length === 0) return null;
 
   const runningStatus = getIntermediateRunningStatus(
     parts,
     isStreaming,
     isReconnecting,
+    isFinalizing,
   );
   const statusLabel = runningStatus ?? "open details";
 
@@ -411,7 +427,9 @@ function IntermediateStepsArtifactTrigger({
               </p>
             </div>
             <div className="p-4">
-              <IntermediateStepContent parts={parts} />
+              <IntermediateStepContent
+                parts={intermediateArtifact.open ? deferredArtifactParts : parts}
+              />
             </div>
           </div>
         </IntermediateArtifactContent>
@@ -975,6 +993,7 @@ type AssistantMessageProps = {
   allMessages: Message[];
   isLoading: boolean;
   isReconnecting?: boolean;
+  isFinalizing?: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
   interrupt: StreamContextType["interrupt"];
   getMessagesMetadata: StreamContextType["getMessagesMetadata"];
@@ -1098,6 +1117,7 @@ function areAssistantMessagePropsEqual(
   }
   if (previous.isLoading !== next.isLoading) return false;
   if (previous.isReconnecting !== next.isReconnecting) return false;
+  if (previous.isFinalizing !== next.isFinalizing) return false;
   if (previous.interrupt !== next.interrupt) return false;
   if (previous.handleRegenerate !== next.handleRegenerate) return false;
   if (previous.getMessagesMetadata !== next.getMessagesMetadata) return false;
@@ -1129,6 +1149,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   allMessages,
   isLoading,
   isReconnecting = false,
+  isFinalizing = false,
   handleRegenerate,
   interrupt,
   getMessagesMetadata,
@@ -1279,6 +1300,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             parts={stableGroupedIntermediateParts}
             isStreaming={isGroupStreaming}
             isReconnecting={isReconnecting}
+            isFinalizing={isFinalizing}
             isLoading={isLoading}
             showActions={shouldRenderInlineActionsForIntermediate}
             actionContent={groupedIntermediateCopyContent}

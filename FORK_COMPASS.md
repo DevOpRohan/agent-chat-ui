@@ -1,7 +1,7 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-03-11_  
-_Branch: main_  
+_Last updated: 2026-03-15_  
+_Branch: develop_  
 _Upstream: langchain-ai/agent-chat-ui (upstream/main)_
 
 This document is a high-detail map of how this fork diverges from the upstream Agent Chat UI. It is designed so a new developer can quickly understand what was customized, why it exists, and where to edit it.
@@ -52,6 +52,7 @@ Tracking anchor commits:
 
 ## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
 
+- 2026-03-15: Add a fallback-first recovery path for React render-instability failures during streaming. The chat message subtree is now wrapped in a render boundary, React `#185` / max-depth / too-many-rerenders style failures trigger finalize-only backend polling instead of only suppressing the toast, reconnect exhaustion can hand off to the same finalization path, and open Thinking/Intermediate Step bodies now render from deferred snapshots to reduce live tool-call churn. Added deterministic fallback coverage plus a serial soak suite for the exact JEE complex-number prompt, including the "artifact kept open while streaming" case. Files: `src/components/thread/index.tsx`, `src/components/thread/render-crash-boundary.tsx`, `src/components/thread/messages/ai.tsx`, `src/hooks/use-run-finalization-fallback.ts`, `src/hooks/use-stream-auto-reconnect.ts`, `src/lib/stream-error-classifier.ts`, `tests/react185-finalization-fallback.spec.ts`, `tests/jee-complex-number-fallback-soak.spec.ts`, `README.md`, `plan.md`, `scratchpad.md`, `FORK_COMPASS.md`.
 - 2026-03-10: Harden stream recovery for silent clean-close failures that do not surface `stream.error`. The client now shadows latest run IDs outside the SDK's resumable storage, detects suspicious owned-stream endings after a grace window, and performs hidden reconnect/final reconciliation when the backend still reports the thread/run as active. Added clean-EOF Playwright regression coverage that closes the initial stream without a fetch error. Files: `src/lib/stream-run-shadow.ts`, `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/hooks/use-stream-auto-reconnect.ts`, `tests/reconnect-silent-stream-close.spec.ts`, `FORK_COMPASS.md`.
 - 2026-03-11: Add explicit `markdown_artifact` UI rendering for QuestionCrafterAgent markdown/LaTeX artifacts. Assistant turns now show a click-anywhere markdown artifact card that opens a rendered markdown pane with raw-link, share, and refresh actions; markdown is fetched through a same-origin proxy route so previews do not depend on third-party CORS headers. Added Playwright coverage for markdown artifact panel behavior. Files: `src/components/thread/messages/markdown-artifact.tsx`, `src/components/thread/messages/ai.tsx`, `src/app/api/markdown-artifact/route.ts`, `tests/markdown-artifact-ui.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-02-20: Fix reconnect false-positive UX at normal stream tail by switching reconnect start to intent-gated flow. Reconnect now requires an explicit intent (recoverable disconnect or startup resume), startup resume reconciliation runs silently, and reconnect/finalizing status copy is shown only for high-confidence disconnect signals (offline/address-unreachable style events). Added negative E2E coverage that asserts healthy runs do not show reconnect badge while preserving forced-disconnect suites. Files: `src/components/thread/index.tsx`, `src/hooks/use-stream-auto-reconnect.ts`, `tests/reconnect-no-false-positive.spec.ts`, `README.md`, `FORK_COMPASS.md`.
@@ -200,9 +201,11 @@ Tracking anchor commits:
 
 - `src/hooks/use-file-upload.tsx`
 - `src/components/thread/index.tsx`
+- `src/components/thread/render-crash-boundary.tsx`
 - `src/components/thread/history/index.tsx`
 - `src/components/thread/messages/ai.tsx`
 - `src/hooks/use-thread-last-seen.ts`
+- `src/hooks/use-run-finalization-fallback.ts`
 - `src/hooks/use-stable-stream-messages.ts`
 - `src/lib/thread-metadata.ts`
 - `src/lib/thread-activity.ts`
@@ -222,6 +225,8 @@ Tracking anchor commits:
 - Mid-run disconnects for the run-owning tab now trigger app-level reconnect attempts (run-id resolution + bounded retry/backoff) without forcing a page refresh.
 - During reconnect, composer loading/cancel state and assistant intermediate-step status stay in loading mode (`reconnecting...`) until stream resumes or run ends; if the run finishes while disconnected, a bounded finalization reconciliation pass hydrates the latest assistant output without requiring page refresh. Reconnect/finalizing status copy is now intent-gated and shown only for confirmed disconnect signals, while startup resume/low-confidence transport churn recovery is silent.
 - Latest run IDs are also shadowed outside the SDK's resumable storage so a stream that ends "cleanly" from the SDK's perspective can still recover. If an owned stream drops without `stream.error`, the UI now waits briefly, confirms the backend still shows the thread/run as active, and silently re-enters reconnect/final reconciliation instead of requiring a refresh.
+- React render-instability failures in the assistant/tool/intermediate subtree now stay contained inside a local render boundary so the thread shell and recovery controller remain mounted.
+- When stream failures are classified as React `#185` / max-depth / too-many-rerenders style instability, or when reconnect exhausts while the backend still looks active, the UI switches to a finalize-only polling fallback that waits for terminal backend state and then hydrates the latest thread snapshot without page refresh.
 - Status warning UX now aligns with SDK statuses: warning guidance is derived from thread status + freshest run status, including standard failure states (`error`, `timeout`) and custom fallbacks (`cancelled`/`canceled`, `incomplete`), with retry-once then engineering-ticket copy.
 - History rows surface attention statuses (`error`, `interrupted`, `timeout`, `cancelled`/`canceled`, `incomplete`) with the same green activity squiggle when the thread is not currently open; the marker clears once that thread is opened/viewed.
 - Composer input still auto-expands for multi-line drafts, but now stops growing at `40vh` and becomes internally scrollable beyond that threshold; when upload previews + long drafts are combined, composer height is contained and only the preview/input body scrolls so the send/cancel action row remains visible.
@@ -229,6 +234,7 @@ Tracking anchor commits:
 - Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
 - Intermediate reasoning/tool content now routes through one `Intermediate Step` launcher in the chat message area and renders full ordered details in the right artifact pane, including tool calls, tool results, and streaming status text.
 - Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
+- When the Thinking panel or Intermediate Step artifact is open, the mounted body now renders from a deferred snapshot so live stream tokens keep header/status updates immediate without forcing the heavy open-panel subtree to re-render on every tick.
 - Tool-call argument rendering now tolerates transient stream shapes (`string`/empty/object) and preserves the most recent non-empty args during token churn so intermediate tool-call tables do not flicker between `{}` and partial payload shapes.
 - Desktop layout now supports draggable pane boundaries (history↔chat and chat↔artifact) and an artifact full-width expand/restore control in the artifact header; leaving full-width mode restores prior pane widths, while reload resets pane widths to defaults.
 - `topic_preview_artifact` UI events now render through a local component map in `LoadExternalComponent`, showing a click-anywhere artifact card in assistant turns that opens a right-pane iframe preview.
@@ -328,6 +334,8 @@ Use this as a jump list when editing or debugging:
 - `src/components/thread/index.tsx`
 - `src/components/thread/messages/human.tsx`
 - `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`
+- `src/components/thread/render-crash-boundary.tsx`
+- `src/hooks/use-run-finalization-fallback.ts`
 - `src/hooks/use-stream-auto-reconnect.ts`
 - `src/lib/constants.ts`
 - `src/lib/stream-error-classifier.ts`
@@ -358,6 +366,8 @@ Use this as a jump list when editing or debugging:
 - `tests/auto-reconnect-disconnect.spec.ts`
 - `tests/reconnect-final-reconcile.spec.ts`
 - `tests/reconnect-no-false-positive.spec.ts`
+- `tests/react185-finalization-fallback.spec.ts`
+- `tests/jee-complex-number-fallback-soak.spec.ts`
 - `tests/cross-tab-observer.spec.ts`
 - `tests/submit-guard.spec.ts`
 - `tests/markdown-artifact-ui.spec.ts`

@@ -3,7 +3,9 @@ import type { Page } from "@playwright/test";
 const CHAT_COMPOSER_PLACEHOLDER = "Type your message...";
 const DEFAULT_TIMEOUT_MS = 20_000;
 
-export type ChatEnvironmentGate = { ok: true } | { ok: false; reason: string };
+export type ChatEnvironmentGate =
+  | { ok: true; reason?: undefined }
+  | { ok: false; reason: string };
 
 function iapGateReason(): string {
   const hasBearer = Boolean(process.env.PLAYWRIGHT_AUTH_BEARER);
