@@ -230,18 +230,21 @@ gcloud run deploy agent-chat-ui \
   --region asia-south1 \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars "\
-IAP_AUDIENCE=/projects/PROJECT_NUMBER/locations/REGION/services/SERVICE_NAME,\
-LANGGRAPH_AUTH_JWT_ISSUER=https://your-company.example,\
-LANGGRAPH_AUTH_JWT_AUDIENCE=https://your-langgraph.example,\
-MODEL_PROVIDER=OPENAI,\
-GCS_BUCKET_NAME=question_crafter_public,\
-NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,\
-NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,\
-OPENAI_FILES_PURPOSE=assistants,\
-OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,\
-OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
+  --set-env-vars "IAP_AUDIENCE=/projects/55487246974/locations/asia-south1/services/agent-chat-ui,LANGGRAPH_AUTH_JWT_ISSUER=agent-chat-ui-frontend-a8b6a18a,LANGGRAPH_AUTH_JWT_AUDIENCE=question_crafter-backend-a8b6a18a,MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=question_crafter_public,NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,OPENAI_FILES_PURPOSE=assistants,OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
   --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
+```
+
+> ⚠️ **Important — Verify traffic after deploy**: `gcloud run deploy` may report a stale revision as "serving 100%" if the new image has the same digest as an existing revision (Cloud Run deduplicates revisions by image content). Always verify after deploying:
+
+```bash
+# Check which revision is actually receiving traffic
+gcloud run services describe agent-chat-ui --region asia-south1 \
+  --format="yaml(status.traffic)"
+
+# If traffic is NOT on the latest revision, shift it manually
+gcloud run services update-traffic agent-chat-ui \
+  --region asia-south1 \
+  --to-revisions=LATEST=100
 ```
 
 ### Develop Deployment (Zero Traffic + Tag)
@@ -255,17 +258,7 @@ gcloud run deploy agent-chat-ui \
   --platform managed \
   --no-traffic \
   --tag develop \
-  --set-env-vars "\
-IAP_AUDIENCE=/projects/PROJECT_NUMBER/locations/REGION/services/SERVICE_NAME,\
-LANGGRAPH_AUTH_JWT_ISSUER=https://your-company.example,\
-LANGGRAPH_AUTH_JWT_AUDIENCE=https://your-langgraph.example,\
-MODEL_PROVIDER=OPENAI,\
-GCS_BUCKET_NAME=question_crafter_public,\
-NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,\
-NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,\
-OPENAI_FILES_PURPOSE=assistants,\
-OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,\
-OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
+  --set-env-vars "IAP_AUDIENCE=/projects/55487246974/locations/asia-south1/services/agent-chat-ui,LANGGRAPH_AUTH_JWT_ISSUER=agent-chat-ui-frontend-a8b6a18a,LANGGRAPH_AUTH_JWT_AUDIENCE=question_crafter-backend-a8b6a18a,MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=question_crafter_public,NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,OPENAI_FILES_PURPOSE=assistants,OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
   --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
 ```
 
