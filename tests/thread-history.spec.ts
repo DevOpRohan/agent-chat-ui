@@ -26,4 +26,16 @@ test("thread history lists new thread", async ({ page }) => {
     .first();
 
   await expect(historyItem).toBeVisible({ timeout: 120_000 });
+
+  await page.getByRole("button", { name: /^New$/ }).first().click();
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("threadId"), {
+      timeout: 15_000,
+    })
+    .toBeNull();
+
+  await historyItem.click();
+  await expect(page.getByText(prompt, { exact: false })).toBeVisible({
+    timeout: 60_000,
+  });
 });

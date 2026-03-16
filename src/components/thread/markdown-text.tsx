@@ -556,16 +556,12 @@ class MarkdownRenderBoundary extends Component<
 
 type MarkdownTextProps = {
   children: string;
-  streaming?: boolean;
 };
 
-const MarkdownTextImpl: FC<MarkdownTextProps> = ({
-  children,
-  streaming = false,
-}) => {
+const MarkdownTextImpl: FC<MarkdownTextProps> = ({ children }) => {
   const normalizedChildren = useMemo(
-    () => (streaming ? children : normalizeLatexDelimiters(children)),
-    [children, streaming],
+    () => normalizeLatexDelimiters(children),
+    [children],
   );
   const renderResetKey = useMemo(
     () => getRenderResetKey(normalizedChildren),
@@ -583,19 +579,6 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({
     ),
     [normalizedChildren],
   );
-
-  if (streaming) {
-    return (
-      <div className="markdown-content">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={defaultComponents}
-        >
-          {normalizedChildren}
-        </ReactMarkdown>
-      </div>
-    );
-  }
 
   return (
     <div className="markdown-content">

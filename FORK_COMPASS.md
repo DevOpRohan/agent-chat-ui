@@ -1,490 +1,222 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-03-15_  
-_Branch: develop_  
-_Upstream: langchain-ai/agent-chat-ui (upstream/main)_
+_Last updated: 2026-03-16_  
+_Branch: codex/poll_exp_  
+_Base: origin/main (`a9179f4`)_  
+_Upstream project: langchain-ai/agent-chat-ui_
 
-This document is a high-detail map of how this fork diverges from the upstream Agent Chat UI. It is designed so a new developer can quickly understand what was customized, why it exists, and where to edit it.
-
-## Table of Contents
-
-- [1) Executive Summary](#1-executive-summary)
-- [2) Diff Snapshot (Upstream vs Fork)](#2-diff-snapshot-upstream-vs-fork)
-- [2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)](#21-recent-fork-changes-since-upstream-sync-2026-01-22)
-- [3) Customization Map (by area)](#3-customization-map-by-area)
-  - [3.1 Upload Pipeline (GCS + OpenAI Files)](#31-upload-pipeline-gcs--openai-files)
-    - [3.1.1 Implementation Notes & Limits](#311-implementation-notes--limits)
-  - [3.2 Multimodal Content Blocks & Previews](#32-multimodal-content-blocks--previews)
-  - [3.3 Thread Submission Behavior (recursion + disconnects)](#33-thread-submission-behavior-recursion--disconnects)
-  - [3.4 UX Polish & Rendering Tweaks](#34-ux-polish--rendering-tweaks)
-  - [3.5 Configuration & Deployment](#35-configuration--deployment)
-  - [3.6 Documentation Added](#36-documentation-added)
-- [4) File Navigation Index](#4-file-navigation-index)
-- [5) Fork-only Commit Log](#5-fork-only-commit-log)
-- [6) Notes / Known Deviations](#6-notes--known-deviations)
-
----
+This document is the current map of fork-specific behavior in this worktree. It focuses on the poll-first runtime rewrite plus the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
 
 ## 1) Executive Summary
 
-This fork focuses on **efficient multimodal uploads, IAP-backed auth for direct LangGraph calls, OpenAI-compatible PDF handling, deployment readiness, and a few UX tweaks**. The biggest architectural changes are a new **server-side upload pipeline** (GCS + optional OpenAI Files) and a **frontend token mint endpoint** that validates IAP headers and issues LangGraph JWTs so the browser can call LangGraph directly.
+This fork now uses a poll-first chat runtime.
 
-Key differences in one sentence:
+- No SSE token streaming is used in the app runtime.
+- The selected thread is reconciled from LangGraph REST APIs (`threads.get`, `threads.getState`, `threads.getHistory`, `runs.list`, `runs.cancel`).
+- Refresh/remount/network recovery works by resuming polling while the backend thread remains `busy`.
+- Cross-tab behavior is backend-driven only. If a thread is `busy`, every tab shows the same working state and blocks duplicate sends.
+- Existing fork behavior for uploads, OpenAI PDF handling, recursion limits, `onDisconnect: "continue"`, thread history, artifact cards, and HITL resume/edit/regenerate is preserved.
 
-- **Uploads now go to GCS first (and optionally OpenAI), IAP JWTs are validated and exchanged for LangGraph JWTs, content blocks are URL/ID-based, and the UI and submission configs were adjusted for reliability and UX.**
-  Recent post-sync changes (after 2026-01-22) include **re-enabling thread history list**, **removing assistant/graph gating for history (owner-only)**, **removing stream health polling**, **adding app-level stream auto-reconnect state handling**, and **documentation updates**.
+## 2) Diff Snapshot
 
----
+Working tree snapshot vs `origin/main` for this migration branch:
 
-## 2) Diff Snapshot (Upstream vs Fork)
+- Files changed: `22`
+- Insertions: `1080`
+- Deletions: `4681`
+- Snapshot note: excludes `tsconfig.tsbuildinfo`
 
-- **Upstream status:** 0 commits behind
-- **Fork status:** 69 commits ahead
-- **Files changed vs upstream:** 87
-- **Net diff vs upstream:** +12644 / -1218 lines
+Git state:
 
-Tracking anchor commits:
+- `HEAD`: `a9179f4`
+- `origin/main`: `a9179f4`
+- Unique commits in this worktree: none yet
+- Current migration is still uncommitted on top of `origin/main`
 
-- **Fork HEAD:** `37b305f`
-- **Upstream main:** `1a0e8af`
+## 3) Recent Change
 
----
+- 2026-03-16: Replace the stream-driven runtime with a polling runtime. The app now creates runs with `client.runs.create`, polls thread/run state on a fixed schedule, resumes polling after refresh/remount, removes reconnect/finalization/observer-mode machinery, simplifies active UX to `Working on your query...`, deletes stream-only hooks/libs/tests, and keeps branch/checkpoint metadata through local history processing. Main files: `src/providers/Stream.tsx`, `src/lib/thread-branching.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/history/index.tsx`, `src/lib/thread-activity.ts`, `tests/polling-refresh.spec.ts`.
 
-## 2.1) Recent Fork Changes Since Upstream Sync (2026-01-22)
+## 4) Customization Map
 
-- 2026-03-15: Add a fallback-first recovery path for React render-instability failures during streaming. The chat message subtree is now wrapped in a render boundary, React `#185` / max-depth / too-many-rerenders style failures trigger finalize-only backend polling instead of only suppressing the toast, reconnect exhaustion can hand off to the same finalization path, and open Thinking/Intermediate Step bodies now render from deferred snapshots to reduce live tool-call churn. Added deterministic fallback coverage plus a serial soak suite for the exact JEE complex-number prompt, including the "artifact kept open while streaming" case. Files: `src/components/thread/index.tsx`, `src/components/thread/render-crash-boundary.tsx`, `src/components/thread/messages/ai.tsx`, `src/hooks/use-run-finalization-fallback.ts`, `src/hooks/use-stream-auto-reconnect.ts`, `src/lib/stream-error-classifier.ts`, `tests/react185-finalization-fallback.spec.ts`, `tests/jee-complex-number-fallback-soak.spec.ts`, `README.md`, `plan.md`, `scratchpad.md`, `FORK_COMPASS.md`.
-- 2026-03-10: Harden stream recovery for silent clean-close failures that do not surface `stream.error`. The client now shadows latest run IDs outside the SDK's resumable storage, detects suspicious owned-stream endings after a grace window, and performs hidden reconnect/final reconciliation when the backend still reports the thread/run as active. Added clean-EOF Playwright regression coverage that closes the initial stream without a fetch error. Files: `src/lib/stream-run-shadow.ts`, `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/hooks/use-stream-auto-reconnect.ts`, `tests/reconnect-silent-stream-close.spec.ts`, `FORK_COMPASS.md`.
-- 2026-03-11: Add explicit `markdown_artifact` UI rendering for QuestionCrafterAgent markdown/LaTeX artifacts. Assistant turns now show a click-anywhere markdown artifact card that opens a rendered markdown pane with raw-link, share, and refresh actions; markdown is fetched through a same-origin proxy route so previews do not depend on third-party CORS headers. Added Playwright coverage for markdown artifact panel behavior. Files: `src/components/thread/messages/markdown-artifact.tsx`, `src/components/thread/messages/ai.tsx`, `src/app/api/markdown-artifact/route.ts`, `tests/markdown-artifact-ui.spec.ts`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-20: Fix reconnect false-positive UX at normal stream tail by switching reconnect start to intent-gated flow. Reconnect now requires an explicit intent (recoverable disconnect or startup resume), startup resume reconciliation runs silently, and reconnect/finalizing status copy is shown only for high-confidence disconnect signals (offline/address-unreachable style events). Added negative E2E coverage that asserts healthy runs do not show reconnect badge while preserving forced-disconnect suites. Files: `src/components/thread/index.tsx`, `src/hooks/use-stream-auto-reconnect.ts`, `tests/reconnect-no-false-positive.spec.ts`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-20: Harden app-level stream recovery so the client performs terminal reconciliation when a run finishes while disconnected. Reconnect now resolves freshest eligible runs (including recent terminal fallback), performs bounded finalization retries on recoverable disconnects, and avoids premature reconnect cancellation on busy->idle transitions. Expanded recoverable stream error signatures (`502`/`503`/`504`, gateway/service-unavailable, EOF/socket hang-up), tightened reconnect E2E assertions to require assistant text catch-up, and added dedicated terminal-reconciliation coverage. Files: `src/hooks/use-stream-auto-reconnect.ts`, `src/lib/stream-error-classifier.ts`, `tests/auto-reconnect-disconnect.spec.ts`, `tests/reconnect-final-reconcile.spec.ts`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-13: Align status handling with LangGraph SDK status enums and preserve custom fallback states. Chat warning logic now evaluates thread status (`idle`/`busy`/`interrupted`/`error`) plus freshest run status (`pending`/`running`/`success`/`error`/`timeout`/`interrupted`) and still supports non-standard `cancelled`/`canceled`/`incomplete` values; warning states show retry-once + engineering-ticket guidance with one-time toast dedupe. File: `src/components/thread/index.tsx`.
-- 2026-02-13: Extend history-row activity indicator behavior so non-active threads with attention statuses (SDK-aligned `error`/`interrupted` plus custom terminal warning statuses `cancelled`/`canceled`, `incomplete`, `timeout`) show the green squiggle marker until viewed/opened, making cross-thread follow-up easier when a run did not complete cleanly. File: `src/components/thread/history/index.tsx`.
-- 2026-02-11: Follow-up tool-call streaming stability fix for intermediate artifacts: normalized transient `tool_call.args` shapes, cached non-empty args to prevent `{}`/`input` oscillation during token updates, stabilized intermediate part keys, preserved previous non-empty reasoning during tail streaming regressions, and reduced assistant tail-group comparator work by replacing full serialization with bounded structural summaries. Files: `src/components/thread/messages/tool-calls.tsx`, `src/components/thread/messages/ai.tsx`, `scratchpad.md`, `FORK_COMPASS.md`.
-- 2026-02-11: Fix streaming stability loops causing intermittent React `#185`/max-depth failures and thinking-panel flicker by making busy-map writes idempotent, adding shallow-equality guards in `useThreadBusy`, replacing interdependent busy effects in `Thread` with deterministic derived-state sync + transition side-effects, decoupling thread-status polling cadence from loading-toggle effect restarts, memoizing `AssistantMessage` with message-scope-aware tail-group comparison, and ref-ifying `ThinkingPanel` stick-to-bottom scroll state. Files: `src/lib/thread-activity.ts`, `src/hooks/use-thread-busy.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `plan.md`, `scratchpad.md`, `FORK_COMPASS.md`.
-- 2026-02-11: Add local `topic_preview_artifact` rendering with a click-anywhere assistant card and right-pane `Topic Preview` iframe plus icon actions (`download`, `share`, `refresh`). Rendering now relies on backend `ui` events (no tool-result inference), with deterministic single-card behavior, full-height iframe pane treatment, and smooth-scroll hardening in the artifact surface. Added Playwright coverage for artifact panel behavior and scroll stability. Files: `src/components/thread/messages/topic-preview-artifact.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/artifact.tsx`, `src/components/thread/index.tsx`, `tests/topic-artifact-ui.spec.ts`, `tests/topic-artifact-smooth-scroll.spec.ts`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-11: Prevent composer send/cancel row underflow when uploaded file previews and long multiline drafts coexist by constraining composer max-height, moving attachment+textarea into a scrollable body region, and pinning the action row as non-shrinking. Also tuned initial landing spacing to avoid pushing the composer too low on short viewports. File: `src/components/thread/index.tsx`.
-- 2026-02-11: Remove chat-pane horizontal overflow for long unbroken user tokens/URLs on top of the desktop resizable-pane layout by constraining the chat scroll container (`overflow-x: hidden`), tightening human bubble flex/width constraints, and hardening markdown long-token wrapping. Added deterministic Playwright coverage for long token/URL responsiveness (desktop + intermediate step + mobile). Files: `src/components/thread/index.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/markdown-styles.css`, `tests/chat-pane-responsive.spec.ts`, `FORK_COMPASS.md`.
-- 2026-02-09: Add desktop three-pane layout controls for chat history, chat/composer, and artifact views: horizontal drag-resize handles for history↔chat and chat↔artifact boundaries, artifact full-width expand/restore toggle in the artifact header, and width restoration when leaving full-width mode. Includes pane-layout Playwright coverage and responsive guardrails so the behavior stays desktop-only (`>=1024px`). Files: `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `tests/pane-layout.spec.ts`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-09: Cap composer textarea growth at a viewport-based threshold and enable internal scrolling after the limit so long multi-line drafts do not consume the full screen. File: `src/components/thread/index.tsx`.
-- 2026-02-08: Add app-level stream reconnect controller for mid-run disconnect recovery (no manual refresh), extend stream error classification with recoverable disconnect signatures, keep composer/intermediate loading UX aligned during reconnect, harden run ownership transitions across thread switches, and make history running indicator semantics strictly backend `busy`. Added reconnect-focused E2E coverage scaffold. Files: `src/hooks/use-stream-auto-reconnect.ts`, `src/lib/stream-error-classifier.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/history/index.tsx`, `tests/auto-reconnect-disconnect.spec.ts`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-08: Add cross-tab observer mode for active threads and harden stream error classification so expected interrupt/breakpoint signals (including human breakpoint and cancel/abort-style errors) do not show generic fatal toasts. Active-run state in another tab now keeps draft text editable while disabling send for that thread, observer lock release aligns to active `busy` status so it clears after cancellation/interrupt transitions, and composer UX now includes explicit fallback copy plus a reload action for stale cross-tab/cross-browser/device sync. Running-thread submit/regenerate blocking toast behavior remains intact and is asserted in E2E. Files: `src/lib/stream-error-classifier.ts`, `src/components/thread/index.tsx`, `tests/cross-tab-observer.spec.ts`, `tests/submit-guard.spec.ts`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-08: Add per-expression KaTeX fallback sanitization so malformed formulas render as plain text (instead of red `katex-error` output), set `errorColor: "currentColor"` as a secondary guard, and make markdown render-boundary fallback GFM-only (no KaTeX) for full fail-open behavior. Files: `src/components/thread/markdown-text.tsx`, `FORK_COMPASS.md`.
-- 2026-02-08: Optimize live stream markdown performance by adding a fast-path renderer for actively streaming assistant tail messages (skip async Shiki highlighting and math transforms during token flow, then restore full render after stream completion). This reduces UI stalls from partial LaTeX/code while preserving final rich formatting. Files: `src/components/thread/markdown-text.tsx`, `src/components/thread/messages/ai.tsx`, `FORK_COMPASS.md`.
-- 2026-02-08: Harden markdown streaming render path against malformed/incomplete LaTeX by adding a fail-open error boundary around async markdown highlighting and forcing KaTeX non-throwing mode (`throwOnError: false`, `strict: "ignore"`). Streaming now falls back to safe markdown rendering instead of stalling the UI when formula parsing fails mid-stream. Files: `src/components/thread/markdown-text.tsx`, `FORK_COMPASS.md`.
-- 2026-02-08: Replace Prism-based markdown code block highlighting with `rehype-pretty-code` (`shiki`) for robust GitHub-style syntax coloring across languages, including light/dark theme-aware rendering and copy-to-clipboard controls on rendered code blocks. Files: `src/components/thread/markdown-text.tsx`, `src/components/thread/markdown-styles.css`, `package.json`, `pnpm-lock.yaml`, `FORK_COMPASS.md`; removed `src/components/thread/syntax-highlighter.tsx`.
-- 2026-02-08: Add LaTeX delimiter normalization in markdown rendering so `\(...\)` renders as inline math and `\[...\]` renders as display math (in both streaming and settled assistant output, plus other markdown views). Code spans and fenced code blocks are excluded from normalization. Files: `src/components/thread/markdown-text.tsx`, `FORK_COMPASS.md`.
-- 2026-02-08: Sync browser tab/app icons to Question Crafter branding by explicitly declaring metadata icon links (SVG, PNG sizes, ICO, apple-touch) and generating matching assets to avoid stale favicon caches across browsers. Files: `src/app/layout.tsx`, `src/app/favicon.ico`, `public/favicon-32x32.png`, `public/favicon-16x16.png`, `public/apple-touch-icon.png`.
-- 2026-02-08: Improve markdown link readability in dark mode by adding dedicated light/dark link color tokens and applying them in markdown rendering so plain URLs remain visually distinct from body text. Files: `src/app/globals.css`, `src/components/thread/markdown-styles.css`, `src/components/thread/markdown-text.tsx`.
-- 2026-02-08: Add full light/dark theme support with persistent toggle UX (`next-themes`) in setup and chat headers, migrate core chat/history/tool-call/agent-inbox surfaces to semantic theme tokens, and add a dedicated dark variant for the Question Crafter logo. Files: `src/app/layout.tsx`, `src/components/theme/theme-provider.tsx`, `src/components/theme/theme-toggle.tsx`, `src/components/icons/question-crafter.tsx`, `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/messages/tool-calls.tsx`, `src/components/thread/messages/generic-interrupt.tsx`, `src/components/thread/MultimodalPreview.tsx`, `src/components/thread/markdown-styles.css`, `src/components/thread/agent-inbox/index.tsx`, `src/components/thread/agent-inbox/components/state-view.tsx`, `src/components/thread/agent-inbox/components/thread-actions-view.tsx`, `src/components/thread/agent-inbox/components/inbox-item-input.tsx`, `src/components/thread/agent-inbox/components/thread-id.tsx`, `src/components/thread/agent-inbox/components/tool-call-table.tsx`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-08: Stabilize final assistant streaming after intermediate/tool activity by preventing same-tail-message regressions during stream-to-history handoff. Added a non-regressive tail AI snapshot hook and Playwright continuity coverage. Files: `src/hooks/use-stable-stream-messages.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `tests/final-stream-continuity.spec.ts`, `FORK_COMPASS.md`.
-- 2026-02-08: Switch to local Inter font assets via `@fontsource/inter` to avoid build-time Google Fonts fetch failures in Docker builds. Files: `package.json`, `pnpm-lock.yaml`, `src/app/layout.tsx`, `src/app/globals.css`.
-- 2026-02-07: Remove logo background fill for transparent assets (no square background in UI). Files: `public/question-crafter-logo.svg`, `public/logo.svg`, `public/question-crafter-logo.png`, `src/components/icons/question-crafter.tsx`, `src/app/favicon.ico`.
-- 2026-02-07: Sync updated logo SVG across all assets and React icon, regenerate PNG + favicon. Files: `public/question-crafter-logo.svg`, `public/logo.svg`, `public/question-crafter-logo.png`, `src/components/icons/question-crafter.tsx`, `src/app/favicon.ico`.
-- 2026-02-06: Refresh Question Crafter branding assets to the selected balanced co-author mark and simplify the icon by removing the outer nested containers (inner symbol only). Also add alternate icon source under `public/branding/`; history-row rename save/cancel controls are compact icon actions for lower width. Files: `public/logo.svg`, `public/question-crafter-logo.svg`, `public/question-crafter-logo.png`, `public/branding/question-crafter-icon-option-1-collab.svg`, `src/components/icons/question-crafter.tsx`, `src/components/thread/history/index.tsx`, `FORK_COMPASS.md`.
-- 2026-02-06: Add manual thread naming on history rows (pencil icon with inline editor); persists names via `threads.update(...metadata.thread_title)` and prioritizes custom names in history labels. Also adds a clear `New` action in history headers (desktop + mobile sheet). Files: `src/components/thread/history/index.tsx`, `src/providers/Thread.tsx`, `src/lib/thread-metadata.ts`, `src/components/thread/index.tsx`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-06: Add thread history lazy loading in 20-thread batches with bottom-of-list scroll fetch and inline `Loading more history...` spinner indicator (desktop + mobile sheet). Files: `src/providers/Thread.tsx`, `src/components/thread/history/index.tsx`, `src/providers/Stream.tsx`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-06: Prevent intermediate artifact portal over-rendering by mounting intermediate artifact slot content only when open, and suppress benign React `#185` stream errors from showing as user-facing failure toasts. Files: `src/components/thread/messages/ai.tsx`, `src/components/thread/index.tsx`, `FORK_COMPASS.md`.
-- 2026-02-06: Rebrand in-app UI title/header/logo from `Agent Chat` to `Question Crafter` across setup, main thread header, and page metadata. Files: `src/providers/Stream.tsx`, `src/components/thread/index.tsx`, `src/app/layout.tsx`, `src/components/icons/question-crafter.tsx`, `public/logo.svg`.
-- 2026-02-06: Aggregate consecutive AI/tool intermediate content into a single `Intermediate Step` launcher per turn (instead of per message), with streaming header status + spinner (`thinking...` / `calling ...`) and ordered content preserved for tool calls/results and reasoning blocks. Files: `src/components/thread/messages/ai.tsx`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-06: Add assistant-message reasoning preview UI. When `reasoning` content blocks are present, the chat shows a compact “Thinking” panel with the latest 500 characters (stream-updating as content updates). Files: `src/components/thread/messages/ai.tsx`, `README.md`.
-- 2026-02-06: Optimize thread history refresh path: `threads.search` now requests a lightweight selected field set (no `values`), thread labels are read from thread metadata preview, polling pauses when the history panel is closed or the tab is hidden, and redundant thread-list rerenders are skipped when signatures are unchanged. Files: `src/providers/Thread.tsx`, `src/components/thread/history/index.tsx`, `src/components/thread/index.tsx`.
-- 2026-02-06: Reject same-thread concurrent sends with explicit toast UX and backend-safe run policy (`multitaskStrategy: "reject"` on all run-creating submits). Added preflight thread busy check in composer and new submit-guard Playwright coverage. Files: `src/components/thread/index.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/agent-inbox/components/thread-actions-view.tsx`, `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`, `tests/submit-guard.spec.ts`, `tests/history-spinner-qa.spec.ts`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-06: Add Playwright one-time manual auth setup and QA spinner-focused E2E coverage for history/cancel synchronization and inactive-thread behavior. Files: `playwright.config.ts`, `tests/auth.setup.ts`, `tests/history-spinner-qa.spec.ts`, `tests/thread-history.spec.ts`, `tests/reconnect.spec.ts`, `package.json`, `README.md`.
-- 2026-02-05: Add thread history activity indicators (busy spinner + unseen completion dot) with localStorage last-seen tracking and light polling. Files: `src/components/thread/history/index.tsx`, `src/hooks/use-thread-last-seen.ts`, `src/lib/thread-activity.ts`, `src/components/thread/index.tsx`.
-- 2026-02-05: Reduce thread history fetch limit from 100 to 20 for faster loads. Files: `src/providers/Thread.tsx`, `FORK_COMPASS.md`.
-- 2026-02-05: Highlight the active thread in history with a darker background. Files: `src/components/thread/history/index.tsx`, `FORK_COMPASS.md`.
-- 2026-02-06: Sync history busy spinner with local run state and scope cancel/loading UI to the run-owning thread during rapid thread switches. Files: `src/components/thread/index.tsx`, `src/components/thread/history/index.tsx`, `src/hooks/use-thread-busy.ts`, `src/lib/thread-activity.ts`, `FORK_COMPASS.md`.
-- 2026-02-03: Re-enable thread history list now that ownership is enforced. Files: `src/lib/constants.ts`, `README.md`, `FORK_COMPASS.md`.
-- 2026-02-03: Thread history search now relies on owner filtering only (no assistant/graph gating). Files: `src/providers/Thread.tsx`, `FORK_COMPASS.md`.
-- 2026-02-03: Add IAP-backed auth token endpoint + client token cache; remove API passthrough; update docs.
-- 2026-02-02: Remove stream auto-reconnect (buggy). Files: `src/providers/Stream.tsx`, `FORK_COMPASS.md`.
-- 2026-01-29: Disable thread history list until ownership. Files: `src/components/thread/history/index.tsx`, `src/lib/constants.ts`, `src/providers/Stream.tsx`, `src/providers/Thread.tsx`, `README.md`, `FORK_COMPASS.md`.
-- 2026-01-29: Remove stream health polling. Files: `src/providers/Stream.tsx`; removed `src/hooks/useStreamHealthCheck.ts`, `plan.md`.
-- 2026-01-29: Add fork agent instructions. Files: `AGENTS.md`.
-- 2026-01-29: Update deployment docs. Files: `DEPLOYMENT_GUIDE.md`.
-- 2026-01-29: Consolidate fork docs. Files: `FORK_COMPASS.md`, `README.md`; removed `CODE_CHANGES.md`.
+### 4.1 Upload Pipeline
 
----
+What stays fork-specific:
 
-## 3) Customization Map (by area)
+- Uploads are handled server-side.
+- Files are stored in GCS and returned as `gs://` plus HTTPS URLs.
+- PDFs use OpenAI Files IDs when `MODEL_PROVIDER=OPENAI`.
+- Non-OpenAI PDFs stay URL-backed.
+- Upload size limit remains `100MB`.
 
-### 3.1 Upload Pipeline (GCS + OpenAI Files)
-
-**What changed:** Uploads are handled server-side, stored in GCS, and optionally forwarded to OpenAI Files API for PDFs when `MODEL_PROVIDER=OPENAI`.
-
-**Why:**
-
-- Avoids large base64 payloads in messages.
-- Makes PDFs OpenAI-compatible using file IDs (LangChain converter rejects URL-based `file` blocks for OpenAI).
-- Keeps upload logic centralized with size validation and metadata handling.
-
-**Primary files:**
+Primary files:
 
 - `src/app/api/upload/route.ts`
 - `src/app/api/openai/upload/route.ts`
-
-**Key behaviors:**
-
-- `/api/upload` accepts multipart `file`, enforces 100MB max, uploads to GCS, and returns `{ gsUrl, httpsUrl, openaiFileId?, ... }`.
-- When `MODEL_PROVIDER=OPENAI` and file is PDF, server uploads to OpenAI Files API in-memory and returns `openaiFileId`.
-- `/api/openai/upload` supports URL-based OpenAI file uploads and returns file metadata to the client.
-
-**Operational knobs:**
-
-- `GCS_BUCKET_NAME` (server)
-- `MODEL_PROVIDER` and `NEXT_PUBLIC_MODEL_PROVIDER`
-- `OPENAI_API_KEY` and `OPENAI_FILES_*`
-
----
-
-#### 3.1.1 Implementation Notes & Limits
-
-- **Size cap:** 100MB enforced twice (file size + buffer length). Returns `413` with `{ max_bytes, content_length }`.
-- **In-memory upload:** Files are read once into memory and uploaded to GCS via `file.save(...)` with `resumable: false`.
-- **Uniform Bucket-Level Access (UBLA):** Object ACLs are not set. Public access must be handled at the bucket IAM policy, or use signed URLs.
-- **OpenAI Files:** PDFs use Web `FormData` + `Blob` (not Node `form-data`) to avoid OpenAI rejecting the `file` field. Expiry defaults to ~90 days unless overridden by `OPENAI_FILES_EXPIRES_AFTER_*`.
-- **Failure mode:** If OpenAI upload fails, the API still returns GCS URLs so uploads remain usable for non-OpenAI paths.
-- **/api/openai/upload path:** Performs an optional `HEAD` check for size, then downloads the file and uploads it to OpenAI; returns structured error info on failures.
-- **Preview limitation:** ID-based PDF blocks render as filename chips (no inline PDF preview). URL PDFs use a filename chip as well.
-
----
-
-### 3.2 Multimodal Content Blocks & Previews
-
-**What changed:** The client now constructs **URL/ID-based blocks** instead of base64 for images/PDFs. UI previews handle URL-based images and ID-based PDFs.
-
-**Primary files:**
-
 - `src/lib/multimodal-utils.ts`
 - `src/hooks/use-file-upload.tsx`
-- `src/components/thread/MultimodalPreview.tsx`
-- `src/components/thread/ContentBlocksPreview.tsx`
 
-**Key behaviors:**
+### 4.2 Auth and Setup
 
-- `fileToContentBlock` calls `/api/upload`, then creates:
-  - **Images:** `{ type: "image", source_type: "url", url: httpsUrl }`
-  - **PDFs (OpenAI):** `{ type: "file", source_type: "id", id: openaiFileId }`
-  - **PDFs (others):** `{ type: "file", source_type: "url", url: httpsUrl }`
-- Added `ExtendedContentBlock` and `isPreviewableContentBlock` to support base64 + URL + ID formats.
-- Preview components now support URL-based images and ID-based PDFs.
+What stays fork-specific:
 
----
+- The setup screen can be bypassed by env vars.
+- IAP mode still validates frontend headers and mints LangGraph JWTs.
+- Browser requests still talk directly to LangGraph once configured.
 
-### 3.3 Thread Submission Behavior (recursion + disconnects)
+Primary files:
 
-**What changed:** Thread submissions pass a recursion limit and keep the run alive on disconnect.
-
-**Primary files:**
-
-- `src/lib/constants.ts`
-- `src/components/thread/index.tsx`
-- `src/components/thread/messages/human.tsx`
-- `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`
 - `src/providers/Stream.tsx`
+- `src/lib/auth-token.ts`
+- `src/app/api/auth/token/route.ts`
 
-**Key behaviors:**
+### 4.3 Poll-First Runtime
 
-- `DEFAULT_AGENT_RECURSION_LIMIT` is read from `NEXT_PUBLIC_AGENT_RECURSION_LIMIT` (fallback 50).
-- All `thread.submit` calls include:
-  - `config: { recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT }`
+Current runtime behavior:
+
+- `src/providers/Stream.tsx` is now a polling-backed runtime provider despite the legacy filename.
+- The provider exposes `useThreadRuntime`.
+- New runs use `client.runs.create`.
+- Active state is driven by backend thread/run status plus a small local phase machine:
+  - `hydrating`
+  - `idle`
+  - `submitting`
+  - `polling`
+  - `canceling`
+  - `error`
+- Poll cadence:
+  - `1500ms` while busy
+  - `10000ms` while settled
+  - retry backoff `3000ms`, `5000ms`, `10000ms`
+- The provider performs immediate refresh on:
+  - mount
+  - thread switch
+  - submit/edit/regenerate/resume
+  - cancel completion
+  - focus / visibility regain
+
+Important preserved behavior:
+
+- All run-creating submits still pass:
+  - `config.recursion_limit`
   - `multitaskStrategy: "reject"`
   - `onDisconnect: "continue"`
+- New threads still carry thread preview metadata.
+- A minimal optimistic human-message overlay is kept until the next successful poll.
 
----
+Primary files:
 
-### 3.4 UX Polish & Rendering Tweaks
+- `src/providers/Stream.tsx`
+- `src/lib/thread-branching.ts`
+- `src/lib/constants.ts`
 
-**What changed:** Small but important UX changes, especially around uploads and tool-call formatting.
+### 4.4 Branches, Checkpoints, Regenerate, HITL
 
-**Primary files:**
+What changed:
 
-- `src/hooks/use-file-upload.tsx`
-- `src/components/thread/index.tsx`
-- `src/components/thread/render-crash-boundary.tsx`
-- `src/components/thread/history/index.tsx`
-- `src/components/thread/messages/ai.tsx`
-- `src/hooks/use-thread-last-seen.ts`
-- `src/hooks/use-run-finalization-fallback.ts`
-- `src/hooks/use-stable-stream-messages.ts`
-- `src/lib/thread-metadata.ts`
-- `src/lib/thread-activity.ts`
-- `src/lib/stream-error-classifier.ts`
-- `src/components/thread/messages/tool-calls.tsx`
-- `src/components/thread/messages/human.tsx`
+- Branch/checkpoint metadata is now derived locally from `threads.getHistory(...)`.
+- No SDK stream hook is used to provide branch state.
 
-**Key behaviors:**
+What stays supported:
 
-- Upload flow now exposes `isUploading` and disables inputs while files upload.
-- Upload label shows spinner + “Uploading...”
-- Tool call results render in scrollable `<pre>` blocks with prettier JSON formatting.
-- Human message bubble alignment adjusted (removed `text-right`).
-- Composer now rejects same-thread sends while the thread is still running and shows a warning toast; draft text/files are preserved for retry.
-- Conflict-like run errors (busy/conflict/409) surface with a dedicated “active run” toast instead of a generic error message.
-- When the same thread is open in another tab while a run is active, the non-owning tab enters observer mode for that thread: send is disabled, draft typing remains enabled, expected interrupt/breakpoint/cancel stream signals are suppressed from generic fatal error toasts, and the composer offers a reload action to recover from stale sync across tabs/browsers/devices.
-- Mid-run disconnects for the run-owning tab now trigger app-level reconnect attempts (run-id resolution + bounded retry/backoff) without forcing a page refresh.
-- During reconnect, composer loading/cancel state and assistant intermediate-step status stay in loading mode (`reconnecting...`) until stream resumes or run ends; if the run finishes while disconnected, a bounded finalization reconciliation pass hydrates the latest assistant output without requiring page refresh. Reconnect/finalizing status copy is now intent-gated and shown only for confirmed disconnect signals, while startup resume/low-confidence transport churn recovery is silent.
-- Latest run IDs are also shadowed outside the SDK's resumable storage so a stream that ends "cleanly" from the SDK's perspective can still recover. If an owned stream drops without `stream.error`, the UI now waits briefly, confirms the backend still shows the thread/run as active, and silently re-enters reconnect/final reconciliation instead of requiring a refresh.
-- React render-instability failures in the assistant/tool/intermediate subtree now stay contained inside a local render boundary so the thread shell and recovery controller remain mounted.
-- When stream failures are classified as React `#185` / max-depth / too-many-rerenders style instability, or when reconnect exhausts while the backend still looks active, the UI switches to a finalize-only polling fallback that waits for terminal backend state and then hydrates the latest thread snapshot without page refresh.
-- Status warning UX now aligns with SDK statuses: warning guidance is derived from thread status + freshest run status, including standard failure states (`error`, `timeout`) and custom fallbacks (`cancelled`/`canceled`, `incomplete`), with retry-once then engineering-ticket copy.
-- History rows surface attention statuses (`error`, `interrupted`, `timeout`, `cancelled`/`canceled`, `incomplete`) with the same green activity squiggle when the thread is not currently open; the marker clears once that thread is opened/viewed.
-- Composer input still auto-expands for multi-line drafts, but now stops growing at `40vh` and becomes internally scrollable beyond that threshold; when upload previews + long drafts are combined, composer height is contained and only the preview/input body scrolls so the send/cancel action row remains visible.
-- Local run ownership/busy markers are no longer cleared aggressively during thread switches, reducing false observer-mode transitions and preserving reconnect authority for the owning tab.
-- Assistant messages now render a compact “Thinking” panel when `reasoning` content blocks are present, showing the latest 500 characters.
-- Intermediate reasoning/tool content now routes through one `Intermediate Step` launcher in the chat message area and renders full ordered details in the right artifact pane, including tool calls, tool results, and streaming status text.
-- Intermediate launchers now aggregate contiguous AI/tool message blocks into one per turn, reducing repeated cards during parallel/interleaved tool execution.
-- When the Thinking panel or Intermediate Step artifact is open, the mounted body now renders from a deferred snapshot so live stream tokens keep header/status updates immediate without forcing the heavy open-panel subtree to re-render on every tick.
-- Tool-call argument rendering now tolerates transient stream shapes (`string`/empty/object) and preserves the most recent non-empty args during token churn so intermediate tool-call tables do not flicker between `{}` and partial payload shapes.
-- Desktop layout now supports draggable pane boundaries (history↔chat and chat↔artifact) and an artifact full-width expand/restore control in the artifact header; leaving full-width mode restores prior pane widths, while reload resets pane widths to defaults.
-- `topic_preview_artifact` UI events now render through a local component map in `LoadExternalComponent`, showing a click-anywhere artifact card in assistant turns that opens a right-pane iframe preview.
-- Topic artifact actions support JSON download, preview-link sharing (clipboard + toast), and iframe refresh with a deterministic reload token.
-- `markdown_artifact` UI events now render through the same local component map, showing a click-anywhere assistant card that opens a rendered markdown/LaTeX pane.
-- Markdown artifact previews are fetched through a same-origin `/api/markdown-artifact` proxy route so public `.md` files render reliably even when the upstream object store does not send browser-readable CORS headers.
-- Markdown artifact actions support raw-link open, link sharing (clipboard + toast), and manual preview refresh.
-- Tail AI message rendering now applies a monotonic guard for the active thread/branch so final assistant text does not shrink if SDK history refetch temporarily returns a shorter snapshot than live stream output.
-- Benign React `#185` stream errors are filtered from the generic run-error toast path to avoid false failure alerts for users.
-- Busy ownership synchronization now uses an idempotent busy marker source (`markThreadBusy` no-op short-circuit) plus shallow-equality busy subscriptions and deterministic local busy-state derivation to avoid cascading busy effects and React max-depth rerender loops during streaming/reconnect transitions.
-- Thinking panel auto-scroll stickiness now uses refs instead of state to avoid scroll-handler rerender feedback loops while reasoning text streams.
-- Markdown code blocks now use `rehype-pretty-code` (`shiki`) with GitHub light/dark themes for stronger language coverage and consistent syntax color quality across streamed and final output.
-- Markdown rendering now fails open for malformed LaTeX across settled markdown views: failed KaTeX expressions are sanitized to plain text (no red `katex-error` styling/tooltip), KaTeX uses non-throwing mode with neutral `errorColor`, and boundary-level failures degrade to safe GFM-only markdown instead of blocking the UI.
-- While assistant text is actively streaming, markdown rendering now uses a lighter fast path (GFM only) to keep token updates smooth; once streaming ends, the message re-renders with full LaTeX + Shiki formatting.
-- Header/setup branding now uses `Question Crafter` title text with the fork logo.
-- App metadata now declares explicit favicon + app icon links (`svg`, `16/32 png`, `ico`, and `apple-touch-icon`) with versioned URLs to prevent stale browser icon caches after logo updates.
-- App-wide theme switching now uses `next-themes` with a persistent light/dark toggle in the setup and main chat headers.
-- The `Question Crafter` logo now supports explicit light/dark variants and switches automatically with active theme.
-- Core chat/history/tool-call/interrupt/agent-inbox surfaces were migrated off hard-coded light grays to semantic theme tokens for readable dark mode.
-- Markdown rendering now normalizes LaTeX delimiters from `\(...\)` and `\[...\]` into `remark-math`-compatible syntax before parsing, so these delimiters render consistently during stream updates and final output.
-- Thread history rows now include a contextual rename action (pencil icon with inline editor); saving writes `thread_title` metadata through the LangGraph SDK `threads.update(...)` API.
-- Rename inline editor uses compact icon actions (`check` / `close`) instead of text buttons to reduce row width.
-- History label resolution now prioritizes user-defined thread titles (`thread_title`, then `title`) before fallback preview text.
-- Thread history list is enabled and controlled by `THREAD_HISTORY_ENABLED`.
-- History search no longer gates by assistant/graph; the backend ownership filter scopes results per-user.
-- Thread history items show run-in-progress spinners and unseen completion dots using localStorage last-seen tracking.
-- History polling now uses a lighter `/threads/search` payload (`select` fields, no `values`), pauses when history is not visible, pauses while the tab is hidden, and avoids rerenders when thread signatures have not changed.
-- History list lazy-loads metadata in 20-thread batches on downward scroll and shows an inline `Loading more history...` spinner while the next batch fetches.
-- Chat scroll container now explicitly hides horizontal overflow, and both human bubble text and markdown text blocks apply safer long-token wrapping (`overflow-wrap:anywhere`) so long unbroken content does not push the chat pane horizontally, including with artifact pane open.
+- branch switching
+- edit from checkpoint
+- regenerate from checkpoint
+- HITL resume / resolve / goto actions
 
----
+Primary files:
 
-### 3.5 Configuration & Deployment
-
-**What changed:** Build/deploy setup now supports **direct LangGraph calls with IAP-backed JWT auth**, plus GCS uploads and standalone Next output.
-
-**Primary files:**
-
-- `next.config.mjs`
-- `.env.example`
-- `Dockerfile`
-- `package.json`
-- `src/app/api/auth/token/route.ts`
-- `src/lib/auth-token.ts`
-- `src/lib/iap-keys.ts`
-
-**Key behaviors:**
-
-- Next output set to `standalone` for containerized deploys.
-- `serverActions.bodySizeLimit` increased to `100mb`.
-- `images.remotePatterns` allows `storage.googleapis.com` for URL-based image previews.
-- Dockerfile accepts build args for all `NEXT_PUBLIC_*` variables used at build time.
-- `/api/auth/token` validates IAP signed headers and mints LangGraph JWTs (HS256).
-- `NEXT_PUBLIC_AUTH_MODE=iap` hides the API key UI and enables auth header injection.
-- API passthrough dependency removed; `NEXT_PUBLIC_API_URL` now points directly to LangGraph.
-- Added deps: `@google-cloud/storage`, `form-data`, `jose`.
-
----
-
-### 3.6 Documentation Added
-
-**What changed:** Added internal docs to explain uploads and deployment.
-
-**Primary files:**
-
-- `FORK_COMPASS.md` — this guide (includes upload refactor details).
-- `DEPLOYMENT_GUIDE.md` — multi-arch build + Cloud Run steps.
-- `README.md` — updated env vars and pointers to new docs.
-- `AGENTS.md` — fork-specific agent instructions.
-
----
-
-## 4) File Navigation Index
-
-Use this as a jump list when editing or debugging:
-
-**Uploads & provider logic**
-
-- `src/app/api/upload/route.ts`
-- `src/app/api/openai/upload/route.ts`
-- `src/lib/multimodal-utils.ts`
-- `src/hooks/use-file-upload.tsx`
-
-**UI preview components**
-
-- `src/components/thread/MultimodalPreview.tsx`
-- `src/components/thread/ContentBlocksPreview.tsx`
-
-**Auth & tokens**
-
-- `src/app/api/auth/token/route.ts`
-- `src/lib/auth-token.ts`
-- `src/lib/iap-keys.ts`
-
-**Thread submission and run behavior**
-
-- `src/components/thread/index.tsx`
+- `src/lib/thread-branching.ts`
 - `src/components/thread/messages/human.tsx`
 - `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`
-- `src/components/thread/render-crash-boundary.tsx`
-- `src/hooks/use-run-finalization-fallback.ts`
-- `src/hooks/use-stream-auto-reconnect.ts`
-- `src/lib/constants.ts`
-- `src/lib/stream-error-classifier.ts`
-- `src/providers/Stream.tsx`
+- `src/components/thread/agent-inbox/components/thread-actions-view.tsx`
 
-**UI formatting tweaks**
+### 4.5 Thread Shell and History
 
-- `src/components/thread/messages/tool-calls.tsx`
-- `src/components/thread/messages/ai.tsx`
-- `src/app/api/markdown-artifact/route.ts`
-- `src/components/thread/messages/markdown-artifact.tsx`
-- `src/components/thread/messages/topic-preview-artifact.tsx`
-- `src/components/thread/markdown-text.tsx`
-- `src/components/thread/markdown-styles.css`
+Current behavior:
+
+- Active badge is always `Working on your query...`.
+- Duplicate sends/regenerates are blocked whenever the local runtime is active or the backend thread is `busy`.
+- History activity indicators are backend-driven only.
+- Cross-tab ownership logic and observer mode were removed.
+- Last-seen tracking remains for unseen completion indicators.
+
+Primary files:
+
+- `src/components/thread/index.tsx`
 - `src/components/thread/history/index.tsx`
-- `src/components/theme/theme-provider.tsx`
-- `src/components/theme/theme-toggle.tsx`
-- `src/hooks/use-thread-last-seen.ts`
-- `src/hooks/use-stable-stream-messages.ts`
-- `src/lib/thread-metadata.ts`
 - `src/lib/thread-activity.ts`
+- `src/providers/Thread.tsx`
 
-**E2E coverage**
+### 4.6 Message and Artifact Rendering
 
-- `tests/chat-pane-responsive.spec.ts`
-- `tests/pane-layout.spec.ts`
-- `tests/final-stream-continuity.spec.ts`
+Current behavior:
+
+- Assistant rendering uses polled state snapshots only.
+- The fast streaming markdown path was removed.
+- Reconnect/finalizing state copy was removed.
+- Intermediate reasoning/tool content still collapses into a single `Intermediate Step` launcher.
+- Local artifact cards remain supported:
+  - `topic_preview_artifact`
+  - `markdown_artifact`
+
+Primary files:
+
+- `src/components/thread/messages/ai.tsx`
+- `src/components/thread/messages/tool-calls.tsx`
+- `src/components/thread/messages/topic-preview-artifact.tsx`
+- `src/components/thread/messages/markdown-artifact.tsx`
+- `src/components/thread/markdown-text.tsx`
+- `src/components/thread/artifact.tsx`
+
+## 5) Removed Stream-Only Subsystems
+
+Deleted as part of the poll-first migration:
+
+- `src/hooks/use-stream-auto-reconnect.ts`
+- `src/hooks/use-run-finalization-fallback.ts`
+- `src/hooks/use-stable-stream-messages.ts`
+- `src/hooks/use-thread-busy.ts`
+- `src/lib/stream-error-classifier.ts`
+- `src/lib/stream-run-shadow.ts`
+- `src/components/thread/render-crash-boundary.tsx`
+
+Removed test suites:
+
 - `tests/auto-reconnect-disconnect.spec.ts`
+- `tests/cross-tab-observer.spec.ts`
+- `tests/final-stream-continuity.spec.ts`
+- `tests/jee-complex-number-fallback-soak.spec.ts`
+- `tests/react185-finalization-fallback.spec.ts`
 - `tests/reconnect-final-reconcile.spec.ts`
 - `tests/reconnect-no-false-positive.spec.ts`
-- `tests/react185-finalization-fallback.spec.ts`
-- `tests/jee-complex-number-fallback-soak.spec.ts`
-- `tests/cross-tab-observer.spec.ts`
-- `tests/submit-guard.spec.ts`
-- `tests/markdown-artifact-ui.spec.ts`
-- `tests/topic-artifact-ui.spec.ts`
-- `tests/topic-artifact-smooth-scroll.spec.ts`
+- `tests/reconnect-silent-stream-close.spec.ts`
+- `tests/reconnect.spec.ts`
 
-**Config, build, deploy**
+Added test coverage:
 
-- `next.config.mjs`
-- `.env.example`
-- `Dockerfile`
-- `package.json`
+- `tests/polling-refresh.spec.ts`
 
-**Docs**
+## 6) File Navigation Index
 
-- `FORK_COMPASS.md`
-- `DEPLOYMENT_GUIDE.md`
-- `README.md`
-- `AGENTS.md`
+Start here when modifying the fork:
 
-**Branding assets**
+- Runtime provider: `src/providers/Stream.tsx`
+- Thread shell: `src/components/thread/index.tsx`
+- History: `src/components/thread/history/index.tsx`
+- Assistant messages: `src/components/thread/messages/ai.tsx`
+- Human message edit/regenerate: `src/components/thread/messages/human.tsx`
+- HITL actions: `src/components/thread/agent-inbox/components/thread-actions-view.tsx`
+- HITL hook: `src/components/thread/agent-inbox/hooks/use-interrupted-actions.tsx`
+- Branch metadata helpers: `src/lib/thread-branching.ts`
+- Activity tracking: `src/lib/thread-activity.ts`
+- Upload APIs: `src/app/api/upload/route.ts`, `src/app/api/openai/upload/route.ts`
+- Artifact provider: `src/components/thread/artifact.tsx`
 
-- `public/logo.svg`
-- `public/question-crafter-logo.svg`
-- `public/question-crafter-logo.png`
-- `public/favicon-32x32.png`
-- `public/favicon-16x16.png`
-- `public/apple-touch-icon.png`
-- `public/branding/question-crafter-icon-option-1-collab.svg`
-- `src/components/icons/question-crafter.tsx`
+## 7) Notes / Known Deviations
 
----
-
-## 5) Fork-only Commit Log
-
-Commits unique to this fork (upstream/main..HEAD):
-
-- `37b305f` fix: reconcile completed runs after stream disconnect
-- `11d2d8e` feat(ui): add thread settings with enter-to-send toggle
-- `2d4ea98` feat(status): align langgraph status handling and attention indicators
-- `333fa8a` fix(stream): stabilize busy sync and tool-call streaming UX
-- `1a005cb` test(e2e): make suites environment-aware for auth/setup gates
-- `904d69d` fix(ui): keep composer actions visible with uploads
-- `583ae8b` feat(ui): add explicit topic preview artifact rendering and pane UX
-- `c1c447d` fix(chat): prevent horizontal overflow with resizable panes
-- `9fb2055` docs: update scratchpad validation log for desktop pane rollout
-- `a0fa077` feat(ui): add desktop resizable 3-pane layout with artifact full-width toggle
-- `4ae25be` fix: cap composer growth with internal scrolling
-- `5cf791e` docs(agents): reference engineering principle workflow
-- `7406bcf` fix(stream): add zero-refresh reconnect UX and engineering playbook
-- `dd99e00` fix(thread): harden cross-tab observer UX and interrupt handling
-- `2d99f2e` fix(markdown): fail open on malformed latex rendering
-- `bcda5a0` docs: refresh fork compass for favicon branding sync
-- `44fe615` fix(branding): sync favicon and apple icon assets
-- `b9ad64f` docs: refresh fork compass after markdown link contrast fix
-- `a95bf63` fix(ui): restore markdown link contrast in dark mode
-- `3d52ae1` feat(ui): add experimental dark mode toggle and themed logo
-- `c8add70` fix(stream): stabilize final assistant output after intermediate steps
-- `4612151` fix(build): use local inter font
-- `33bdc62` docs: refresh fork compass snapshot
-- `4b10f0c` fix(branding): remove logo background fill
-- `e8d8ed8` docs: refresh fork compass after logo sync
-- `d363602` fix(branding): sync updated logo svg across assets
-- `496d328` fix(branding): remove logo outer containers and update favicon
-- `a2239ce` docs: refresh fork compass snapshot after branding updates
-- `1d0a8ec` feat(ui): move thread actions to history and refresh branding
-- `f35cea4` fix(ui): stop intermediate spinner when final text starts
-- `3e924cd` fix(ui): remove extra gap under intermediate step blocks
-- `8afba89` fix: reduce intermediate artifact churn and ignore benign react 185 toast
-- `e31c75a` docs: refresh fork compass snapshot and commit log
-- `55ddaac` feat(ui): aggregate intermediate steps and rebrand to Question Crafter
-- `837bd7f` fix: align intermediate steps ordering and tool-result actions
-- `4702da1` feat: group reasoning and tool calls under intermediate steps
-- `dae70b2` fix: guard regenerate while thread is running
-- `e3e5984` feat: add scrollable thinking panel with sticky bottom
-- `2997990` fix: preserve interleaved reasoning and tool call order
-- `1b3fdb4` fix: parse reasoning summary blocks for thinking preview
-- `030d8cc` fix: reject concurrent thread sends and harden stream UX
-- `3ab7f0e` feat: improve thread run UX and add playwright QA coverage
-- `df0fb50` fix: reconnect stream on mount
-- `e66f66b` Revert "docs: update develop LangGraph URL"
-- `9815ffa` docs: update develop LangGraph URL
-- `eea6103` feat: add IAP auth and direct LangGraph calls
-- `209bdf9` test: add Playwright e2e setup
-- `3f29185` chore: update fork compass and clean build artifacts
-- `fbd3d13` fix: remove stream auto-reconnect
-- `645cbdb` Updated Deployment
-- `7e75347` fix: stream auto-reconnect on page refresh
-- `4fc9b47` Added agents.md
-- `a3a8de5` fix: disable thread history list until ownership
-- `2934dfd` docs: consolidate fork customization notes
-- `b73a84a` chore: remove stream health polling
-- `659c943` Merge upstream/main: SDK 1.0 + upstream fixes
-- `93be0c5` feat: add stream health polling for stale connection detection
-- `faafbf2` improve tool call formatting
-- `9087615` Make agent recursion limit configurable
-- `9d6c559` Ensure thread submissions continue on disconnect
-- `38a0bac` Upload UX: show spinner and disable inputs while files upload
-- `2a9e2a3` feat(multimodal,deploy): efficient uploads + OpenAI file IDs; add deployment docs and env plumbing
-- `68d0685` Merge pull request #3 from hars008/fix/text-alignment
-- `f339e1b` corrected text alignment
-- `be88ac1` Updated nect.confing.mjs file for production grade docker deployment
-- `a618a1e` Added Docker File
-- `383d0e6` Merge pull request #1 from DevOpRohan/codex/modify-agent-chat-ui-to-add-gcs-file-metadata
-- `6338f64` Add GCS upload and attachment metadata
-
----
-
-## 6) Notes / Known Deviations
-
-- **Polling removed:** A stream health polling hook was added and later removed. Current behavior relies on `onDisconnect: "continue"`.
-- **Docs consolidated:** `CODE_CHANGES.md` was removed in favor of this document.
-- **Tracked build artifact:** `tsconfig.tsbuildinfo` is currently tracked in git (from upstream diff list). Consider removing if you want a clean repo.
-- **OpenAI vs non-OpenAI:** PDF blocks use `source_type: "id"` only when OpenAI is the provider; otherwise they use URL blocks.
-- **Private buckets:** If the GCS bucket is private, previews require signed URLs or IAM policy changes (current flow assumes public-read or equivalent).
-- **Auth flow:** API passthrough is removed; the frontend now mints JWTs via `/api/auth/token` after validating IAP headers and calls LangGraph directly.
-
----
-
-For deployment steps, open `DEPLOYMENT_GUIDE.md`.
+- The provider file is still named `src/providers/Stream.tsx` for continuity, but it is polling-backed now.
+- Busy-state truth comes from the backend. There is no client-side run ownership model anymore.
+- Message metadata for branches/checkpoints is derived from `threads.getHistory({ limit: 100 })`; older checkpoints beyond that window may not expose branch controls in the UI.
+- `LoadExternalComponent` still receives a `stream` prop because that is the upstream component API shape, even though the backing object is the polling runtime.
+- `DEPLOYMENT_GUIDE.md` did not need changes for this migration because env vars and deployment flow stayed the same.

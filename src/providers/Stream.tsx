@@ -1,20 +1,27 @@
 import React, {
   createContext,
+  useCallback,
   useContext,
-  ReactNode,
-  useState,
   useEffect,
   useMemo,
+  useRef,
+  useState,
+  type ReactNode,
 } from "react";
-import { useStream } from "@langchain/langgraph-sdk/react";
-import { type Message } from "@langchain/langgraph-sdk";
 import {
-  uiMessageReducer,
-  isUIMessage,
-  isRemoveUIMessage,
-  type UIMessage,
-  type RemoveUIMessage,
-} from "@langchain/langgraph-sdk/react-ui";
+  type Checkpoint,
+  type Client,
+  type Command,
+  type Config,
+  type Interrupt,
+  type Message,
+  type Metadata,
+  type Run,
+  type Thread,
+  type ThreadState,
+} from "@langchain/langgraph-sdk";
+import { Client as LangGraphClient } from "@langchain/langgraph-sdk";
+import { type UIMessage } from "@langchain/langgraph-sdk/react-ui";
 import { useQueryState } from "nuqs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -31,31 +38,302 @@ import {
   isIapAuthMode,
 } from "@/lib/auth-token";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
-import { writeShadowRunId } from "@/lib/stream-run-shadow";
 import { THREAD_HISTORY_PAGE_SIZE, useThreads } from "./Thread";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import {
+  buildMessageMetadata,
+  getBranchContext,
+  getMessagesFromState,
+  type RuntimeMessageMetadata,
+} from "@/lib/thread-branching";
 
-export type StateType = { messages: Message[]; ui?: UIMessage[] };
+export type StateType = {
+  context?: Record<string, unknown>;
+  messages: Message[];
+  ui?: UIMessage[];
+  [key: string]: unknown;
+};
 
-const useTypedStream = useStream<
-  StateType,
-  {
-    UpdateType: {
-      messages?: Message[] | Message | string;
-      ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
-      context?: Record<string, unknown>;
-    };
-    CustomEventType: UIMessage | RemoveUIMessage;
-  }
->;
+type RuntimePhase =
+  | "hydrating"
+  | "idle"
+  | "submitting"
+  | "polling"
+  | "canceling"
+  | "error";
 
-type StreamContextType = ReturnType<typeof useTypedStream>;
-const StreamContext = createContext<StreamContextType | undefined>(undefined);
+type RuntimeSubmitOptions = {
+  config?: Config;
+  context?: Record<string, unknown>;
+  checkpoint?: Omit<Checkpoint, "thread_id"> | null;
+  command?: Command;
+  interruptBefore?: "*" | string[];
+  interruptAfter?: "*" | string[];
+  metadata?: Metadata;
+  multitaskStrategy?: "enqueue" | "interrupt" | "reject" | "rollback";
+  onCompletion?: "complete" | "continue";
+  onDisconnect?: "cancel" | "continue";
+  optimisticValues?:
+    | Partial<StateType>
+    | ((prev: StateType) => Partial<StateType>);
+  durability?: "async" | "exit" | "sync";
+  threadId?: string;
+};
 
-async function sleep(ms = 4000) {
+type RuntimeSubmitInput =
+  | Record<string, unknown>
+  | Message
+  | Message[]
+  | string
+  | null
+  | undefined;
+
+type OptimisticState = {
+  pendingMessageIds: string[];
+  threadId: string;
+  values: StateType;
+};
+
+type ThreadRuntimeContextType = {
+  activeRunId: string | null;
+  assistantId: string;
+  branch: string;
+  cancel: () => Promise<void>;
+  client: Client;
+  error: unknown;
+  experimental_branchTree: ReturnType<typeof getBranchContext<StateType>>["branchTree"];
+  getMessagesMetadata: (
+    message: Message,
+    index?: number,
+  ) => RuntimeMessageMetadata<StateType> | undefined;
+  history: ThreadState<StateType>[];
+  interrupt: Interrupt<unknown> | Interrupt<unknown>[] | undefined;
+  isLoading: boolean;
+  isThreadLoading: boolean;
+  isWorking: boolean;
+  latestRunStatus: string | null;
+  messages: Message[];
+  phase: RuntimePhase;
+  refresh: (options?: { forceHistory?: boolean }) => Promise<void>;
+  setBranch: (branch: string) => void;
+  submit: (
+    values: RuntimeSubmitInput,
+    options?: RuntimeSubmitOptions,
+  ) => Promise<void>;
+  threadId: string | null;
+  threadStatus: string | null;
+  values: StateType;
+};
+
+const BUSY_POLL_INTERVAL_MS = 1500;
+const IDLE_POLL_INTERVAL_MS = 10000;
+const HISTORY_LIMIT = 100;
+const RUN_STATUS_LIST_LIMIT = 10;
+const REFRESH_THREADS_DELAY_MS = 750;
+const POLL_RETRY_DELAYS_MS = [3000, 5000, 10000] as const;
+
+const ThreadRuntimeContext = createContext<
+  ThreadRuntimeContextType | undefined
+>(undefined);
+
+function getEmptyValues(): StateType {
+  return {
+    messages: [],
+    ui: [],
+  };
+}
+
+async function sleep(ms = REFRESH_THREADS_DELAY_MS) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isThreadBusy(status: string | null | undefined) {
+  return status === "busy";
+}
+
+function toTimestampMs(value: string | null | undefined): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function selectFreshestRun(runs: Run[]): Run | null {
+  if (runs.length === 0) return null;
+  return [...runs].sort((a, b) => {
+    const aTs = Math.max(
+      toTimestampMs(a.updated_at),
+      toTimestampMs(a.created_at),
+    );
+    const bTs = Math.max(
+      toTimestampMs(b.updated_at),
+      toTimestampMs(b.created_at),
+    );
+    return bTs - aTs;
+  })[0];
+}
+
+function selectActiveRun(runs: Run[]): Run | null {
+  const activeRuns = runs.filter(
+    (run) => run.status === "pending" || run.status === "running",
+  );
+  return selectFreshestRun(activeRuns);
+}
+
+function compareThreadRecency(a: Thread, b: Thread): number {
+  const aUpdatedAt = toTimestampMs(
+    (a as Thread & { updated_at?: string | null }).updated_at,
+  );
+  const bUpdatedAt = toTimestampMs(
+    (b as Thread & { updated_at?: string | null }).updated_at,
+  );
+  return bUpdatedAt - aUpdatedAt;
+}
+
+function upsertThreadSummary(
+  previousThreads: Thread[],
+  nextThread: Thread,
+): Thread[] {
+  const existingIndex = previousThreads.findIndex(
+    (thread) => thread.thread_id === nextThread.thread_id,
+  );
+  const nextThreads =
+    existingIndex >= 0
+      ? previousThreads.map((thread, index) =>
+          index === existingIndex ? nextThread : thread,
+        )
+      : [nextThread, ...previousThreads];
+
+  return [...nextThreads].sort(compareThreadRecency);
+}
+
+function normalizeSubmitInput(values: RuntimeSubmitInput) {
+  if (typeof values === "undefined") {
+    return undefined;
+  }
+
+  if (values === null) {
+    return null;
+  }
+
+  if (typeof values === "string") {
+    return {
+      messages: [
+        {
+          type: "human",
+          content: values,
+        } satisfies Message,
+      ],
+    };
+  }
+
+  if (Array.isArray(values)) {
+    return { messages: values };
+  }
+
+  if ("type" in values) {
+    return { messages: [values as Message] };
+  }
+
+  return values;
+}
+
+function getInterrupt(
+  values: StateType,
+  threadHead: ThreadState<StateType> | undefined,
+  error: unknown,
+) {
+  const valueInterrupts = values.__interrupt__;
+  if (Array.isArray(valueInterrupts)) {
+    if (valueInterrupts.length === 0) {
+      return { when: "breakpoint" } as Interrupt<unknown>;
+    }
+
+    if (valueInterrupts.length === 1) {
+      return valueInterrupts[0] as Interrupt<unknown>;
+    }
+
+    return valueInterrupts as Interrupt<unknown>[];
+  }
+
+  const interrupts = threadHead?.tasks?.at(-1)?.interrupts;
+  if (interrupts == null || interrupts.length === 0) {
+    const next = threadHead?.next ?? [];
+    if (!next.length || error != null) return undefined;
+    return { when: "breakpoint" } as Interrupt<unknown>;
+  }
+
+  return interrupts.at(-1) as Interrupt<unknown> | undefined;
+}
+
+function getUiMessages(values: StateType | null | undefined): UIMessage[] {
+  return Array.isArray(values?.ui) ? values.ui : [];
+}
+
+function mergeStateValues(
+  liveValues: StateType | null | undefined,
+  historyValues: StateType | null | undefined,
+): StateType {
+  if (!liveValues && !historyValues) {
+    return getEmptyValues();
+  }
+
+  if (!historyValues) {
+    return liveValues ?? getEmptyValues();
+  }
+
+  if (!liveValues) {
+    return historyValues;
+  }
+
+  const mergedValues = {
+    ...historyValues,
+    ...liveValues,
+  };
+
+  if (
+    getMessagesFromState(liveValues).length === 0 &&
+    getMessagesFromState(historyValues).length > 0
+  ) {
+    mergedValues.messages = historyValues.messages;
+  }
+
+  if (
+    getUiMessages(liveValues).length === 0 &&
+    getUiMessages(historyValues).length > 0
+  ) {
+    mergedValues.ui = historyValues.ui;
+  }
+
+  return mergedValues;
+}
+
+function mergeThreadStates(
+  liveState: ThreadState<StateType> | null,
+  historyState: ThreadState<StateType> | undefined,
+): ThreadState<StateType> | undefined {
+  if (!liveState) {
+    return historyState;
+  }
+
+  if (!historyState) {
+    return liveState;
+  }
+
+  return {
+    ...historyState,
+    ...liveState,
+    values: mergeStateValues(liveState.values, historyState.values),
+    next:
+      liveState.next.length > 0 || historyState.next.length === 0
+        ? liveState.next
+        : historyState.next,
+    tasks:
+      liveState.tasks.length > 0 || historyState.tasks.length === 0
+        ? liveState.tasks
+        : historyState.tasks,
+  };
 }
 
 async function checkGraphStatus(
@@ -79,13 +357,23 @@ async function checkGraphStatus(
     });
 
     return res.ok;
-  } catch (e) {
-    console.error(e);
+  } catch (error) {
+    console.error(error);
     return false;
   }
 }
 
-const StreamSession = ({
+function getPollDelay(failureCount: number, threadStatus: string | null) {
+  if (failureCount > 0) {
+    return (
+      POLL_RETRY_DELAYS_MS[Math.min(failureCount - 1, POLL_RETRY_DELAYS_MS.length - 1)]
+    );
+  }
+
+  return isThreadBusy(threadStatus) ? BUSY_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
+}
+
+const ThreadRuntimeSession = ({
   children,
   apiKey,
   apiUrl,
@@ -115,6 +403,64 @@ const StreamSession = ({
     () => (authHeader ? { Authorization: authHeader } : undefined),
     [authHeader],
   );
+  const client = useMemo(
+    () =>
+      new LangGraphClient({
+        apiUrl,
+        apiKey: isIapAuth ? undefined : (apiKey ?? undefined),
+        callerOptions,
+        defaultHeaders,
+      }),
+    [apiKey, apiUrl, callerOptions, defaultHeaders, isIapAuth],
+  );
+
+  const [phase, setPhase] = useState<RuntimePhase>(() =>
+    threadId ? "hydrating" : "idle",
+  );
+  const [error, setError] = useState<unknown>(undefined);
+  const [rawState, setRawState] = useState<ThreadState<StateType> | null>(null);
+  const [historyData, setHistoryData] = useState<ThreadState<StateType>[]>([]);
+  const [branch, setBranch] = useState("");
+  const [threadStatus, setThreadStatus] = useState<string | null>(null);
+  const [latestRunStatus, setLatestRunStatus] = useState<string | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [optimisticState, setOptimisticState] = useState<OptimisticState | null>(
+    null,
+  );
+
+  const threadIdRef = useRef(threadId);
+  const rawStateRef = useRef(rawState);
+  const historyDataRef = useRef(historyData);
+  const threadStatusRef = useRef(threadStatus);
+  const phaseRef = useRef(phase);
+  const optimisticStateRef = useRef(optimisticState);
+  const refreshRequestRef = useRef(0);
+  const pollFailureCountRef = useRef(0);
+  const lastSettledThreadStatusRef = useRef<string | null>(threadStatus);
+
+  useEffect(() => {
+    threadIdRef.current = threadId;
+  }, [threadId]);
+
+  useEffect(() => {
+    rawStateRef.current = rawState;
+  }, [rawState]);
+
+  useEffect(() => {
+    historyDataRef.current = historyData;
+  }, [historyData]);
+
+  useEffect(() => {
+    threadStatusRef.current = threadStatus;
+  }, [threadStatus]);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    optimisticStateRef.current = optimisticState;
+  }, [optimisticState]);
 
   useEffect(() => {
     if (!isIapAuth) {
@@ -129,8 +475,8 @@ const StreamSession = ({
           setAuthHeader(`Bearer ${token}`);
         }
       })
-      .catch((error) => {
-        console.error("Failed to prefetch auth token", error);
+      .catch((authError) => {
+        console.error("Failed to prefetch auth token", authError);
       });
 
     return () => {
@@ -138,38 +484,232 @@ const StreamSession = ({
     };
   }, [isIapAuth]);
 
-  const streamValue = useTypedStream({
-    apiUrl,
-    apiKey: isIapAuth ? undefined : (apiKey ?? undefined),
-    assistantId,
-    threadId: threadId ?? null,
-    reconnectOnMount: true,
-    fetchStateHistory: true,
-    callerOptions,
-    defaultHeaders,
-    onCreated: (run) => {
-      writeShadowRunId(run.thread_id, run.run_id);
+  const syncThreadsSoon = useCallback(
+    (nextThreadId?: string | null) => {
+      if (!THREAD_HISTORY_ENABLED) return;
+      const historyLimit = Math.max(
+        threads.length + (nextThreadId ? 1 : 0),
+        THREAD_HISTORY_PAGE_SIZE,
+      );
+      void sleep()
+        .then(() => getThreads({ limit: historyLimit }).then(setThreads))
+        .catch(console.error);
     },
-    onCustomEvent: (event, options) => {
-      if (isUIMessage(event) || isRemoveUIMessage(event)) {
-        options.mutate((prev) => {
-          const ui = uiMessageReducer(prev.ui ?? [], event);
-          return { ...prev, ui };
+    [getThreads, setThreads, threads.length],
+  );
+
+  const refreshThreadState = useCallback(
+    async (
+      targetThreadId: string,
+      options?: {
+        forceHistory?: boolean;
+      },
+    ) => {
+      const refreshId = ++refreshRequestRef.current;
+
+      try {
+        const [currentThread, recentRuns, nextRawState] = await Promise.all([
+          client.threads.get<StateType>(targetThreadId),
+          client.runs
+            .list(targetThreadId, { limit: RUN_STATUS_LIST_LIMIT })
+            .catch(() => []),
+          client.threads.getState<StateType>(targetThreadId),
+        ]);
+        if (
+          threadIdRef.current !== targetThreadId ||
+          refreshRequestRef.current !== refreshId
+        ) {
+          return;
+        }
+
+        const nextThreadStatus = currentThread.status ?? null;
+        const nextActiveRun = selectActiveRun(recentRuns);
+        const nextLatestRun = selectFreshestRun(recentRuns);
+        const refreshedThreadSummary: Thread = {
+          ...currentThread,
+          status: nextThreadStatus,
+          updated_at:
+            currentThread.updated_at ?? new Date().toISOString(),
+        };
+        const shouldRefreshHistory =
+          options?.forceHistory ||
+          historyDataRef.current.length === 0 ||
+          (isThreadBusy(lastSettledThreadStatusRef.current) &&
+            !isThreadBusy(nextThreadStatus));
+
+        pollFailureCountRef.current = 0;
+        lastSettledThreadStatusRef.current = nextThreadStatus;
+        setError(undefined);
+        setRawState(nextRawState);
+        setThreadStatus(nextThreadStatus);
+        setLatestRunStatus(nextLatestRun?.status ?? null);
+        setActiveRunId(nextActiveRun?.run_id ?? null);
+        setPhase(isThreadBusy(nextThreadStatus) ? "polling" : "idle");
+        setThreads((previousThreads) =>
+          upsertThreadSummary(previousThreads, refreshedThreadSummary),
+        );
+        setOptimisticState((previous) => {
+          if (!previous || previous.threadId !== targetThreadId) {
+            return previous;
+          }
+
+          const messageIds = new Set(
+            getMessagesFromState(nextRawState.values)
+              .map((message) => message.id)
+              .filter((messageId): messageId is string => !!messageId),
+          );
+          const isHydrated = previous.pendingMessageIds.every((id) =>
+            messageIds.has(id),
+          );
+          if (
+            isHydrated ||
+            (!isThreadBusy(nextThreadStatus) && nextActiveRun == null)
+          ) {
+            return null;
+          }
+          return previous;
         });
+
+        if (!shouldRefreshHistory) {
+          return;
+        }
+
+        const nextHistory = await client.threads.getHistory<StateType>(
+          targetThreadId,
+          {
+            limit: HISTORY_LIMIT,
+          },
+        );
+        if (
+          threadIdRef.current !== targetThreadId ||
+          refreshRequestRef.current !== refreshId
+        ) {
+          return;
+        }
+
+        setHistoryData(nextHistory);
+      } catch (refreshError) {
+        if (threadIdRef.current !== targetThreadId) {
+          return;
+        }
+
+        pollFailureCountRef.current += 1;
+        console.error("Failed to refresh thread state", refreshError);
+        if (!rawStateRef.current && historyDataRef.current.length === 0) {
+          setError(refreshError);
+          setPhase("error");
+        }
       }
     },
-    onThreadId: (id) => {
-      setThreadId(id);
-      // Refetch threads list when thread ID changes.
-      // Wait for some seconds before fetching so we're able to get the new thread that was created.
-      if (THREAD_HISTORY_ENABLED) {
-        const historyLimit = Math.max(threads.length, THREAD_HISTORY_PAGE_SIZE);
-        sleep()
-          .then(() => getThreads({ limit: historyLimit }).then(setThreads))
-          .catch(console.error);
+    [client, setThreads],
+  );
+
+  const refresh = useCallback(
+    async (options?: { forceHistory?: boolean }) => {
+      const targetThreadId = threadIdRef.current;
+      if (!targetThreadId) {
+        setPhase("idle");
+        setError(undefined);
+        setRawState(null);
+        setHistoryData([]);
+        setThreadStatus(null);
+        setLatestRunStatus(null);
+        setActiveRunId(null);
+        setOptimisticState(null);
+        return;
       }
+
+      await refreshThreadState(targetThreadId, options);
     },
-  });
+    [refreshThreadState],
+  );
+
+  useEffect(() => {
+    if (!threadId) {
+      setPhase("idle");
+      setError(undefined);
+      setRawState(null);
+      setHistoryData([]);
+      setThreadStatus(null);
+      setLatestRunStatus(null);
+      setActiveRunId(null);
+      setOptimisticState(null);
+      setBranch("");
+      pollFailureCountRef.current = 0;
+      lastSettledThreadStatusRef.current = null;
+      return;
+    }
+
+    const nextOptimisticState = optimisticStateRef.current;
+    const nextPhase = phaseRef.current;
+    if (
+      nextOptimisticState?.threadId === threadId &&
+      (nextPhase === "submitting" || nextPhase === "polling")
+    ) {
+      return;
+    }
+
+    setBranch("");
+    setError(undefined);
+    setPhase("hydrating");
+    setRawState(null);
+    setHistoryData([]);
+    setThreadStatus(null);
+    setLatestRunStatus(null);
+    setActiveRunId(null);
+    setOptimisticState((previous) =>
+      previous?.threadId === threadId ? previous : null,
+    );
+    pollFailureCountRef.current = 0;
+    lastSettledThreadStatusRef.current = null;
+    void refreshThreadState(threadId, { forceHistory: true });
+  }, [refreshThreadState, threadId]);
+
+  useEffect(() => {
+    if (!threadId) return;
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const tick = async () => {
+      await refreshThreadState(threadId);
+      if (cancelled) return;
+      timeoutId = window.setTimeout(
+        tick,
+        getPollDelay(pollFailureCountRef.current, threadStatusRef.current),
+      );
+    };
+
+    void tick();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [refreshThreadState, threadId]);
+
+  useEffect(() => {
+    if (!threadId) return;
+
+    const handleFocus = () => {
+      void refresh();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [refresh, threadId]);
 
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey, isIapAuth).then((ok) => {
@@ -191,36 +731,317 @@ const StreamSession = ({
     });
   }, [apiKey, apiUrl, isIapAuth]);
 
+  const branchContext = useMemo(() => {
+    const usableHistory =
+      historyData.length > 0
+        ? historyData
+        : rawState
+          ? [rawState]
+          : [];
+    return getBranchContext<StateType>(branch, usableHistory);
+  }, [branch, historyData, rawState]);
+
+  const historyHead = branchContext.threadHead;
+
+  const activeState = useMemo(() => {
+    if (branch) {
+      return historyHead ?? rawState ?? undefined;
+    }
+
+    return mergeThreadStates(rawState, historyHead);
+  }, [branch, historyHead, rawState]);
+
+  const baseValues = useMemo(() => {
+    return activeState?.values ?? getEmptyValues();
+  }, [activeState]);
+
+  const effectiveThreadId = threadId ?? threadIdRef.current ?? null;
+
+  const values = useMemo(() => {
+    if (!optimisticState || optimisticState.threadId !== effectiveThreadId) {
+      return baseValues;
+    }
+
+    return {
+      ...baseValues,
+      ...optimisticState.values,
+    };
+  }, [baseValues, effectiveThreadId, optimisticState]);
+
+  const messages = useMemo(() => getMessagesFromState(values), [values]);
+  const messageMetadata = useMemo(
+    () =>
+      buildMessageMetadata({
+        values,
+        history:
+          historyData.length > 0
+            ? historyData
+            : activeState
+              ? [activeState]
+              : [],
+        branchByCheckpoint: branchContext.branchByCheckpoint,
+      }),
+    [activeState, branchContext.branchByCheckpoint, historyData, values],
+  );
+
+  const getMessagesMetadata = useCallback(
+    (message: Message, index?: number) => {
+      return messageMetadata.find(
+        (candidate) =>
+          candidate.messageId === String(message.id ?? index ?? ""),
+      );
+    },
+    [messageMetadata],
+  );
+
+  const isWorking = useMemo(
+    () =>
+      phase === "submitting" ||
+      phase === "polling" ||
+      phase === "canceling" ||
+      isThreadBusy(threadStatus),
+    [phase, threadStatus],
+  );
+
+  const interrupt = useMemo(
+    () => getInterrupt(values, activeState, error),
+    [activeState, error, values],
+  );
+
+  const submit = useCallback(
+    async (input: RuntimeSubmitInput, options?: RuntimeSubmitOptions) => {
+      const normalizedInput = normalizeSubmitInput(input);
+      const checkpointId = options?.checkpoint?.checkpoint_id;
+      if (checkpointId) {
+        setBranch(branchContext.branchByCheckpoint[checkpointId]?.branch ?? "");
+      }
+
+      setPhase("submitting");
+      setError(undefined);
+
+      let targetThreadId = threadIdRef.current ?? null;
+      try {
+        if (!targetThreadId) {
+          const createdThread = await client.threads.create({
+            metadata: options?.metadata,
+            threadId: options?.threadId,
+          });
+          targetThreadId = createdThread.thread_id;
+          threadIdRef.current = targetThreadId;
+          syncThreadsSoon(targetThreadId);
+        }
+
+        if (!targetThreadId) {
+          throw new Error("Failed to determine thread ID for run creation.");
+        }
+
+        const nowIso = new Date().toISOString();
+        setThreads((previousThreads) => {
+          const existingThread = previousThreads.find(
+            (thread) => thread.thread_id === targetThreadId,
+          );
+          const optimisticThreadSummary: Thread = {
+            ...(existingThread ?? {
+              thread_id: targetThreadId,
+              created_at: nowIso,
+            }),
+            metadata: {
+              ...(existingThread?.metadata ?? {}),
+              ...(options?.metadata ?? {}),
+            },
+            status: "busy",
+            thread_id: targetThreadId,
+            updated_at: nowIso,
+          } as Thread;
+
+          return upsertThreadSummary(previousThreads, optimisticThreadSummary);
+        });
+
+        const optimisticValues =
+          options?.optimisticValues == null
+            ? null
+            : typeof options.optimisticValues === "function"
+              ? options.optimisticValues(baseValues)
+              : options.optimisticValues;
+        if (optimisticValues) {
+          const optimisticSnapshot = {
+            ...baseValues,
+            ...optimisticValues,
+          };
+          const existingIds = new Set(
+            getMessagesFromState(baseValues)
+              .map((message) => message.id)
+              .filter((messageId): messageId is string => !!messageId),
+          );
+          const pendingMessageIds = getMessagesFromState(optimisticSnapshot)
+            .map((message) => message.id)
+            .filter(
+              (messageId): messageId is string =>
+                !!messageId && !existingIds.has(messageId),
+            );
+          setOptimisticState({
+            pendingMessageIds,
+            threadId: targetThreadId,
+            values: optimisticSnapshot,
+          });
+        }
+
+        const run = await client.runs.create(targetThreadId, assistantId, {
+          config: options?.config,
+          context: options?.context,
+          command: options?.command,
+          durability: options?.durability,
+          input: normalizedInput as Record<string, unknown> | null | undefined,
+          interruptAfter: options?.interruptAfter,
+          interruptBefore: options?.interruptBefore,
+          metadata: options?.metadata,
+          multitaskStrategy: options?.multitaskStrategy,
+          onCompletion: options?.onCompletion,
+          onDisconnect: options?.onDisconnect,
+          checkpoint:
+            options?.checkpoint === null ? undefined : options?.checkpoint,
+        });
+
+        setActiveRunId(run.run_id);
+        setLatestRunStatus(run.status ?? null);
+        setThreadStatus("busy");
+        setPhase("polling");
+        if (threadId !== targetThreadId) {
+          setThreadId(targetThreadId);
+        }
+        await refreshThreadState(targetThreadId, {
+          forceHistory: historyDataRef.current.length === 0,
+        });
+      } catch (submitError) {
+        console.error("Failed to create run", submitError);
+        setError(submitError);
+        setPhase(threadIdRef.current ? "idle" : "error");
+        setOptimisticState(null);
+        throw submitError;
+      }
+    },
+    [
+      assistantId,
+      baseValues,
+      branchContext.branchByCheckpoint,
+      client,
+      refreshThreadState,
+      setThreads,
+      setThreadId,
+      syncThreadsSoon,
+      threadId,
+    ],
+  );
+
+  const resolveActiveRunId = useCallback(async () => {
+    const targetThreadId = threadIdRef.current;
+    if (!targetThreadId) return null;
+    if (activeRunId) return activeRunId;
+
+    const recentRuns = await client.runs
+      .list(targetThreadId, { limit: RUN_STATUS_LIST_LIMIT })
+      .catch(() => []);
+    const nextActiveRun = selectActiveRun(recentRuns);
+    return nextActiveRun?.run_id ?? null;
+  }, [activeRunId, client]);
+
+  const cancel = useCallback(async () => {
+    const targetThreadId = threadIdRef.current;
+    if (!targetThreadId) return;
+
+    setPhase("canceling");
+    setError(undefined);
+    try {
+      const runId = await resolveActiveRunId();
+      if (runId) {
+        await client.runs.cancel(targetThreadId, runId);
+      }
+      setOptimisticState(null);
+      await refreshThreadState(targetThreadId, { forceHistory: true });
+    } catch (cancelError) {
+      console.error("Failed to cancel run", cancelError);
+      setError(cancelError);
+      setPhase("error");
+      throw cancelError;
+    }
+  }, [client, refreshThreadState, resolveActiveRunId]);
+
+  const value = useMemo<ThreadRuntimeContextType>(
+    () => ({
+      activeRunId,
+      assistantId,
+      branch,
+      cancel,
+      client,
+      error,
+      experimental_branchTree: branchContext.branchTree,
+      getMessagesMetadata,
+      history: branchContext.flatHistory,
+      interrupt,
+      isLoading: isWorking,
+      isThreadLoading:
+        phase === "hydrating" && rawState == null && historyData.length === 0,
+      isWorking,
+      latestRunStatus,
+      messages,
+      phase,
+      refresh,
+      setBranch,
+      submit,
+      threadId,
+      threadStatus,
+      values,
+    }),
+    [
+      activeRunId,
+      assistantId,
+      branch,
+      branchContext.branchTree,
+      branchContext.flatHistory,
+      cancel,
+      client,
+      error,
+      getMessagesMetadata,
+      historyData.length,
+      interrupt,
+      isWorking,
+      latestRunStatus,
+      messages,
+      phase,
+      rawState,
+      refresh,
+      submit,
+      threadId,
+      threadStatus,
+      values,
+    ],
+  );
+
   return (
-    <StreamContext.Provider value={streamValue}>
+    <ThreadRuntimeContext.Provider value={value}>
       {children}
-    </StreamContext.Provider>
+    </ThreadRuntimeContext.Provider>
   );
 };
 
-// Default values for the form
 const DEFAULT_API_URL = "http://localhost:2024";
 const DEFAULT_ASSISTANT_ID = "agent";
 
-export const StreamProvider: React.FC<{ children: ReactNode }> = ({
+export const ThreadRuntimeProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const { resolvedTheme } = useTheme();
   const isIapAuth = isIapAuthMode();
-  // Get environment variables
   const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
   const envAssistantId: string | undefined =
     process.env.NEXT_PUBLIC_ASSISTANT_ID;
 
-  // Use URL params with env var fallbacks
   const [apiUrl, setApiUrl] = useQueryState("apiUrl", {
     defaultValue: envApiUrl || "",
   });
   const [assistantId, setAssistantId] = useQueryState("assistantId", {
     defaultValue: envAssistantId || "",
   });
-
-  // For API key, use localStorage with env var fallback
   const [apiKey, _setApiKey] = useState(() => {
     if (isIapAuth) return "";
     const storedKey = getApiKey();
@@ -233,12 +1054,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     _setApiKey(key);
   };
 
-  // Determine final values to use, prioritizing URL params then env vars
   const finalApiUrl = apiUrl || envApiUrl;
   const finalAssistantId = assistantId || envAssistantId;
   const logoVariant = resolvedTheme === "dark" ? "dark" : "light";
 
-  // Show the form if we: don't have an API URL, or don't have an assistant ID
   if (!finalApiUrl || !finalAssistantId) {
     return (
       <div className="relative flex min-h-screen w-full items-center justify-center p-4">
@@ -260,23 +1079,22 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
             </p>
           </div>
           <form
-            onSubmit={(e) => {
-              e.preventDefault();
+            onSubmit={(event) => {
+              event.preventDefault();
 
-              const form = e.target as HTMLFormElement;
+              const form = event.target as HTMLFormElement;
               const formData = new FormData(form);
-              const apiUrl = formData.get("apiUrl") as string;
-              const assistantId = formData.get("assistantId") as string;
-              const apiKey = isIapAuth
+              const nextApiUrl = formData.get("apiUrl") as string;
+              const nextAssistantId = formData.get("assistantId") as string;
+              const nextApiKey = isIapAuth
                 ? ""
                 : (formData.get("apiKey") as string);
 
-              setApiUrl(apiUrl);
+              setApiUrl(nextApiUrl);
               if (!isIapAuth) {
-                setApiKey(apiKey);
+                setApiKey(nextApiKey);
               }
-              setAssistantId(assistantId);
-
+              setAssistantId(nextAssistantId);
               form.reset();
             }}
             className="bg-muted/50 flex flex-col gap-6 p-6"
@@ -351,24 +1169,25 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   }
 
   return (
-    <StreamSession
+    <ThreadRuntimeSession
       apiKey={apiKey}
       apiUrl={finalApiUrl}
       assistantId={finalAssistantId}
       isIapAuth={isIapAuth}
     >
       {children}
-    </StreamSession>
+    </ThreadRuntimeSession>
   );
 };
 
-// Create a custom hook to use the context
-export const useStreamContext = (): StreamContextType => {
-  const context = useContext(StreamContext);
+export const useThreadRuntime = (): ThreadRuntimeContextType => {
+  const context = useContext(ThreadRuntimeContext);
   if (context === undefined) {
-    throw new Error("useStreamContext must be used within a StreamProvider");
+    throw new Error(
+      "useThreadRuntime must be used within a ThreadRuntimeProvider",
+    );
   }
   return context;
 };
 
-export default StreamContext;
+export default ThreadRuntimeContext;

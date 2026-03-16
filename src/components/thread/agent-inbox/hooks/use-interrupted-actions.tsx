@@ -1,4 +1,4 @@
-import { useStreamContext } from "@/providers/Stream";
+import { useThreadRuntime } from "@/providers/Stream";
 import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
 import { END } from "@langchain/langgraph/web";
 import { Interrupt } from "@langchain/langgraph-sdk";
@@ -26,8 +26,8 @@ interface UseInterruptedActionsValue {
   handleResolve: (
     e: React.MouseEvent<HTMLButtonElement, MouseEvent>,
   ) => Promise<void>;
-  streaming: boolean;
-  streamFinished: boolean;
+  submitting: boolean;
+  submissionCompleted: boolean;
   loading: boolean;
   supportsMultipleMethods: boolean;
   hasEdited: boolean;
@@ -45,11 +45,11 @@ interface UseInterruptedActionsValue {
 export default function useInterruptedActions({
   interrupt,
 }: UseInterruptedActionsInput): UseInterruptedActionsValue {
-  const thread = useStreamContext();
+  const thread = useThreadRuntime();
   const [humanResponse, setHumanResponse] = useState<DecisionWithEdits[]>([]);
   const [loading, setLoading] = useState(false);
-  const [streaming, setStreaming] = useState(false);
-  const [streamFinished, setStreamFinished] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submissionCompleted, setSubmissionCompleted] = useState(false);
   const [selectedSubmitType, setSelectedSubmitType] = useState<SubmitType>();
   const [hasEdited, setHasEdited] = useState(false);
   const [hasAddedResponse, setHasAddedResponse] = useState(false);
@@ -143,7 +143,7 @@ export default function useInterruptedActions({
 
     try {
       setLoading(true);
-      setStreaming(true);
+      setSubmitting(true);
 
       const resumedSuccessfully = resumeRun([decision]);
       if (!resumedSuccessfully) {
@@ -156,7 +156,7 @@ export default function useInterruptedActions({
         duration: 5000,
       });
 
-      setStreamFinished(true);
+      setSubmissionCompleted(true);
     } catch (error: any) {
       console.error("Error sending human response", error);
       errorOccurred = true;
@@ -178,10 +178,10 @@ export default function useInterruptedActions({
         });
       }
     } finally {
-      setStreaming(false);
+      setSubmitting(false);
       setLoading(false);
       if (errorOccurred) {
-        setStreamFinished(false);
+        setSubmissionCompleted(false);
       }
     }
   };
@@ -235,8 +235,8 @@ export default function useInterruptedActions({
     handleResolve,
     humanResponse,
     selectedSubmitType,
-    streaming,
-    streamFinished,
+    submitting,
+    submissionCompleted,
     loading,
     supportsMultipleMethods,
     hasEdited,

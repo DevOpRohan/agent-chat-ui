@@ -1,4 +1,4 @@
-import { useStreamContext } from "@/providers/Stream";
+import { useThreadRuntime } from "@/providers/Stream";
 import { Message } from "@langchain/langgraph-sdk";
 import { useState } from "react";
 import { getContentString } from "../utils";
@@ -42,7 +42,7 @@ export function HumanMessage({
   message: Message;
   isLoading: boolean;
 }) {
-  const thread = useStreamContext();
+  const thread = useThreadRuntime();
   const meta = thread.getMessagesMetadata(message);
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
 
@@ -63,9 +63,6 @@ export function HumanMessage({
         multitaskStrategy: "reject",
         onDisconnect: "continue",
         checkpoint: parentCheckpoint,
-        streamMode: ["values"],
-        streamSubgraphs: true,
-        streamResumable: true,
         optimisticValues: (prev) => {
           const values = meta?.firstSeenState?.values;
           if (!values) return prev;

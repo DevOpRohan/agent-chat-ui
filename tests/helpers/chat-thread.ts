@@ -4,9 +4,6 @@ import {
   type ChatEnvironmentGate,
 } from "./environment-gates";
 
-export const RUN_STREAM_ROUTE_PATTERN =
-  /\/threads\/[^/]+\/runs(?:\/[^/]+)?\/stream(?:\?|$)/;
-
 export async function readThreadId(page: Page): Promise<string | null> {
   return new URL(page.url()).searchParams.get("threadId");
 }
@@ -49,7 +46,7 @@ export async function clearStaleClientState(page: Page): Promise<void> {
 
     const sessionKeys = Object.keys(window.sessionStorage);
     for (const key of sessionKeys) {
-      if (key.startsWith("lg:thread:") || key.startsWith("lg:stream:")) {
+      if (key.startsWith("lg:thread:")) {
         window.sessionStorage.removeItem(key);
       }
     }

@@ -3,7 +3,7 @@ import { expect, type Page } from "@playwright/test";
 const REACT_ERROR_PATTERNS = [
   /minified react error #185/i,
   /\/errors\/185/i,
-  /ignoring benign react #185 stream error/i,
+  /ignoring benign react #185 render error/i,
   /maximum update depth exceeded/i,
   /too many re-renders/i,
 ];

@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import {
+  Component,
+  type ErrorInfo,
   FormEvent,
   KeyboardEvent,
   PointerEvent,
@@ -13,9 +15,9 @@ import {
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
-import { useStreamContext } from "@/providers/Stream";
+import { useThreadRuntime } from "@/providers/Stream";
 import { Button } from "../ui/button";
-import { Checkpoint, Message, Run } from "@langchain/langgraph-sdk";
+import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import {
@@ -31,10 +33,10 @@ import {
   Minimize2,
   PanelRightOpen,
   PanelRightClose,
-  XIcon,
   Plus,
+  XIcon,
 } from "lucide-react";
-import { useQueryState, parseAsBoolean } from "nuqs";
+import { parseAsBoolean, useQueryState } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
 import { toast } from "sonner";
@@ -42,38 +44,17 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
-import { getOrCreateThreadTabId, markThreadSeen } from "@/lib/thread-activity";
+import { markThreadSeen } from "@/lib/thread-activity";
 import {
-  clearShadowRunId,
-  readRecoveryRunId,
-  readSdkRunId,
-  readShadowRunId,
-} from "@/lib/stream-run-shadow";
-import { useThreadBusy } from "@/hooks/use-thread-busy";
-import { useStableStreamMessages } from "@/hooks/use-stable-stream-messages";
-import {
-  useStreamAutoReconnect,
-  type ReconnectIntent,
-} from "@/hooks/use-stream-auto-reconnect";
-import {
-  useRunFinalizationFallback,
-  type FinalizationFallbackIntent,
-} from "@/hooks/use-run-finalization-fallback";
-import {
-  useArtifactOpen,
   ArtifactContent,
   ArtifactTitle,
   useArtifactContext,
+  useArtifactOpen,
   useArtifactSurfaceMode,
 } from "./artifact";
 import { useTheme } from "next-themes";
 import { ThreadSettings } from "./thread-settings";
-import {
-  classifyStreamError,
-  getStreamErrorDetails,
-  isReactRenderInstabilityError,
-} from "@/lib/stream-error-classifier";
-import { ThreadRenderBoundary } from "./render-crash-boundary";
+import { getContentString } from "./utils";
 
 function showThreadRunningToast() {
   toast("Thread is still running", {
@@ -108,10 +89,10 @@ function isThreadActiveStatus(
 }
 
 type ThreadStatusWarning = {
-  kind: "cancelled" | "incomplete" | "timeout" | "error";
-  title: string;
   description: string;
+  kind: "cancelled" | "error" | "incomplete" | "timeout";
   statusKey: string;
+  title: string;
 };
 
 function normalizeThreadStatusValue(
@@ -121,32 +102,10 @@ function normalizeThreadStatusValue(
   return status.trim().toLowerCase();
 }
 
-function toTimestampMs(value: string | null | undefined): number {
-  if (!value) return 0;
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? 0 : parsed;
-}
-
-function selectFreshestRun(runs: Run[]): Run | null {
-  if (runs.length === 0) return null;
-  return [...runs].sort((a, b) => {
-    const aTs = Math.max(
-      toTimestampMs(a.updated_at),
-      toTimestampMs(a.created_at),
-    );
-    const bTs = Math.max(
-      toTimestampMs(b.updated_at),
-      toTimestampMs(b.created_at),
-    );
-    return bTs - aTs;
-  })[0];
-}
-
 function getStatusWarning(
   status: string | null | undefined,
-  source: "thread" | "run",
+  source: "run" | "thread",
 ): ThreadStatusWarning | null {
-  // SDK statuses: thread = idle|busy|interrupted|error, run = pending|running|success|error|timeout|interrupted.
   const normalizedStatus = normalizeThreadStatusValue(status);
   if (!normalizedStatus) return null;
 
@@ -196,22 +155,17 @@ function getStatusWarning(
   return null;
 }
 
-function shouldSurfaceRecoverableReconnectStatus(
-  name: string | undefined,
-  message: string | undefined,
-): boolean {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return true;
-  }
-
-  const text = `${name ?? ""} ${message ?? ""}`.toLowerCase();
-  if (!text) return false;
-
+function isConflictLikeError(error: unknown) {
+  const text =
+    typeof error === "object" && error && "message" in error
+      ? String((error as { message?: unknown }).message ?? "")
+      : String(error ?? "");
+  const normalized = text.toLowerCase();
   return (
-    text.includes("internet disconnected") ||
-    text.includes("err_internet_disconnected") ||
-    text.includes("err_network_changed") ||
-    text.includes("addressunreachable")
+    normalized.includes("409") ||
+    normalized.includes("conflict") ||
+    normalized.includes("active run") ||
+    normalized.includes("thread is busy")
   );
 }
 
@@ -223,120 +177,13 @@ const DEFAULT_ARTIFACT_FALLBACK_WIDTH_PX = 360;
 const ARTIFACT_MIN_WIDTH_PX = 320;
 const ARTIFACT_MAX_RATIO = 0.62;
 const CHAT_MIN_WIDTH_PX = 360;
-const RESIZE_STEP_PX = 24;
 const RESIZE_HANDLE_WIDTH_PX = 10;
-const RUN_STATUS_LIST_LIMIT = 10;
-const RECONNECT_INTENT_TTL_MS = 12_000;
-const RECOVERABLE_DISCONNECT_INTENT_GRACE_MS = 1_500;
-const SILENT_STREAM_END_GRACE_MS = 3_500;
-const EXPECTED_STREAM_STOP_TTL_MS = 15_000;
-
-type BusyState = {
-  loadingThreadId: string | null;
-  ownedBusyThreadId: string | null;
-};
-
-type ThreadRenderFallbackProps = {
-  statusText: string;
-};
-
-type BusySignals = {
-  threadId: string | null;
-  tabId: string | null;
-  effectiveIsLoading: boolean;
-  threadStatus: string | null;
-  busyByThreadId: Record<string, boolean>;
-  busyOwnerByThreadId: Record<string, string>;
-};
-
-const EMPTY_BUSY_STATE: BusyState = {
-  loadingThreadId: null,
-  ownedBusyThreadId: null,
-};
+const RESIZE_STEP_PX = 24;
 
 type PaneDragState =
   | { type: "none" }
-  | { type: "history"; startX: number; startHistory: number }
-  | { type: "artifact"; startX: number; startArtifact: number };
-
-function areBusyStatesEqual(a: BusyState, b: BusyState): boolean {
-  return (
-    a.loadingThreadId === b.loadingThreadId &&
-    a.ownedBusyThreadId === b.ownedBusyThreadId
-  );
-}
-
-function isThreadStatusSettled(threadStatus: string | null): boolean {
-  return threadStatus !== null && !isThreadActiveStatus(threadStatus);
-}
-
-function deriveBusyState(previous: BusyState, signals: BusySignals): BusyState {
-  let loadingThreadId = previous.loadingThreadId;
-  let ownedBusyThreadId = previous.ownedBusyThreadId;
-  const {
-    threadId,
-    tabId,
-    effectiveIsLoading,
-    threadStatus,
-    busyByThreadId,
-    busyOwnerByThreadId,
-  } = signals;
-
-  if (!effectiveIsLoading && loadingThreadId) {
-    const shouldKeepLocalLoading =
-      !!threadId &&
-      loadingThreadId === threadId &&
-      threadStatus !== null &&
-      isThreadActiveStatus(threadStatus);
-    if (!shouldKeepLocalLoading) {
-      loadingThreadId = null;
-    }
-  }
-
-  if (threadId && effectiveIsLoading && !loadingThreadId) {
-    const ownerTabId = busyOwnerByThreadId[threadId];
-    if (!ownerTabId || ownerTabId === tabId) {
-      loadingThreadId = threadId;
-      ownedBusyThreadId = threadId;
-    }
-  }
-
-  if (threadId && effectiveIsLoading && ownedBusyThreadId !== threadId) {
-    const ownerTabId = busyOwnerByThreadId[threadId];
-    if (ownerTabId === tabId || loadingThreadId === threadId) {
-      ownedBusyThreadId = threadId;
-    }
-  }
-
-  if (
-    threadId &&
-    busyByThreadId[threadId] &&
-    !effectiveIsLoading &&
-    isThreadStatusSettled(threadStatus)
-  ) {
-    if (loadingThreadId === threadId) {
-      loadingThreadId = null;
-    }
-    if (ownedBusyThreadId === threadId) {
-      ownedBusyThreadId = null;
-    }
-  }
-
-  if (
-    threadId &&
-    ownedBusyThreadId === threadId &&
-    !effectiveIsLoading &&
-    isThreadStatusSettled(threadStatus)
-  ) {
-    ownedBusyThreadId = null;
-  }
-
-  if (ownedBusyThreadId && !busyByThreadId[ownedBusyThreadId]) {
-    ownedBusyThreadId = null;
-  }
-
-  return { loadingThreadId, ownedBusyThreadId };
-}
+  | { type: "artifact"; startArtifact: number; startX: number }
+  | { type: "history"; startHistory: number; startX: number };
 
 function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
@@ -350,21 +197,10 @@ function toBounds(min: number, max: number) {
   return { min: safeMin, max: safeMax };
 }
 
-function ThreadRenderFallback({ statusText }: ThreadRenderFallbackProps) {
-  return (
-    <div className="flex w-full justify-start py-2">
-      <div className="bg-muted text-muted-foreground inline-flex max-w-full items-center gap-2 rounded-2xl border px-4 py-3 text-sm">
-        <LoaderCircle className="h-4 w-4 animate-spin" />
-        {statusText}
-      </div>
-    </div>
-  );
-}
-
 function getHistoryBounds(
   viewportWidth: number,
   artifactWidth: number,
-): { min: number; max: number } {
+): { max: number; min: number } {
   const maxByChat =
     viewportWidth - CHAT_MIN_WIDTH_PX - Math.max(artifactWidth, 0);
   const max = Math.min(HISTORY_MAX_WIDTH_PX, Math.max(0, maxByChat));
@@ -374,7 +210,7 @@ function getHistoryBounds(
 function getArtifactBounds(
   viewportWidth: number,
   historyWidth: number,
-): { min: number; max: number } {
+): { max: number; min: number } {
   const mainWidth = Math.max(0, viewportWidth - Math.max(0, historyWidth));
   const maxByChat = Math.max(0, mainWidth - CHAT_MIN_WIDTH_PX);
   const maxByRatio = Math.max(0, Math.floor(mainWidth * ARTIFACT_MAX_RATIO));
@@ -392,20 +228,20 @@ function getDefaultArtifactWidth(viewportWidth: number, historyWidth: number) {
 }
 
 function normalizePaneWidths(params: {
-  viewportWidth: number;
-  chatHistoryOpen: boolean;
-  artifactOpen: boolean;
   artifactExpanded: boolean;
-  historyWidth: number;
+  artifactOpen: boolean;
   artifactWidth: number;
+  chatHistoryOpen: boolean;
+  historyWidth: number;
+  viewportWidth: number;
 }) {
   const {
-    viewportWidth,
-    chatHistoryOpen,
-    artifactOpen,
     artifactExpanded,
-    historyWidth,
+    artifactOpen,
     artifactWidth,
+    chatHistoryOpen,
+    historyWidth,
+    viewportWidth,
   } = params;
   const safeViewportWidth = Math.max(0, viewportWidth);
   let nextHistory = Math.max(0, historyWidth);
@@ -461,27 +297,24 @@ function normalizePaneWidths(params: {
     nextArtifact = activeArtifact;
   }
 
-  nextHistory = Math.round(Math.max(0, nextHistory));
-  nextArtifact = Math.round(Math.max(0, nextArtifact));
-
   return {
-    historyWidth: nextHistory,
-    artifactWidth: nextArtifact,
+    artifactWidth: Math.round(Math.max(0, nextArtifact)),
+    historyWidth: Math.round(Math.max(0, nextHistory)),
   };
 }
 
 function StickyToBottomContent(props: {
-  content: ReactNode;
-  footer?: ReactNode;
   className?: string;
+  content: ReactNode;
   contentClassName?: string;
+  footer?: ReactNode;
 }) {
   const context = useStickToBottomContext();
   return (
     <div
       ref={context.scrollRef}
       data-testid="chat-scroll-container"
-      style={{ width: "100%", height: "100%" }}
+      style={{ height: "100%", width: "100%" }}
       className={props.className}
     >
       <div
@@ -494,6 +327,72 @@ function StickyToBottomContent(props: {
       {props.footer}
     </div>
   );
+}
+
+type MessageRenderBoundaryProps = {
+  children: ReactNode;
+  fallback: ReactNode;
+  resetKey: string;
+};
+
+type MessageRenderBoundaryState = {
+  hasError: boolean;
+};
+
+class MessageRenderBoundary extends Component<
+  MessageRenderBoundaryProps,
+  MessageRenderBoundaryState
+> {
+  state: MessageRenderBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): MessageRenderBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown, _errorInfo: ErrorInfo) {
+    console.error("Message render failed", error);
+  }
+
+  componentDidUpdate(previousProps: MessageRenderBoundaryProps) {
+    if (
+      previousProps.resetKey !== this.props.resetKey &&
+      this.state.hasError
+    ) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+
+    return this.props.children;
+  }
+}
+
+function getSafeMessagePreview(message: Message): string {
+  const text = getContentString(message.content).trim();
+  if (text.length > 0) {
+    return text;
+  }
+
+  if (Array.isArray(message.content)) {
+    const blockTypes = message.content
+      .map((block) => String(block?.type ?? "content"))
+      .join(", ");
+    return blockTypes || "Multimodal message";
+  }
+
+  if (message.content == null) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(message.content);
+  } catch {
+    return String(message.content);
+  }
 }
 
 function ScrollToBottom(props: { className?: string }) {
@@ -515,6 +414,7 @@ function ScrollToBottom(props: { className?: string }) {
 const ENTER_TO_SEND_STORAGE_KEY = "lg:chat:enterToSend";
 
 export function Thread() {
+  const runtime = useThreadRuntime();
   const { resolvedTheme } = useTheme();
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const artifactSurfaceMode = useArtifactSurfaceMode();
@@ -534,225 +434,10 @@ export function Thread() {
     handleFileUpload,
     dropRef,
     removeBlock,
-    resetBlocks: _resetBlocks,
     dragOver,
     handlePaste,
     isUploading,
   } = useFileUpload();
-  const [firstTokenReceived, setFirstTokenReceived] = useState(false);
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem(ENTER_TO_SEND_STORAGE_KEY);
-    if (stored === "false") {
-      setEnterToSend(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(ENTER_TO_SEND_STORAGE_KEY, String(enterToSend));
-  }, [enterToSend]);
-  const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-
-  const stream = useStreamContext();
-  const isLoading = stream.isLoading;
-  const { busyByThreadId, busyOwnerByThreadId, markBusy } = useThreadBusy();
-  const [busyState, setBusyState] = useState<BusyState>(EMPTY_BUSY_STATE);
-  const [threadStatus, setThreadStatus] = useState<string | null>(null);
-  const [latestRunStatus, setLatestRunStatus] = useState<string | null>(null);
-  const [reconnectIntent, setReconnectIntent] =
-    useState<ReconnectIntent | null>(null);
-  const [finalizationIntent, setFinalizationIntent] =
-    useState<FinalizationFallbackIntent | null>(null);
-  const [renderBoundaryResetCounter, setRenderBoundaryResetCounter] =
-    useState(0);
-  const loadingThreadId = busyState.loadingThreadId;
-  const ownedBusyThreadId = busyState.ownedBusyThreadId;
-  const isCurrentThreadLoading =
-    !!threadId &&
-    isLoading &&
-    (loadingThreadId === null || loadingThreadId === threadId);
-  const tabId = getOrCreateThreadTabId();
-  const isThreadBusyInAnyTab = !!threadId && !!busyByThreadId[threadId];
-  const isThreadActiveOnServer = isThreadActiveStatus(threadStatus);
-  const currentThreadBusyOwnerId = threadId
-    ? busyOwnerByThreadId[threadId]
-    : undefined;
-  const isCurrentThreadOwnedByTab =
-    !!threadId &&
-    (ownedBusyThreadId === threadId ||
-      currentThreadBusyOwnerId === tabId ||
-      loadingThreadId === threadId);
-  const isBusyElsewhereFromLocalSignal =
-    isThreadBusyInAnyTab &&
-    !isCurrentThreadLoading &&
-    (currentThreadBusyOwnerId == null || currentThreadBusyOwnerId !== tabId);
-  const isBusyElsewhereFromServerSignal =
-    !isLoading &&
-    !isThreadBusyInAnyTab &&
-    !isCurrentThreadOwnedByTab &&
-    !isCurrentThreadLoading &&
-    isThreadActiveOnServer;
-  const isCurrentThreadBusyElsewhere =
-    isBusyElsewhereFromLocalSignal || isBusyElsewhereFromServerSignal;
-  const shouldShowRunningQueryMessage = isCurrentThreadBusyElsewhere;
-  const statusWarning = useMemo(() => {
-    const threadWarning = getStatusWarning(threadStatus, "thread");
-    const runWarning = getStatusWarning(latestRunStatus, "run");
-
-    // Prefer explicit terminal cancellation/incomplete signals from thread status
-    // when present, then fall back to run-level status.
-    if (
-      threadWarning &&
-      (threadWarning.kind === "cancelled" ||
-        threadWarning.kind === "incomplete")
-    ) {
-      return threadWarning;
-    }
-
-    return runWarning ?? threadWarning;
-  }, [latestRunStatus, threadStatus]);
-  const startupReconnectIntentThreadRef = useRef<string | null>(null);
-  const previousReconnectIntentThreadRef = useRef<string | null>(threadId);
-  const recoverableIntentTimeoutRef = useRef<number | null>(null);
-  const silentStreamEndTimeoutRef = useRef<number | null>(null);
-  const previousStreamLoadingRef = useRef(isLoading);
-  const expectedStreamStopRef = useRef<{
-    threadId: string;
-    createdAtMs: number;
-  } | null>(null);
-  const reconnectSignalRef = useRef({
-    threadId,
-    threadStatus,
-    latestRunStatus,
-    isLoading,
-    isCurrentThreadBusyElsewhere,
-    isCurrentThreadOwnedByTab,
-  });
-  const clearRecoverableIntentTimeout = useCallback(() => {
-    if (recoverableIntentTimeoutRef.current === null) return;
-    window.clearTimeout(recoverableIntentTimeoutRef.current);
-    recoverableIntentTimeoutRef.current = null;
-  }, []);
-  const clearSilentStreamEndTimeout = useCallback(() => {
-    if (silentStreamEndTimeoutRef.current === null) return;
-    window.clearTimeout(silentStreamEndTimeoutRef.current);
-    silentStreamEndTimeoutRef.current = null;
-  }, []);
-  const consumeReconnectIntent = useCallback((intentId: string) => {
-    setReconnectIntent((prev) => (prev?.id === intentId ? null : prev));
-  }, []);
-  const consumeFinalizationIntent = useCallback((intentId: string) => {
-    setFinalizationIntent((prev) => (prev?.id === intentId ? null : prev));
-  }, []);
-  const createFinalizationIntent = useCallback(
-    (
-      reason: FinalizationFallbackIntent["reason"],
-      options?: { runId?: string | null; targetThreadId?: string | null },
-    ) => {
-      const targetThreadId = options?.targetThreadId ?? threadId;
-      if (!targetThreadId) return;
-
-      const backendStillActive =
-        threadStatus === "busy" ||
-        latestRunStatus === "running" ||
-        latestRunStatus === "pending" ||
-        !!readRecoveryRunId(targetThreadId);
-      const hasAuthority =
-        !isCurrentThreadBusyElsewhere || isCurrentThreadOwnedByTab;
-
-      if (!backendStillActive || !hasAuthority) {
-        return;
-      }
-
-      setFinalizationIntent((previous) => {
-        if (previous?.threadId === targetThreadId) {
-          return previous;
-        }
-
-        return {
-          createdAtMs: Date.now(),
-          id: uuidv4(),
-          reason,
-          runId: options?.runId ?? readRecoveryRunId(targetThreadId) ?? null,
-          threadId: targetThreadId,
-        };
-      });
-    },
-    [
-      isCurrentThreadBusyElsewhere,
-      isCurrentThreadOwnedByTab,
-      latestRunStatus,
-      threadId,
-      threadStatus,
-    ],
-  );
-  const {
-    isReconnecting,
-    statusText: reconnectStatusText,
-    showReconnectStatus,
-    activeRunId,
-    stopReconnect,
-  } = useStreamAutoReconnect({
-    stream,
-    threadId,
-    threadStatus,
-    isCurrentThreadBusyElsewhere,
-    isCurrentThreadOwnedByTab,
-    onExhausted: ({ runId, threadId: exhaustedThreadId }) => {
-      createFinalizationIntent("reconnect_exhausted", {
-        runId,
-        targetThreadId: exhaustedThreadId,
-      });
-    },
-    reconnectIntent,
-    consumeReconnectIntent,
-  });
-  const {
-    clearFinalSnapshot,
-    finalSnapshot,
-    isActive: isFinalizationFallbackActive,
-    statusText: finalizationStatusText,
-    stopFallback,
-  } = useRunFinalizationFallback({
-    stream,
-    threadId,
-    threadStatus,
-    latestRunStatus,
-    isCurrentThreadBusyElsewhere,
-    isCurrentThreadOwnedByTab,
-    intent: finalizationIntent,
-    consumeIntent: consumeFinalizationIntent,
-  });
-  const effectiveIsLoading =
-    isCurrentThreadLoading || isReconnecting || isFinalizationFallbackActive;
-  const messages = finalSnapshot?.messages ?? stream.messages;
-  const displayMessages = useStableStreamMessages({
-    messages,
-    threadId,
-    branch: stream.branch,
-  });
-  const visibleStatusWarning = useMemo(
-    () =>
-      isThreadActiveStatus(threadStatus) || effectiveIsLoading
-        ? null
-        : statusWarning,
-    [threadStatus, effectiveIsLoading, statusWarning],
-  );
-  const effectiveIsLoadingRef = useRef(effectiveIsLoading);
-  const isThreadBusyInAnyTabRef = useRef(isThreadBusyInAnyTab);
-
-  const lastError = useRef<string | undefined>(undefined);
-  const lastWarnedThreadStatusKey = useRef<string | null>(null);
-  const previousBusyStateRef = useRef(busyState);
-  const previouslyObservedBusyThreadId = useRef<string | null>(null);
-  const pendingNewThreadOwnership = useRef<{
-    pending: boolean;
-    startedAtMs: number;
-  }>({
-    pending: false,
-    startedAtMs: 0,
-  });
-  const [runningDotsCount, setRunningDotsCount] = useState(1);
   const [viewportWidthPx, setViewportWidthPx] = useState(() =>
     typeof window === "undefined" ? 1440 : window.innerWidth,
   );
@@ -766,12 +451,77 @@ export function Thread() {
   const [paneDragState, setPaneDragState] = useState<PaneDragState>({
     type: "none",
   });
+  const [pendingSubmittedMessage, setPendingSubmittedMessage] =
+    useState<Message | null>(null);
+
   const preExpandLayoutRef = useRef<{
+    artifactWidth: number;
     historyOpen: boolean;
     historyWidth: number;
-    artifactWidth: number;
   } | null>(null);
   const artifactWidthInitializedRef = useRef(false);
+  const previousMessageLengthRef = useRef(0);
+  const lastWarnedThreadStatusKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(ENTER_TO_SEND_STORAGE_KEY);
+    if (stored === "false") {
+      setEnterToSend(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(ENTER_TO_SEND_STORAGE_KEY, String(enterToSend));
+  }, [enterToSend]);
+
+  const isLargeScreen = useMediaQuery("(min-width: 1024px)");
+  const effectiveIsLoading = runtime.isWorking;
+  const displayMessages = useMemo(() => {
+    if (!pendingSubmittedMessage) {
+      return runtime.messages;
+    }
+
+    if (
+      runtime.messages.some(
+        (message) => message.id === pendingSubmittedMessage.id,
+      )
+    ) {
+      return runtime.messages;
+    }
+
+    return [...runtime.messages, pendingSubmittedMessage];
+  }, [pendingSubmittedMessage, runtime.messages]);
+  const statusWarning = useMemo(() => {
+    const threadWarning = getStatusWarning(runtime.threadStatus, "thread");
+    const runWarning = getStatusWarning(runtime.latestRunStatus, "run");
+
+    if (
+      threadWarning &&
+      (threadWarning.kind === "cancelled" ||
+        threadWarning.kind === "incomplete")
+    ) {
+      return threadWarning;
+    }
+
+    return runWarning ?? threadWarning;
+  }, [runtime.latestRunStatus, runtime.threadStatus]);
+  const visibleStatusWarning = useMemo(
+    () =>
+      isThreadActiveStatus(runtime.threadStatus) || effectiveIsLoading
+        ? null
+        : statusWarning,
+    [effectiveIsLoading, runtime.threadStatus, statusWarning],
+  );
+  const uiMessageIdsByMessageId = useMemo(() => {
+    const ids = new Set<string>();
+    for (const uiMessage of runtime.values.ui ?? []) {
+      const messageId = uiMessage.metadata?.message_id;
+      if (typeof messageId === "string" && messageId.length > 0) {
+        ids.add(messageId);
+      }
+    }
+    return ids;
+  }, [runtime.values.ui]);
   const artifactPaneOpen = artifactOpen || manualArtifactOpen;
   const isIframeArtifactSurface = artifactSurfaceMode === "iframe";
   const isArtifactExpandedMode =
@@ -783,21 +533,74 @@ export function Thread() {
   const showDesktopHistoryHandle = showDesktopHistoryPane;
   const isPaneDragActive = paneDragState.type !== "none";
 
-  const claimThreadOwnership = useCallback(
-    (targetThreadId: string) => {
-      setBusyState((previous) =>
-        previous.loadingThreadId === targetThreadId &&
-        previous.ownedBusyThreadId === targetThreadId
-          ? previous
-          : {
-              loadingThreadId: targetThreadId,
-              ownedBusyThreadId: targetThreadId,
-            },
-      );
-      markBusy(targetThreadId, true, tabId ?? undefined);
-    },
-    [markBusy, tabId],
-  );
+  useEffect(() => {
+    if (threadId && displayMessages.length !== previousMessageLengthRef.current) {
+      markThreadSeen(threadId, Date.now());
+    }
+
+    previousMessageLengthRef.current = displayMessages.length;
+  }, [displayMessages.length, threadId]);
+
+  useEffect(() => {
+    if (!pendingSubmittedMessage) return;
+    if (
+      runtime.messages.some(
+        (message) => message.id === pendingSubmittedMessage.id,
+      )
+    ) {
+      setPendingSubmittedMessage(null);
+      return;
+    }
+
+    if (!runtime.isWorking) {
+      setPendingSubmittedMessage(null);
+    }
+  }, [pendingSubmittedMessage, runtime.isWorking, runtime.messages]);
+
+  useEffect(() => {
+    if (!pendingSubmittedMessage) return;
+    if (!threadId || !runtime.threadId) return;
+    if (threadId !== runtime.threadId) {
+      setPendingSubmittedMessage(null);
+    }
+  }, [pendingSubmittedMessage, runtime.threadId, threadId]);
+
+  useEffect(() => {
+    if (!threadId) return;
+    markThreadSeen(threadId, Date.now());
+  }, [threadId]);
+
+  useEffect(() => {
+    if (!threadId) {
+      lastWarnedThreadStatusKey.current = null;
+      return;
+    }
+
+    if (isThreadActiveStatus(runtime.threadStatus) || effectiveIsLoading) {
+      lastWarnedThreadStatusKey.current = null;
+      return;
+    }
+
+    if (!visibleStatusWarning) return;
+
+    const statusKey = `${threadId}:${visibleStatusWarning.statusKey}`;
+    if (lastWarnedThreadStatusKey.current === statusKey) {
+      return;
+    }
+    lastWarnedThreadStatusKey.current = statusKey;
+
+    toast(visibleStatusWarning.title, {
+      description: visibleStatusWarning.description,
+      closeButton: true,
+      duration: 12000,
+    });
+  }, [
+    effectiveIsLoading,
+    runtime.threadStatus,
+    threadId,
+    visibleStatusWarning,
+  ]);
+
   const restoreLayoutFromExpand = useCallback(() => {
     const preExpandLayout = preExpandLayoutRef.current;
     if (!preExpandLayout) return;
@@ -818,17 +621,12 @@ export function Thread() {
   }, [closeArtifact, isArtifactExpandedMode, restoreLayoutFromExpand]);
 
   const setThreadId = useCallback(
-    (id: string | null) => {
-      _setThreadId(id);
-      setFinalizationIntent(null);
-      clearFinalSnapshot();
-      setRenderBoundaryResetCounter((previous) => previous + 1);
-
-      // close artifact and reset artifact context
+    (value: string | null) => {
+      _setThreadId(value);
       handleArtifactClose();
       setArtifactContext({});
     },
-    [_setThreadId, clearFinalSnapshot, handleArtifactClose, setArtifactContext],
+    [_setThreadId, handleArtifactClose, setArtifactContext],
   );
 
   useEffect(() => {
@@ -871,12 +669,12 @@ export function Thread() {
   useEffect(() => {
     if (!isLargeScreen) return;
     const normalized = normalizePaneWidths({
-      viewportWidth: viewportWidthPx,
-      chatHistoryOpen,
-      artifactOpen: artifactPaneOpen,
       artifactExpanded,
-      historyWidth: historyWidthPx,
+      artifactOpen: artifactPaneOpen,
       artifactWidth: artifactWidthPx,
+      chatHistoryOpen,
+      historyWidth: historyWidthPx,
+      viewportWidth: viewportWidthPx,
     });
     if (normalized.historyWidth !== historyWidthPx) {
       setHistoryWidthPx(normalized.historyWidth);
@@ -896,13 +694,13 @@ export function Thread() {
 
   useEffect(() => {
     if (!isPaneDragActive || typeof document === "undefined") return;
-    const prevUserSelect = document.body.style.userSelect;
-    const prevCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
     document.body.style.userSelect = "none";
     document.body.style.cursor = "col-resize";
     return () => {
-      document.body.style.userSelect = prevUserSelect;
-      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
     };
   }, [isPaneDragActive]);
 
@@ -960,607 +758,46 @@ export function Thread() {
     viewportWidthPx,
   ]);
 
-  useEffect(() => {
-    if (
-      pendingNewThreadOwnership.current.pending &&
-      !threadId &&
-      !isLoading &&
-      Date.now() - pendingNewThreadOwnership.current.startedAtMs > 60_000
-    ) {
-      pendingNewThreadOwnership.current.pending = false;
-      pendingNewThreadOwnership.current.startedAtMs = 0;
-    }
-  }, [threadId, isLoading]);
-
-  useEffect(() => {
-    if (!threadId) return;
-    if (!pendingNewThreadOwnership.current.pending) return;
-
-    claimThreadOwnership(threadId);
-    pendingNewThreadOwnership.current.pending = false;
-    pendingNewThreadOwnership.current.startedAtMs = 0;
-  }, [threadId, claimThreadOwnership]);
-
-  useEffect(() => {
-    if (previousReconnectIntentThreadRef.current === threadId) return;
-    previousReconnectIntentThreadRef.current = threadId;
-    startupReconnectIntentThreadRef.current = null;
-    clearRecoverableIntentTimeout();
-    clearSilentStreamEndTimeout();
-    expectedStreamStopRef.current = null;
-    setReconnectIntent(null);
-    setFinalizationIntent(null);
-    clearFinalSnapshot();
-    setRenderBoundaryResetCounter((previous) => previous + 1);
-  }, [
-    clearFinalSnapshot,
-    clearRecoverableIntentTimeout,
-    clearSilentStreamEndTimeout,
-    threadId,
-  ]);
-
-  useEffect(() => {
-    const shouldKeepPendingIntent =
-      threadStatus === "busy" &&
-      !isLoading &&
-      (!isCurrentThreadBusyElsewhere || isCurrentThreadOwnedByTab);
-    if (shouldKeepPendingIntent) return;
-    clearRecoverableIntentTimeout();
-  }, [
-    clearRecoverableIntentTimeout,
-    isCurrentThreadBusyElsewhere,
-    isCurrentThreadOwnedByTab,
-    isLoading,
-    threadStatus,
-  ]);
-
-  useEffect(
-    () => () => {
-      clearRecoverableIntentTimeout();
-      clearSilentStreamEndTimeout();
-    },
-    [clearRecoverableIntentTimeout, clearSilentStreamEndTimeout],
-  );
-
-  useEffect(() => {
-    if (!finalizationIntent) return;
-    stopReconnect();
-  }, [finalizationIntent, stopReconnect]);
-
-  useEffect(() => {
-    if (!reconnectIntent) return;
-    const ageMs = Date.now() - reconnectIntent.createdAtMs;
-    if (ageMs >= RECONNECT_INTENT_TTL_MS) {
-      setReconnectIntent((prev) =>
-        prev?.id === reconnectIntent.id ? null : prev,
-      );
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setReconnectIntent((prev) =>
-        prev?.id === reconnectIntent.id ? null : prev,
-      );
-    }, RECONNECT_INTENT_TTL_MS - ageMs);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [reconnectIntent]);
-
-  useEffect(() => {
-    if (!threadId) return;
-    if (threadStatus !== "busy") return;
-    if (isLoading) return;
-    if (!isCurrentThreadOwnedByTab) return;
-    if (startupReconnectIntentThreadRef.current === threadId) return;
-    if (!readSdkRunId(threadId)) return;
-
-    startupReconnectIntentThreadRef.current = threadId;
-    setReconnectIntent((prev) => {
-      if (
-        prev &&
-        prev.threadId === threadId &&
-        (prev.reason === "recoverable_disconnect" ||
-          prev.reason === "silent_stream_end")
-      ) {
-        return prev;
-      }
-      return {
-        id: uuidv4(),
-        threadId,
-        reason: "startup_resume",
-        createdAtMs: Date.now(),
-        showStatus: false,
-      };
-    });
-  }, [isCurrentThreadOwnedByTab, isLoading, threadId, threadStatus]);
-
-  useEffect(() => {
-    reconnectSignalRef.current = {
-      threadId,
-      threadStatus,
-      latestRunStatus,
-      isLoading,
-      isCurrentThreadBusyElsewhere,
-      isCurrentThreadOwnedByTab,
-    };
-  }, [
-    latestRunStatus,
-    isCurrentThreadBusyElsewhere,
-    isCurrentThreadOwnedByTab,
-    isLoading,
-    threadId,
-    threadStatus,
-  ]);
-
-  useEffect(() => {
-    const previousIsLoading = previousStreamLoadingRef.current;
-    previousStreamLoadingRef.current = isLoading;
-
-    if (isLoading) {
-      clearSilentStreamEndTimeout();
-      expectedStreamStopRef.current = null;
-      return;
-    }
-
-    if (!previousIsLoading) {
-      const expectedStop = expectedStreamStopRef.current;
-      if (
-        expectedStop &&
-        Date.now() - expectedStop.createdAtMs > EXPECTED_STREAM_STOP_TTL_MS
-      ) {
-        expectedStreamStopRef.current = null;
-      }
-      return;
-    }
-
-    if (!threadId) return;
-    if (!isCurrentThreadOwnedByTab) return;
-    if (stream.error || stream.interrupt) return;
-
-    const expectedStop = expectedStreamStopRef.current;
-    if (
-      expectedStop &&
-      expectedStop.threadId === threadId &&
-      Date.now() - expectedStop.createdAtMs <= EXPECTED_STREAM_STOP_TTL_MS
-    ) {
-      expectedStreamStopRef.current = null;
-      return;
-    }
-
-    if (!readShadowRunId(threadId)) return;
-
-    clearSilentStreamEndTimeout();
-    const targetThreadId = threadId;
-    silentStreamEndTimeoutRef.current = window.setTimeout(() => {
-      silentStreamEndTimeoutRef.current = null;
-      const latest = reconnectSignalRef.current;
-      const runStillActive =
-        latest.latestRunStatus === "running" ||
-        latest.latestRunStatus === "pending";
-      const shouldCreateIntent =
-        latest.threadId === targetThreadId &&
-        !latest.isLoading &&
-        (!latest.isCurrentThreadBusyElsewhere ||
-          latest.isCurrentThreadOwnedByTab) &&
-        (latest.threadStatus === "busy" || runStillActive);
-
-      if (!shouldCreateIntent) return;
-
-      setReconnectIntent((prev) => {
-        if (prev && prev.threadId === targetThreadId) {
-          return prev;
-        }
-
-        return {
-          id: uuidv4(),
-          threadId: targetThreadId,
-          reason: "silent_stream_end",
-          createdAtMs: Date.now(),
-          showStatus: false,
-        };
-      });
-    }, SILENT_STREAM_END_GRACE_MS);
-  }, [
-    clearSilentStreamEndTimeout,
-    isCurrentThreadOwnedByTab,
-    isLoading,
-    stream.error,
-    stream.interrupt,
-    threadId,
-  ]);
-
-  useEffect(() => {
-    effectiveIsLoadingRef.current = effectiveIsLoading;
-    isThreadBusyInAnyTabRef.current = isThreadBusyInAnyTab;
-  }, [effectiveIsLoading, isThreadBusyInAnyTab]);
-
-  useEffect(() => {
-    if (!finalSnapshot?.snapshotKey) return;
-    setRenderBoundaryResetCounter((previous) => previous + 1);
-  }, [finalSnapshot?.snapshotKey]);
-
-  useEffect(() => {
-    if (!isLoading) return;
-    clearFinalSnapshot();
-  }, [clearFinalSnapshot, isLoading]);
-
-  useEffect(() => {
-    if (!threadId) {
-      setThreadStatus(null);
-      setLatestRunStatus(null);
-      return;
-    }
-
-    let cancelled = false;
-    let timeoutId: number | null = null;
-
-    const pollThreadStatus = async () => {
-      try {
-        const currentThread = await stream.client.threads.get(threadId);
-        if (cancelled) return;
-        setThreadStatus((prev) =>
-          prev === currentThread.status ? prev : currentThread.status,
-        );
-
-        let freshestRunStatus: string | null = null;
-        try {
-          const recentRuns = await stream.client.runs.list(threadId, {
-            limit: RUN_STATUS_LIST_LIMIT,
-          });
-          freshestRunStatus = selectFreshestRun(recentRuns)?.status ?? null;
-        } catch {
-          freshestRunStatus = null;
-        }
-        if (cancelled) return;
-        setLatestRunStatus((prev) =>
-          prev === freshestRunStatus ? prev : freshestRunStatus,
-        );
-
-        const shouldPollFast =
-          isThreadActiveStatus(currentThread.status) ||
-          effectiveIsLoadingRef.current ||
-          isThreadBusyInAnyTabRef.current;
-        timeoutId = window.setTimeout(
-          pollThreadStatus,
-          shouldPollFast ? 2500 : 15000,
-        );
-      } catch {
-        if (cancelled) return;
-        timeoutId = window.setTimeout(pollThreadStatus, 5000);
-      }
-    };
-
-    void pollThreadStatus();
-
-    return () => {
-      cancelled = true;
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [threadId, stream.client]);
-
-  useEffect(() => {
-    if (!threadId) {
-      lastWarnedThreadStatusKey.current = null;
-      return;
-    }
-
-    if (isThreadActiveStatus(threadStatus) || effectiveIsLoading) {
-      lastWarnedThreadStatusKey.current = null;
-      return;
-    }
-
-    if (!visibleStatusWarning) return;
-
-    const statusKey = `${threadId}:${visibleStatusWarning.statusKey}`;
-    if (lastWarnedThreadStatusKey.current === statusKey) {
-      return;
-    }
-    lastWarnedThreadStatusKey.current = statusKey;
-
-    toast(visibleStatusWarning.title, {
-      description: visibleStatusWarning.description,
-      closeButton: true,
-      duration: 12000,
-    });
-  }, [effectiveIsLoading, threadId, threadStatus, visibleStatusWarning]);
-
-  useEffect(() => {
-    if (!threadId) {
-      previouslyObservedBusyThreadId.current = null;
-      return;
-    }
-
-    if (
-      previouslyObservedBusyThreadId.current &&
-      previouslyObservedBusyThreadId.current !== threadId
-    ) {
-      previouslyObservedBusyThreadId.current = null;
-    }
-
-    if (isCurrentThreadBusyElsewhere) {
-      previouslyObservedBusyThreadId.current = threadId;
-      return;
-    }
-
-    if (
-      previouslyObservedBusyThreadId.current === threadId &&
-      !effectiveIsLoading &&
-      threadStatus !== null &&
-      !isThreadActiveStatus(threadStatus)
-    ) {
-      previouslyObservedBusyThreadId.current = null;
-    }
-  }, [
-    threadId,
-    isCurrentThreadBusyElsewhere,
-    threadStatus,
-    effectiveIsLoading,
-  ]);
-
-  useEffect(() => {
-    if (!shouldShowRunningQueryMessage) {
-      setRunningDotsCount(1);
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      setRunningDotsCount((prev) => (prev % 3) + 1);
-    }, 350);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [shouldShowRunningQueryMessage]);
-
-  useEffect(() => {
-    setBusyState((previous) => {
-      const next = deriveBusyState(previous, {
-        threadId,
-        tabId,
-        effectiveIsLoading,
-        threadStatus,
-        busyByThreadId,
-        busyOwnerByThreadId,
-      });
-      return areBusyStatesEqual(previous, next) ? previous : next;
-    });
-  }, [
-    threadId,
-    tabId,
-    effectiveIsLoading,
-    threadStatus,
-    busyByThreadId,
-    busyOwnerByThreadId,
-  ]);
-
-  useEffect(() => {
-    const previous = previousBusyStateRef.current;
-    const loadingThreadIdChanged =
-      previous.loadingThreadId !== busyState.loadingThreadId;
-
-    if (loadingThreadIdChanged && previous.loadingThreadId) {
-      markBusy(previous.loadingThreadId, false);
-    }
-
-    if (loadingThreadIdChanged && busyState.loadingThreadId) {
-      const ownerTabId = busyOwnerByThreadId[busyState.loadingThreadId];
-      if (!ownerTabId || ownerTabId === tabId) {
-        markBusy(busyState.loadingThreadId, true, tabId ?? undefined);
-      }
-    }
-
-    if (
-      threadId &&
-      busyByThreadId[threadId] &&
-      !effectiveIsLoading &&
-      isThreadStatusSettled(threadStatus)
-    ) {
-      markBusy(threadId, false);
-    }
-
-    previousBusyStateRef.current = busyState;
-  }, [
-    busyState,
-    markBusy,
-    busyOwnerByThreadId,
-    tabId,
-    threadId,
-    busyByThreadId,
-    effectiveIsLoading,
-    threadStatus,
-  ]);
-
-  useEffect(() => {
-    if (!stream.error) {
-      lastError.current = undefined;
-      return;
-    }
-    try {
-      const { name, message } = getStreamErrorDetails(stream.error);
-      const errorKey = `${threadId ?? "no-thread"}::${name ?? ""}::${message ?? ""}`;
-      if (lastError.current === errorKey) {
-        return;
-      }
-      lastError.current = errorKey;
-
-      const classification = classifyStreamError(stream.error, {
-        hasInterrupt: !!stream.interrupt,
-      });
-      const shouldShowRecoverableStatus =
-        shouldSurfaceRecoverableReconnectStatus(name, message);
-
-      if (classification === "benign_react_185") {
-        console.warn(
-          "React render instability surfaced through stream error; finalizing via backend polling",
-          message ?? name ?? stream.error,
-        );
-        createFinalizationIntent("react_185_stream_error");
-        return;
-      }
-
-      if (classification === "expected_interrupt_or_breakpoint") {
-        console.info("Ignoring expected interrupt/breakpoint stream error", {
-          name,
-          message,
-        });
-        return;
-      }
-
-      if (classification === "conflict") {
-        toast("Thread already has an active run", {
-          description:
-            "Your message was not sent. Please retry after the current run completes.",
-          closeButton: true,
-        });
-        return;
-      }
-
-      if (classification === "recoverable_disconnect") {
-        if (threadId) {
-          clearRecoverableIntentTimeout();
-          const targetThreadId = threadId;
-          recoverableIntentTimeoutRef.current = window.setTimeout(() => {
-            recoverableIntentTimeoutRef.current = null;
-            const latest = reconnectSignalRef.current;
-            const shouldCreateIntent =
-              latest.threadId === targetThreadId &&
-              latest.threadStatus === "busy" &&
-              !latest.isLoading &&
-              (!latest.isCurrentThreadBusyElsewhere ||
-                latest.isCurrentThreadOwnedByTab);
-            if (!shouldCreateIntent) return;
-            setReconnectIntent({
-              id: uuidv4(),
-              threadId: targetThreadId,
-              reason: "recoverable_disconnect",
-              createdAtMs: Date.now(),
-              showStatus: shouldShowRecoverableStatus,
-            });
-          }, RECOVERABLE_DISCONNECT_INTENT_GRACE_MS);
-        }
-        console.info("Recoverable disconnect detected; reconnecting stream", {
-          name,
-          message,
-          threadId,
-        });
-        return;
-      }
-
-      const detailMessage = message ?? name ?? "Unknown stream error";
-      toast.error("An error occurred. Please try again.", {
-        description: (
-          <p>
-            <strong>Error:</strong> <code>{detailMessage}</code>
-          </p>
-        ),
-        richColors: true,
-        closeButton: true,
-      });
-    } catch {
-      // no-op
-    }
-  }, [
-    clearRecoverableIntentTimeout,
-    createFinalizationIntent,
-    stream.error,
-    stream.interrupt,
-    threadId,
-  ]);
-
-  // TODO: this should be part of the useStream hook
-  const prevMessageLength = useRef(0);
-  useEffect(() => {
-    if (
-      messages.length !== prevMessageLength.current &&
-      messages?.length &&
-      messages[messages.length - 1].type === "ai"
-    ) {
-      setFirstTokenReceived(true);
-    }
-
-    if (threadId && messages.length !== prevMessageLength.current) {
-      markThreadSeen(threadId, Date.now());
-    }
-
-    prevMessageLength.current = messages.length;
-  }, [messages, threadId]);
-
-  useEffect(() => {
-    if (!threadId) return;
-    markThreadSeen(threadId, Date.now());
-  }, [threadId]);
-
   const shouldBlockWhileCurrentThreadBusy = useCallback(
-    async (source: "submit" | "regenerate"): Promise<boolean> => {
-      if (isCurrentThreadBusyElsewhere) {
+    (_source: "regenerate" | "submit") => {
+      if (effectiveIsLoading || isThreadActiveStatus(runtime.threadStatus)) {
         showThreadRunningToast();
         return true;
       }
-
-      if (effectiveIsLoading) {
-        showThreadRunningToast();
-        return true;
-      }
-
-      if (!threadId) return false;
-
-      try {
-        const currentThread = await stream.client.threads.get(threadId);
-        if (isThreadActiveStatus(currentThread.status)) {
-          showThreadRunningToast();
-          return true;
-        }
-      } catch (error) {
-        console.error(
-          `Failed to preflight thread status before ${source}`,
-          error,
-        );
-      }
-
       return false;
     },
-    [effectiveIsLoading, isCurrentThreadBusyElsewhere, stream.client, threadId],
+    [effectiveIsLoading, runtime.threadStatus],
   );
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
     if (input.trim().length === 0 && contentBlocks.length === 0) return;
-    if (await shouldBlockWhileCurrentThreadBusy("submit")) {
+    if (shouldBlockWhileCurrentThreadBusy("submit")) {
       return;
     }
-    setFinalizationIntent(null);
-    clearFinalSnapshot();
-    setRenderBoundaryResetCounter((previous) => previous + 1);
 
     const threadPreview = buildThreadPreview(input, contentBlocks.length);
-    setFirstTokenReceived(false);
-
     const attachmentLines = contentBlocks
-      .map((b, i) => {
+      .map((block, index) => {
         const name =
-          b.type === "image"
-            ? String(b.metadata?.name)
-            : String(b.metadata?.filename);
+          block.type === "image"
+            ? String(block.metadata?.name)
+            : String(block.metadata?.filename);
         const preferredUrl =
-          (b as any).url ||
-          (b.metadata as any)?.httpsUrl ||
-          (b.metadata as any)?.publicUrl ||
-          (b.metadata as any)?.gsUrl ||
-          (b.metadata as any)?.gcsUrl ||
+          (block as { url?: string }).url ||
+          (block.metadata as { httpsUrl?: string })?.httpsUrl ||
+          (block.metadata as { publicUrl?: string })?.publicUrl ||
+          (block.metadata as { gsUrl?: string })?.gsUrl ||
+          (block.metadata as { gcsUrl?: string })?.gcsUrl ||
           "";
         const url = String(preferredUrl);
-        return `${i + 1}. FILE_NAME="${name}", FILE_URL="${url}", MIME_TYPE="${b.mime_type}"`;
+        return `${index + 1}. FILE_NAME="${name}", FILE_URL="${url}", MIME_TYPE="${block.mime_type}"`;
       })
       .join("\n");
-
     const metadataText =
       attachmentLines.length > 0
         ? `ATTACHMENTS_INFO:\n${attachmentLines}`
         : undefined;
-
     const newHumanMessage: Message = {
       id: uuidv4(),
       type: "human",
@@ -1570,148 +807,101 @@ export function Thread() {
         ...(metadataText ? [{ type: "text", text: metadataText }] : []),
       ] as Message["content"],
     };
-
-    const toolMessages = ensureToolCallsHaveResponses(stream.messages);
-
+    const toolMessages = ensureToolCallsHaveResponses(runtime.messages);
     const context =
       Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
     const submitMetadata = !threadId
       ? { thread_preview: threadPreview }
       : undefined;
-
-    if (threadId) {
-      claimThreadOwnership(threadId);
-    } else {
-      pendingNewThreadOwnership.current.pending = true;
-      pendingNewThreadOwnership.current.startedAtMs = Date.now();
-    }
-
-    void stream.submit(
-      { messages: [...toolMessages, newHumanMessage], context },
-      {
-        config: {
-          recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
-        },
-        metadata: submitMetadata,
-        multitaskStrategy: "reject",
-        onDisconnect: "continue",
-        streamMode: ["values"],
-        streamSubgraphs: true,
-        streamResumable: true,
-        optimisticValues: (prev) => ({
-          ...prev,
-          context,
-          messages: [
-            ...(prev.messages ?? []),
-            ...toolMessages,
-            newHumanMessage,
-          ],
-        }),
-      },
-    );
-
+    const previousInput = input;
+    const previousContentBlocks = [...contentBlocks];
+    setPendingSubmittedMessage(newHumanMessage);
     setInput("");
     setContentBlocks([]);
+
+    try {
+      await runtime.submit(
+        { context, messages: [...toolMessages, newHumanMessage] },
+        {
+          config: {
+            recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+          },
+          context,
+          metadata: submitMetadata,
+          multitaskStrategy: "reject",
+          onDisconnect: "continue",
+          optimisticValues: (previous) => ({
+            ...previous,
+            context,
+            messages: [
+              ...(previous.messages ?? []),
+              ...toolMessages,
+              newHumanMessage,
+            ],
+          }),
+        },
+      );
+    } catch (error) {
+      setPendingSubmittedMessage(null);
+      setInput(previousInput);
+      setContentBlocks(previousContentBlocks);
+      if (isConflictLikeError(error)) {
+        showThreadRunningToast();
+        return;
+      }
+
+      toast.error("An error occurred. Please try again.", {
+        description: (
+          <p>
+            <strong>Error:</strong>{" "}
+            <code>
+              {String(
+                typeof error === "object" && error && "message" in error
+                  ? (error as { message?: unknown }).message ?? error
+                  : error,
+              )}
+            </code>
+          </p>
+        ),
+        richColors: true,
+        closeButton: true,
+      });
+    }
   };
 
   const handleRegenerate = useCallback(
     async (parentCheckpoint: Checkpoint | null | undefined) => {
-      if (await shouldBlockWhileCurrentThreadBusy("regenerate")) {
+      if (shouldBlockWhileCurrentThreadBusy("regenerate")) {
         return;
       }
-      setFinalizationIntent(null);
-      clearFinalSnapshot();
-      setRenderBoundaryResetCounter((previous) => previous + 1);
 
-      // Do this so the loading state is correct
-      prevMessageLength.current = prevMessageLength.current - 1;
-      setFirstTokenReceived(false);
-      if (threadId) {
-        claimThreadOwnership(threadId);
-      } else {
-        pendingNewThreadOwnership.current.pending = true;
-        pendingNewThreadOwnership.current.startedAtMs = Date.now();
+      try {
+        await runtime.submit(undefined, {
+          config: {
+            recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+          },
+          checkpoint: parentCheckpoint,
+          multitaskStrategy: "reject",
+          onDisconnect: "continue",
+        });
+      } catch (error) {
+        if (isConflictLikeError(error)) {
+          showThreadRunningToast();
+        }
       }
-      void stream.submit(undefined, {
-        config: {
-          recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
-        },
-        checkpoint: parentCheckpoint,
-        multitaskStrategy: "reject",
-        onDisconnect: "continue",
-        streamMode: ["values"],
-        streamSubgraphs: true,
-        streamResumable: true,
-      });
     },
-    [
-      claimThreadOwnership,
-      clearFinalSnapshot,
-      shouldBlockWhileCurrentThreadBusy,
-      stream,
-      threadId,
-    ],
+    [runtime, shouldBlockWhileCurrentThreadBusy],
   );
 
-  const handleCancel = async () => {
-    const activeThreadId = threadId;
-    const runIdForCancel = activeRunId ?? readRecoveryRunId(activeThreadId);
-
-    if (activeThreadId) {
-      expectedStreamStopRef.current = {
-        threadId: activeThreadId,
-        createdAtMs: Date.now(),
-      };
-    }
-
+  const handleCancel = useCallback(async () => {
     try {
-      await stream.stop();
-    } catch (error) {
-      console.error("Failed to stop active stream", error);
-    }
-
-    if (activeThreadId && runIdForCancel) {
-      try {
-        await stream.client.runs.cancel(activeThreadId, runIdForCancel);
-      } catch (error) {
-        console.warn("Best-effort backend cancel failed", error);
-      }
-    }
-
-    clearRecoverableIntentTimeout();
-    clearSilentStreamEndTimeout();
-    stopReconnect();
-    stopFallback();
-    setReconnectIntent(null);
-    setFinalizationIntent(null);
-    clearFinalSnapshot();
-    setRenderBoundaryResetCounter((previous) => previous + 1);
-    pendingNewThreadOwnership.current.pending = false;
-    pendingNewThreadOwnership.current.startedAtMs = 0;
-
-    if (activeThreadId) {
-      clearShadowRunId(activeThreadId);
-      markBusy(activeThreadId, false);
-      setBusyState((previous) => {
-        if (
-          previous.loadingThreadId !== activeThreadId &&
-          previous.ownedBusyThreadId !== activeThreadId
-        ) {
-          return previous;
-        }
-        return {
-          loadingThreadId:
-            previous.loadingThreadId === activeThreadId
-              ? null
-              : previous.loadingThreadId,
-          ownedBusyThreadId:
-            previous.ownedBusyThreadId === activeThreadId
-              ? null
-              : previous.ownedBusyThreadId,
-        };
+      await runtime.cancel();
+    } catch {
+      toast.error("Failed to cancel the active run.", {
+        closeButton: true,
       });
     }
-  };
+  }, [runtime]);
 
   const handleHistoryResizePointerDown = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
@@ -1719,8 +909,8 @@ export function Thread() {
       event.preventDefault();
       setPaneDragState({
         type: "history",
-        startX: event.clientX,
         startHistory: historyWidthPx,
+        startX: event.clientX,
       });
     },
     [historyWidthPx, isLargeScreen, showDesktopHistoryHandle],
@@ -1732,8 +922,8 @@ export function Thread() {
       event.preventDefault();
       setPaneDragState({
         type: "artifact",
-        startX: event.clientX,
         startArtifact: artifactWidthPx,
+        startX: event.clientX,
       });
     },
     [artifactWidthPx, isLargeScreen, showDesktopArtifactHandle],
@@ -1794,9 +984,9 @@ export function Thread() {
 
     if (!artifactExpanded) {
       preExpandLayoutRef.current = {
+        artifactWidth: artifactWidthPx,
         historyOpen: chatHistoryOpen,
         historyWidth: historyWidthPx,
-        artifactWidth: artifactWidthPx,
       };
       setPaneDragState({ type: "none" });
       setArtifactExpanded(true);
@@ -1819,37 +1009,44 @@ export function Thread() {
     setChatHistoryOpen,
   ]);
 
-  const handleMessageRenderCrash = useCallback(
-    (error: unknown) => {
-      if (!isReactRenderInstabilityError(error)) {
-        console.error("Thread render boundary caught a non-recoverable error", error);
-        return;
-      }
-
-      console.warn(
-        "React render instability detected in thread message subtree; finalizing via backend polling.",
-        error,
-      );
-      createFinalizationIntent("react_render_crash");
-    },
-    [createFinalizationIntent],
-  );
-
-  const uiMessageIdsByMessageId = useMemo(() => {
-    const ids = new Set<string>();
-    for (const uiMessage of stream.values.ui ?? []) {
-      const messageId = uiMessage.metadata?.message_id;
-      if (typeof messageId === "string" && messageId.length > 0) {
-        ids.add(messageId);
-      }
-    }
-    return ids;
-  }, [stream.values.ui]);
-
-  const chatStarted = !!threadId || !!messages.length;
+  const chatStarted = !!threadId || !!displayMessages.length;
   const hasNoAIOrToolMessages = !displayMessages.find(
-    (m) => m.type === "ai" || m.type === "tool",
+    (message) => message.type === "ai" || message.type === "tool",
   );
+  const visibleMessages = displayMessages.filter(
+    (message) =>
+      typeof message.id !== "string" ||
+      !message.id.startsWith(DO_NOT_RENDER_ID_PREFIX),
+  );
+  const messageRenderResetKey = `${threadId ?? "new"}:${visibleMessages
+    .map((message, index) => String(message.id ?? `${message.type}-${index}`))
+    .join("|")}`;
+  const messageRenderFallback = (
+    <div className="flex flex-col gap-3">
+      {visibleMessages.map((message, index) => {
+        const preview = getSafeMessagePreview(message);
+        return (
+          <div
+            key={String(message.id ?? `${message.type}-${index}`)}
+            className={cn(
+              "max-w-[min(100%,72ch)] rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap",
+              message.type === "human"
+                ? "bg-muted ml-auto"
+                : "bg-background mr-auto",
+            )}
+          >
+            {preview || `${message.type} message`}
+          </div>
+        );
+      })}
+      {visibleMessages.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          Unable to render message content for this thread.
+        </p>
+      ) : null}
+    </div>
+  );
+  const showWorkingBadge = effectiveIsLoading || isThreadActiveStatus(runtime.threadStatus);
   const logoVariant = resolvedTheme === "dark" ? "dark" : "light";
   const desktopHistoryWidth = showDesktopHistoryPane ? historyWidthPx : 0;
   const desktopMainGridTemplate = isLargeScreen
@@ -1863,7 +1060,6 @@ export function Thread() {
     "grid-cols-[1fr_0fr] transition-all duration-500",
     artifactPaneOpen && "grid-cols-[3fr_2fr]",
   );
-  const renderBoundaryResetKey = `${threadId ?? "no-thread"}:${renderBoundaryResetCounter}:${finalSnapshot?.snapshotKey ?? "no-snapshot"}`;
 
   return (
     <div
@@ -1876,8 +1072,8 @@ export function Thread() {
         data-testid="pane-history"
         className="relative hidden shrink-0 overflow-hidden border-r lg:flex"
         style={{
-          width: desktopHistoryWidth,
           transition: isPaneDragActive ? "none" : "width 200ms ease",
+          width: desktopHistoryWidth,
         }}
       >
         <div className="relative h-full w-full min-w-0">
@@ -1952,7 +1148,7 @@ export function Thread() {
                       data-testid="chat-history-toggle"
                       className="hover:bg-accent"
                       variant="ghost"
-                      onClick={() => setChatHistoryOpen((p) => !p)}
+                      onClick={() => setChatHistoryOpen((previous) => !previous)}
                     >
                       {chatHistoryOpen ? (
                         <PanelRightOpen className="size-5" />
@@ -1977,7 +1173,7 @@ export function Thread() {
                         data-testid="chat-history-toggle"
                         className="hover:bg-accent"
                         variant="ghost"
-                        onClick={() => setChatHistoryOpen((p) => !p)}
+                        onClick={() => setChatHistoryOpen((previous) => !previous)}
                       >
                         {chatHistoryOpen ? (
                           <PanelRightOpen className="size-5" />
@@ -1994,9 +1190,9 @@ export function Thread() {
                       marginLeft: !chatHistoryOpen ? 48 : 0,
                     }}
                     transition={{
-                      type: "spring",
-                      stiffness: 300,
                       damping: 30,
+                      stiffness: 300,
+                      type: "spring",
                     }}
                   >
                     <QuestionCrafterLogoSVG
@@ -2030,66 +1226,52 @@ export function Thread() {
                 )}
                 contentClassName="pt-8 pb-16 max-w-3xl min-w-0 mx-auto flex w-full flex-col gap-4"
                 content={
-                  <ThreadRenderBoundary
-                    fallback={
-                      <ThreadRenderFallback
-                        statusText={
-                          finalizationStatusText ?? "Finalizing latest response..."
-                        }
-                      />
-                    }
-                    onError={handleMessageRenderCrash}
-                    resetKey={renderBoundaryResetKey}
+                  <MessageRenderBoundary
+                    resetKey={messageRenderResetKey}
+                    fallback={messageRenderFallback}
                   >
                     <>
-                      {displayMessages
-                        .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                        .map((message, index) =>
-                          message.type === "human" ? (
-                            <HumanMessage
-                              key={message.id || `${message.type}-${index}`}
-                              message={message}
-                              isLoading={effectiveIsLoading}
-                            />
-                          ) : (
-                            <AssistantMessage
-                              key={message.id || `${message.type}-${index}`}
-                              message={message}
-                              allMessages={displayMessages}
-                              isLoading={effectiveIsLoading}
-                              isReconnecting={isReconnecting}
-                              isFinalizing={isFinalizationFallbackActive}
-                              handleRegenerate={handleRegenerate}
-                              interrupt={stream.interrupt}
-                              getMessagesMetadata={stream.getMessagesMetadata}
-                              onSelectBranch={stream.setBranch}
-                              hasCustomComponentsForMessage={
-                                !!message.id &&
-                                uiMessageIdsByMessageId.has(message.id)
-                              }
-                            />
-                          ),
-                        )}
-                      {hasNoAIOrToolMessages && !!stream.interrupt && (
+                      {visibleMessages.map((message, index) =>
+                        message.type === "human" ? (
+                          <HumanMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            isLoading={effectiveIsLoading}
+                          />
+                        ) : (
+                          <AssistantMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            allMessages={displayMessages}
+                            isLoading={effectiveIsLoading}
+                            handleRegenerate={handleRegenerate}
+                            interrupt={runtime.interrupt}
+                            getMessagesMetadata={runtime.getMessagesMetadata}
+                            onSelectBranch={runtime.setBranch}
+                            hasCustomComponentsForMessage={
+                              !!message.id && uiMessageIdsByMessageId.has(message.id)
+                            }
+                          />
+                        ),
+                      )}
+                      {hasNoAIOrToolMessages && !!runtime.interrupt && (
                         <AssistantMessage
                           key="interrupt-msg"
                           message={undefined}
                           allMessages={displayMessages}
                           isLoading={effectiveIsLoading}
-                          isReconnecting={isReconnecting}
-                          isFinalizing={isFinalizationFallbackActive}
                           handleRegenerate={handleRegenerate}
-                          interrupt={stream.interrupt}
-                          getMessagesMetadata={stream.getMessagesMetadata}
-                          onSelectBranch={stream.setBranch}
+                          interrupt={runtime.interrupt}
+                          getMessagesMetadata={runtime.getMessagesMetadata}
+                          onSelectBranch={runtime.setBranch}
                           hasCustomComponentsForMessage={false}
                         />
                       )}
-                      {effectiveIsLoading && !firstTokenReceived && (
+                      {showWorkingBadge && hasNoAIOrToolMessages ? (
                         <AssistantMessageLoading />
-                      )}
+                      ) : null}
                     </>
-                  </ThreadRenderBoundary>
+                  </MessageRenderBoundary>
                 }
                 footer={
                   <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 flex flex-col items-center gap-8 backdrop-blur">
@@ -2107,43 +1289,15 @@ export function Thread() {
 
                     <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
 
-                    {shouldShowRunningQueryMessage ? (
+                    {showWorkingBadge ? (
                       <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
                         <p
-                          className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
-                          aria-live="polite"
-                        >
-                          Working on your query
-                          <span
-                            className="ml-1 inline-block w-4 text-left"
-                            aria-hidden="true"
-                          >
-                            {".".repeat(runningDotsCount)}
-                          </span>
-                        </p>
-                      </div>
-                    ) : null}
-                    {isReconnecting && showReconnectStatus ? (
-                      <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
-                        <p
-                          data-testid="stream-reconnect-status"
+                          data-testid="thread-working-status"
                           className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
                           aria-live="polite"
                         >
                           <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
-                          {reconnectStatusText ?? "Reconnecting stream..."}
-                        </p>
-                      </div>
-                    ) : null}
-                    {isFinalizationFallbackActive ? (
-                      <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
-                        <p
-                          data-testid="stream-finalization-status"
-                          className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
-                          aria-live="polite"
-                        >
-                          <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
-                          {finalizationStatusText ?? "Finalizing latest response..."}
+                          Working on your query...
                         </p>
                       </div>
                     ) : null}
@@ -2182,18 +1336,19 @@ export function Thread() {
                           />
                           <textarea
                             value={input}
-                            onChange={(e) => setInput(e.target.value)}
+                            onChange={(event) => setInput(event.target.value)}
                             onPaste={handlePaste}
-                            onKeyDown={(e) => {
+                            onKeyDown={(event) => {
                               if (
-                                e.key === "Enter" &&
-                                !e.nativeEvent.isComposing &&
-                                ((!e.shiftKey && enterToSend) ||
-                                  ((e.metaKey || e.ctrlKey) && !enterToSend))
+                                event.key === "Enter" &&
+                                !event.nativeEvent.isComposing &&
+                                ((!event.shiftKey && enterToSend) ||
+                                  ((event.metaKey || event.ctrlKey) &&
+                                    !enterToSend))
                               ) {
-                                e.preventDefault();
-                                const el = e.target as HTMLElement | undefined;
-                                const form = el?.closest("form");
+                                event.preventDefault();
+                                const element = event.target as HTMLElement | undefined;
+                                const form = element?.closest("form");
                                 form?.requestSubmit();
                               }
                             }}
@@ -2231,7 +1386,7 @@ export function Thread() {
                             className="hidden"
                             disabled={isUploading}
                           />
-                          {effectiveIsLoading ? (
+                          {showWorkingBadge ? (
                             <Button
                               type="button"
                               key="stop"
@@ -2246,8 +1401,7 @@ export function Thread() {
                               type="submit"
                               className="ml-auto shadow-md transition-all"
                               disabled={
-                                effectiveIsLoading ||
-                                isCurrentThreadBusyElsewhere ||
+                                showWorkingBadge ||
                                 isUploading ||
                                 (!input.trim() && contentBlocks.length === 0)
                               }

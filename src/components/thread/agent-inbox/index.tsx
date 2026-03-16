@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Interrupt } from "@langchain/langgraph-sdk";
 import { cn } from "@/lib/utils";
-import { useStreamContext } from "@/providers/Stream";
+import { useThreadRuntime } from "@/providers/Stream";
 import { HITLRequest } from "./types";
 import { StateView } from "./components/state-view";
 import { ThreadActionsView } from "./components/thread-actions-view";
@@ -11,7 +11,7 @@ interface ThreadViewProps {
 }
 
 export function ThreadView({ interrupt }: ThreadViewProps) {
-  const thread = useStreamContext();
+  const thread = useThreadRuntime();
   const interrupts = useMemo(
     () =>
       (Array.isArray(interrupt) ? interrupt : [interrupt]).filter(

@@ -9,7 +9,8 @@ import { toast } from "sonner";
 import { useQueryState } from "nuqs";
 import { constructOpenInStudioURL, buildDecisionFromState } from "../utils";
 import { Decision, HITLRequest, DecisionType, ActionRequest } from "../types";
-import { useStreamContext } from "@/providers/Stream";
+import { useThreadRuntime } from "@/providers/Stream";
+import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
 
 interface ThreadActionsViewProps {
   interrupt: Interrupt<HITLRequest>;
@@ -90,7 +91,7 @@ export function ThreadActionsView({
   showDescription,
   showState,
 }: ThreadActionsViewProps) {
-  const stream = useStreamContext();
+  const runtime = useThreadRuntime();
   const [threadId] = useQueryState("threadId");
   const [apiUrl] = useQueryState("apiUrl");
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -134,9 +135,9 @@ export function ThreadActionsView({
     approveAllowed,
     hasEdited,
     hasAddedResponse,
-    streaming,
+    submitting,
     supportsMultipleMethods,
-    streamFinished,
+    submissionCompleted,
     loading,
     handleSubmit,
     handleResolve,
@@ -179,10 +180,14 @@ export function ThreadActionsView({
         type: "approve",
       }));
 
-      stream.submit(
+      runtime.submit(
         {},
         {
+          config: {
+            recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+          },
           multitaskStrategy: "reject",
+          onDisconnect: "continue",
           command: {
             resume: { decisions: allDecisions },
           },
@@ -202,7 +207,7 @@ export function ThreadActionsView({
         duration: 5000,
       });
     }
-  }, [actionRequests, hasMultipleActions, stream]);
+  }, [actionRequests, hasMultipleActions, runtime]);
 
   const handleSubmitAll = useCallback(() => {
     if (!hasMultipleActions) return;
@@ -227,10 +232,14 @@ export function ThreadActionsView({
         return decision;
       });
 
-      stream.submit(
+      runtime.submit(
         {},
         {
+          config: {
+            recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+          },
           multitaskStrategy: "reject",
+          onDisconnect: "continue",
           command: {
             resume: { decisions: allDecisions },
           },
@@ -253,7 +262,7 @@ export function ThreadActionsView({
     } finally {
       setSubmittingAll(false);
     }
-  }, [actionRequests, addressedActions, hasMultipleActions, stream]);
+  }, [actionRequests, addressedActions, hasMultipleActions, runtime]);
 
   const allAllowApprove = useMemo(() => {
     if (!hasMultipleActions) return false;
@@ -298,7 +307,7 @@ export function ThreadActionsView({
   };
 
   const currentTitle = getActionTitle(currentAction);
-  const actionsDisabled = loading || streaming || submittingAll;
+  const actionsDisabled = loading || submitting || submittingAll;
   const hasAllDecisions =
     hasMultipleActions && addressedActions.size === actionRequests.length;
 
@@ -445,7 +454,7 @@ export function ThreadActionsView({
         </div>
       )}
 
-      {!hasMultipleActions && streamFinished && (
+      {!hasMultipleActions && submissionCompleted && (
         <p className="text-base font-medium text-green-600">
           Successfully finished Graph invocation.
         </p>

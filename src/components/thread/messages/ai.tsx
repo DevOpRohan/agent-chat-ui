@@ -1,5 +1,5 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
-import { useStreamContext } from "@/providers/Stream";
+import { useThreadRuntime } from "@/providers/Stream";
 import {
   AIMessage,
   Checkpoint,
@@ -246,50 +246,13 @@ function ThinkingPanel({ text }: { text: string }) {
 
 function getIntermediateRunningStatus(
   parts: IntermediateContentPart[],
-  isStreaming: boolean,
-  isReconnecting: boolean,
-  isFinalizing: boolean,
+  isWorking: boolean,
 ): string | null {
-  if (parts.length === 0) {
+  if (parts.length === 0 || !isWorking) {
     return null;
   }
 
-  if (isFinalizing) {
-    return "finalizing...";
-  }
-
-  if (isReconnecting) {
-    return "reconnecting...";
-  }
-
-  if (!isStreaming) {
-    return null;
-  }
-
-  for (let idx = parts.length - 1; idx >= 0; idx -= 1) {
-    const part = parts[idx];
-    if (part.kind === "tool_calls") {
-      const toolNames = part.toolCalls
-        .map((toolCall) => toolCall.name?.trim())
-        .filter((name): name is string => !!name);
-
-      if (toolNames.length === 1) {
-        return `calling ${toolNames[0]}...`;
-      }
-
-      if (toolNames.length > 1) {
-        return `calling ${toolNames.length} tools...`;
-      }
-
-      return "calling tool...";
-    }
-
-    if (part.kind === "reasoning") {
-      return "thinking...";
-    }
-  }
-
-  return "thinking...";
+  return "working...";
 }
 
 function IntermediateStepContent({
@@ -338,18 +301,14 @@ function IntermediateStepContent({
 
 function IntermediateStepsArtifactTrigger({
   parts,
-  isStreaming,
-  isReconnecting = false,
-  isFinalizing = false,
+  isWorking,
   isLoading,
   showActions,
   actionContent,
   handleRegenerate,
 }: {
   parts: IntermediateContentPart[];
-  isStreaming: boolean;
-  isReconnecting?: boolean;
-  isFinalizing?: boolean;
+  isWorking: boolean;
   isLoading: boolean;
   showActions?: boolean;
   actionContent?: string;
@@ -359,12 +318,7 @@ function IntermediateStepsArtifactTrigger({
   const deferredArtifactParts = useDeferredValue(parts);
   if (parts.length === 0) return null;
 
-  const runningStatus = getIntermediateRunningStatus(
-    parts,
-    isStreaming,
-    isReconnecting,
-    isFinalizing,
-  );
+  const runningStatus = getIntermediateRunningStatus(parts, isWorking);
   const statusLabel = runningStatus ?? "open details";
 
   return (
@@ -643,33 +597,9 @@ function getIntermediateCopyText(parts: IntermediateContentPart[]): string {
   return chunks.join("\n\n");
 }
 
-function hasNonEmptyReasoningPart(part: IntermediateContentPart): boolean {
-  return part.kind === "reasoning" && part.text.trim().length > 0;
-}
-
-function mergeStreamingIntermediateParts(
-  currentParts: IntermediateContentPart[],
-  previousParts: IntermediateContentPart[],
-): IntermediateContentPart[] {
-  if (currentParts.length === 0) {
-    return previousParts;
-  }
-
-  if (currentParts.some(hasNonEmptyReasoningPart)) {
-    return currentParts;
-  }
-
-  const previousReasoningParts = previousParts.filter(hasNonEmptyReasoningPart);
-  if (previousReasoningParts.length === 0) {
-    return currentParts;
-  }
-
-  return [...previousReasoningParts, ...currentParts];
-}
-
 function CustomComponent({ message }: { message: Message }) {
   const artifact = useArtifact();
-  const thread = useStreamContext();
+  const thread = useThreadRuntime();
   const uiMessages = thread.values.ui ?? [];
   const directMatches = uiMessages.filter(
     (ui) => ui.metadata?.message_id === message.id,
@@ -720,7 +650,7 @@ function CustomComponent({ message }: { message: Message }) {
       {customComponents.map((customComponent) => (
         <LoadExternalComponent
           key={customComponent.id}
-          stream={thread}
+          stream={thread as any}
           message={customComponent}
           meta={{ ui: customComponent, artifact }}
           components={LOCAL_UI_COMPONENTS}
@@ -878,7 +808,9 @@ function messageHasRenderableText(message: Message | undefined): boolean {
 
 function getRenderableMessages(messages: Message[]): Message[] {
   return messages.filter(
-    (message) => !message.id?.startsWith(DO_NOT_RENDER_ID_PREFIX),
+    (message) =>
+      typeof message.id !== "string" ||
+      !message.id.startsWith(DO_NOT_RENDER_ID_PREFIX),
   );
 }
 
@@ -986,18 +918,16 @@ function Interrupt({
   );
 }
 
-type StreamContextType = ReturnType<typeof useStreamContext>;
+type ThreadRuntimeType = ReturnType<typeof useThreadRuntime>;
 
 type AssistantMessageProps = {
   message: Message | undefined;
   allMessages: Message[];
   isLoading: boolean;
-  isReconnecting?: boolean;
-  isFinalizing?: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
-  interrupt: StreamContextType["interrupt"];
-  getMessagesMetadata: StreamContextType["getMessagesMetadata"];
-  onSelectBranch: StreamContextType["setBranch"];
+  interrupt: ThreadRuntimeType["interrupt"];
+  getMessagesMetadata: ThreadRuntimeType["getMessagesMetadata"];
+  onSelectBranch: ThreadRuntimeType["setBranch"];
   hasCustomComponentsForMessage: boolean;
 };
 
@@ -1116,8 +1046,6 @@ function areAssistantMessagePropsEqual(
     return false;
   }
   if (previous.isLoading !== next.isLoading) return false;
-  if (previous.isReconnecting !== next.isReconnecting) return false;
-  if (previous.isFinalizing !== next.isFinalizing) return false;
   if (previous.interrupt !== next.interrupt) return false;
   if (previous.handleRegenerate !== next.handleRegenerate) return false;
   if (previous.getMessagesMetadata !== next.getMessagesMetadata) return false;
@@ -1148,8 +1076,6 @@ export const AssistantMessage = memo(function AssistantMessage({
   message,
   allMessages,
   isLoading,
-  isReconnecting = false,
-  isFinalizing = false,
   handleRegenerate,
   interrupt,
   getMessagesMetadata,
@@ -1171,7 +1097,6 @@ export const AssistantMessage = memo(function AssistantMessage({
   const meta = message ? getMessagesMetadata(message) : undefined;
   const threadInterrupt = interrupt;
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
-  const intermediatePartsCacheRef = useRef<IntermediateContentPart[]>([]);
 
   const content = message?.content ?? [];
   const contentString = getContentString(content);
@@ -1247,38 +1172,24 @@ export const AssistantMessage = memo(function AssistantMessage({
     message.id === firstGroupMessageWithIntermediateId;
   const isCurrentGroupAtThreadTail =
     groupEndIndex >= 0 && groupEndIndex === renderedMessages.length - 1;
-  const shouldStabilizeIntermediateParts =
-    isCurrentGroupAtThreadTail && (isLoading || isReconnecting);
-  const stableGroupedIntermediateParts = shouldStabilizeIntermediateParts
-    ? mergeStreamingIntermediateParts(
-        groupedIntermediateParts,
-        intermediatePartsCacheRef.current,
-      )
-    : groupedIntermediateParts;
-  intermediatePartsCacheRef.current =
-    stableGroupedIntermediateParts.length > 0
-      ? stableGroupedIntermediateParts
-      : [];
   const groupHasRenderableText = groupedMessages.some((groupMessage) =>
     messageHasRenderableText(groupMessage),
   );
-  const isGroupStreaming =
-    (isLoading || isReconnecting) &&
+  const isGroupWorking =
+    isLoading &&
     isCurrentGroupAtThreadTail &&
-    stableGroupedIntermediateParts.length > 0 &&
+    groupedIntermediateParts.length > 0 &&
     !groupHasRenderableText;
   const shouldRenderInlineActionsForIntermediate =
     shouldRenderGroupIntermediateTrigger &&
     isCurrentGroupAtThreadTail &&
     !groupHasRenderableText &&
-    stableGroupedIntermediateParts.length > 0;
+    groupedIntermediateParts.length > 0;
   const groupedIntermediateCopyContent = getIntermediateCopyText(
-    stableGroupedIntermediateParts,
+    groupedIntermediateParts,
   );
   const shouldRenderInterrupt =
     !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
-  const shouldUseFastStreamingMarkdown =
-    message?.type === "ai" && isLoading && isLastMessage;
   const shouldHideGroupedPlaceholderMessage =
     !!message &&
     isAiOrToolMessage(message) &&
@@ -1297,10 +1208,8 @@ export const AssistantMessage = memo(function AssistantMessage({
       <div className="flex w-full flex-col gap-2">
         {shouldRenderGroupIntermediateTrigger ? (
           <IntermediateStepsArtifactTrigger
-            parts={stableGroupedIntermediateParts}
-            isStreaming={isGroupStreaming}
-            isReconnecting={isReconnecting}
-            isFinalizing={isFinalizing}
+            parts={groupedIntermediateParts}
+            isWorking={isGroupWorking}
             isLoading={isLoading}
             showActions={shouldRenderInlineActionsForIntermediate}
             actionContent={groupedIntermediateCopyContent}
@@ -1315,9 +1224,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                 key={segment.key}
                 className="py-1"
               >
-                <MarkdownText streaming={shouldUseFastStreamingMarkdown}>
-                  {segment.text}
-                </MarkdownText>
+                <MarkdownText>{segment.text}</MarkdownText>
               </div>
             ))}
 

@@ -31,7 +31,6 @@ import {
 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useThreadLastSeen } from "@/hooks/use-thread-last-seen";
-import { useThreadBusy } from "@/hooks/use-thread-busy";
 import {
   getThreadLabelFromMetadata,
   toMetadataRecord,
@@ -145,7 +144,6 @@ function ThreadList({
   setThreadId,
   lastSeenByThreadId,
   baselineMs,
-  busyByThreadId,
   seenAttentionStatusByThreadId,
   markSeen,
   markAttentionStatusSeen,
@@ -166,7 +164,6 @@ function ThreadList({
   setThreadId: (value: string | null) => void;
   lastSeenByThreadId: Record<string, number>;
   baselineMs: number;
-  busyByThreadId: Record<string, boolean>;
   seenAttentionStatusByThreadId: Record<string, string>;
   markSeen: (threadId: string, updatedAtMs?: number) => void;
   markAttentionStatusSeen: (threadId: string, statusKey: string | null) => void;
@@ -203,8 +200,7 @@ function ThreadList({
         const itemText = getThreadListLabel(t);
         const updatedAtMs = getThreadUpdatedAtMs(t);
         const lastSeenMs = lastSeenByThreadId[t.thread_id] ?? baselineMs;
-        const isBusy =
-          busyByThreadId[t.thread_id] || isThreadActiveStatus(t.status);
+        const isBusy = isThreadActiveStatus(t.status);
         const isActive = t.thread_id === currentThreadId;
         const attentionStatusKey =
           !isBusy && !isActive ? getThreadAttentionStatusKey(t.status) : null;
@@ -395,7 +391,6 @@ export default function ThreadHistory() {
     setThreadsLoading,
   } = useThreads();
   const { lastSeenByThreadId, baselineMs, markSeen } = useThreadLastSeen();
-  const { busyByThreadId, markBusy } = useThreadBusy();
   const historyDisabled = !THREAD_HISTORY_ENABLED;
   const [isPageVisible, setIsPageVisible] = useState(() =>
     typeof document === "undefined" ? true : !document.hidden,
@@ -580,19 +575,13 @@ export default function ThreadHistory() {
   }, [historyDisabled, refreshThreads, threadsHasMore, threadsLoading]);
 
   const hasBusyThread = useMemo(
-    () =>
-      threads.some(
-        (thread) =>
-          busyByThreadId[thread.thread_id] ||
-          isThreadActiveStatus(thread.status),
-      ),
-    [threads, busyByThreadId],
+    () => threads.some((thread) => isThreadActiveStatus(thread.status)),
+    [threads],
   );
 
   const hasUnseenThread = useMemo(() => {
     return threads.some((thread) => {
-      const isBusy =
-        busyByThreadId[thread.thread_id] || isThreadActiveStatus(thread.status);
+      const isBusy = isThreadActiveStatus(thread.status);
       if (isBusy) return false;
       if (thread.thread_id === currentThreadId) return false;
       const attentionStatusKey = getThreadAttentionStatusKey(thread.status);
@@ -612,20 +601,8 @@ export default function ThreadHistory() {
     currentThreadId,
     lastSeenByThreadId,
     baselineMs,
-    busyByThreadId,
     seenAttentionStatusByThreadId,
   ]);
-
-  useEffect(() => {
-    for (const thread of threads) {
-      if (
-        !isThreadActiveStatus(thread.status) &&
-        busyByThreadId[thread.thread_id]
-      ) {
-        markBusy(thread.thread_id, false);
-      }
-    }
-  }, [threads, busyByThreadId, markBusy]);
 
   const pollIntervalMs = useMemo(
     () =>
@@ -765,7 +742,6 @@ export default function ThreadHistory() {
             setThreadId={setThreadId}
             lastSeenByThreadId={lastSeenByThreadId}
             baselineMs={baselineMs}
-            busyByThreadId={busyByThreadId}
             seenAttentionStatusByThreadId={seenAttentionStatusByThreadId}
             markSeen={markSeen}
             markAttentionStatusSeen={markAttentionStatusSeen}
@@ -819,7 +795,6 @@ export default function ThreadHistory() {
                 setThreadId={setThreadId}
                 lastSeenByThreadId={lastSeenByThreadId}
                 baselineMs={baselineMs}
-                busyByThreadId={busyByThreadId}
                 seenAttentionStatusByThreadId={seenAttentionStatusByThreadId}
                 markSeen={markSeen}
                 markAttentionStatusSeen={markAttentionStatusSeen}
