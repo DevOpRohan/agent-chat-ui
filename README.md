@@ -79,6 +79,12 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > This fork is poll-first. When a thread is active, the UI polls LangGraph for thread state and run status, resumes polling after refresh/remount/transient failures, and renders the latest backend snapshot once it lands. There is no client-side token stream join/rejoin path anymore.
 
 > [!NOTE]
+> Submit UX is client-first: pressing `Enter` clears the composer immediately, shows the outgoing human message locally right away, flips the matching history row to `busy` without waiting for the next history poll, and then hydrates assistant output from backend polling.
+
+> [!NOTE]
+> Selected-thread polling cadence is `1500ms` while the backend thread is `busy`, `10000ms` when settled, with retry backoff at `3000ms`, `5000ms`, then `10000ms` after poll failures. History polling stays lighter: `5000ms` when there are active/unseen threads and `15000ms` otherwise.
+
+> [!NOTE]
 > The chat now includes a light/dark mode toggle in the top-right of the UI (and on the setup screen). Theme preference is persisted via `next-themes`.
 
 ## Environment Variables
