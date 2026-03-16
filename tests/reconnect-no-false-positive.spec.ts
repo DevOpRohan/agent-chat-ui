@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
+import {
+  openFreshThread,
+  prepareFreshChatPage,
+} from "./helpers/chat-thread";
 
 const SHORT_PROMPT_ITERATIONS = 10;
 const LONG_PROMPT_ITERATIONS = 3;
@@ -10,53 +13,9 @@ const SHORT_PROMPT =
 const LONG_PROMPT =
   "Research current market trends, shares, and trading scenarios, then provide beginner-friendly suggestions in clear numbered sections with practical caution notes.";
 
-async function readThreadId(page: Page): Promise<string | null> {
-  return new URL(page.url()).searchParams.get("threadId");
-}
-
-async function clearStaleClientState(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const localKeys = Object.keys(window.localStorage);
-    for (const key of localKeys) {
-      if (key.startsWith("lg:thread:")) {
-        window.localStorage.removeItem(key);
-      }
-    }
-
-    const sessionKeys = Object.keys(window.sessionStorage);
-    for (const key of sessionKeys) {
-      if (key.startsWith("lg:thread:") || key.startsWith("lg:stream:")) {
-        window.sessionStorage.removeItem(key);
-      }
-    }
-  });
-}
-
-async function openFreshThread(page: Page): Promise<void> {
-  const newButton = page.getByRole("button", { name: /^New$/ }).first();
-  await expect(newButton).toBeVisible({ timeout: 60_000 });
-  await newButton.click();
-
-  await expect
-    .poll(() => readThreadId(page), {
-      timeout: 15_000,
-      message: "Expected threadId to be cleared for a fresh test thread",
-    })
-    .toBeNull();
-}
-
 async function prepareFreshPage(page: Page): Promise<void> {
-  const gate = await gotoAndDetectChatEnvironment(
-    page,
-    "/?chatHistoryOpen=true",
-  );
+  const gate = await prepareFreshChatPage(page);
   test.skip(!gate.ok, gate.reason);
-  await clearStaleClientState(page);
-  await page.reload();
-  await openFreshThread(page);
-  await expect(page.getByPlaceholder("Type your message...")).toBeVisible({
-    timeout: 60_000,
-  });
 }
 
 async function runHealthyPromptAndAssertNoReconnect(

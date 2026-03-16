@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { waitForThreadId } from "./helpers/chat-thread";
 import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
 
 function longPrompt(tag: string) {
@@ -10,15 +11,6 @@ async function sendMessage(page: Page, prompt: string) {
   await expect(input).toBeVisible({ timeout: 60_000 });
   await input.fill(prompt);
   await page.getByRole("button", { name: "Send" }).click();
-}
-
-async function waitForThreadId(page: Page) {
-  await expect
-    .poll(() => new URL(page.url()).searchParams.get("threadId"), {
-      timeout: 30_000,
-      message: "Expected threadId in URL",
-    })
-    .not.toBeNull();
 }
 
 test.describe("QA: Thread history run indicators", () => {

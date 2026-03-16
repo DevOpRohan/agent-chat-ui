@@ -1,8 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
-
-const STREAM_ROUTE_PATTERN =
-  /\/threads\/[^/]+\/runs(?:\/[^/]+)?\/stream(?:\?|$)/;
+import {
+  prepareFreshChatPage,
+  readAssistantTextLength,
+  readThreadId,
+  RUN_STREAM_ROUTE_PATTERN,
+  waitForThreadId,
+} from "./helpers/chat-thread";
 
 function longPrompt(tag: string): string {
   return [
@@ -12,68 +15,6 @@ function longPrompt(tag: string): string {
     "Each section must include 8 detailed bullet points and examples.",
     "Do not summarize or shorten.",
   ].join(" ");
-}
-
-async function readThreadId(page: Page): Promise<string | null> {
-  return new URL(page.url()).searchParams.get("threadId");
-}
-
-async function waitForThreadId(
-  page: Page,
-  timeoutMs = 30_000,
-): Promise<string> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const threadId = await readThreadId(page);
-    if (threadId) return threadId;
-    await page.waitForTimeout(250);
-  }
-  throw new Error("Expected new threadId after submit");
-}
-
-async function readAssistantTextLength(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const assistantGroups = Array.from(
-      document.querySelectorAll("div.group.mr-auto"),
-    );
-    const lastAssistant = assistantGroups.at(-1) as HTMLElement | undefined;
-    if (!lastAssistant) return 0;
-    const segments = Array.from(lastAssistant.querySelectorAll("div.py-1")).map(
-      (node) => node.textContent ?? "",
-    );
-    return segments.join("\n").length;
-  });
-}
-
-async function clearStaleClientState(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const localKeys = Object.keys(window.localStorage);
-    for (const key of localKeys) {
-      if (key.startsWith("lg:thread:")) {
-        window.localStorage.removeItem(key);
-      }
-    }
-
-    const sessionKeys = Object.keys(window.sessionStorage);
-    for (const key of sessionKeys) {
-      if (key.startsWith("lg:thread:") || key.startsWith("lg:stream:")) {
-        window.sessionStorage.removeItem(key);
-      }
-    }
-  });
-}
-
-async function openFreshThread(page: Page): Promise<void> {
-  const newButton = page.getByRole("button", { name: /^New$/ }).first();
-  await expect(newButton).toBeVisible({ timeout: 60_000 });
-  await newButton.click();
-
-  await expect
-    .poll(() => readThreadId(page), {
-      timeout: 15_000,
-      message: "Expected threadId to be cleared for a fresh test thread",
-    })
-    .toBeNull();
 }
 
 async function installSilentStreamClose(page: Page): Promise<void> {
@@ -133,21 +74,12 @@ async function installSilentStreamClose(page: Page): Promise<void> {
         headers: new Headers(response.headers),
       });
     };
-  }, STREAM_ROUTE_PATTERN.source);
+  }, RUN_STREAM_ROUTE_PATTERN.source);
 }
 
 async function prepareFreshPage(page: Page): Promise<void> {
-  const gate = await gotoAndDetectChatEnvironment(
-    page,
-    "/?chatHistoryOpen=true",
-  );
+  const gate = await prepareFreshChatPage(page);
   test.skip(!gate.ok, gate.reason);
-  await clearStaleClientState(page);
-  await page.reload();
-  await openFreshThread(page);
-  await expect(page.getByPlaceholder("Type your message...")).toBeVisible({
-    timeout: 60_000,
-  });
 }
 
 test("recovers when the initial stream closes cleanly without surfacing a fetch error", async ({

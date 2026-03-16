@@ -1,8 +1,12 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
-
-const STREAM_ROUTE_PATTERN =
-  /\/threads\/[^/]+\/runs(?:\/[^/]+)?\/stream(?:\?|$)/;
+import {
+  openFreshThread,
+  prepareFreshChatPage,
+  readAssistantTextLength,
+  readThreadId,
+  RUN_STREAM_ROUTE_PATTERN,
+  waitForThreadId,
+} from "./helpers/chat-thread";
 
 function longPrompt(tag: string): string {
   return [
@@ -23,80 +27,9 @@ function toolHeavyPrompt(tag: string): string {
   ].join(" ");
 }
 
-async function readThreadId(page: Page): Promise<string | null> {
-  return new URL(page.url()).searchParams.get("threadId");
-}
-
-async function waitForThreadId(
-  page: Page,
-  timeoutMs = 30_000,
-): Promise<string> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const threadId = await readThreadId(page);
-    if (threadId) return threadId;
-    await page.waitForTimeout(250);
-  }
-  throw new Error("Expected new threadId after submit");
-}
-
-async function readAssistantTextLength(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const assistantGroups = Array.from(
-      document.querySelectorAll("div.group.mr-auto"),
-    );
-    const lastAssistant = assistantGroups.at(-1) as HTMLElement | undefined;
-    if (!lastAssistant) return 0;
-    const segments = Array.from(lastAssistant.querySelectorAll("div.py-1")).map(
-      (node) => node.textContent ?? "",
-    );
-    return segments.join("\n").length;
-  });
-}
-
-async function clearStaleClientState(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const localKeys = Object.keys(window.localStorage);
-    for (const key of localKeys) {
-      if (key.startsWith("lg:thread:")) {
-        window.localStorage.removeItem(key);
-      }
-    }
-
-    const sessionKeys = Object.keys(window.sessionStorage);
-    for (const key of sessionKeys) {
-      if (key.startsWith("lg:thread:") || key.startsWith("lg:stream:")) {
-        window.sessionStorage.removeItem(key);
-      }
-    }
-  });
-}
-
-async function openFreshThread(page: Page): Promise<void> {
-  const newButton = page.getByRole("button", { name: /^New$/ }).first();
-  await expect(newButton).toBeVisible({ timeout: 60_000 });
-  await newButton.click();
-
-  await expect
-    .poll(() => readThreadId(page), {
-      timeout: 15_000,
-      message: "Expected threadId to be cleared for a fresh test thread",
-    })
-    .toBeNull();
-}
-
 async function prepareFreshPage(page: Page): Promise<void> {
-  const gate = await gotoAndDetectChatEnvironment(
-    page,
-    "/?chatHistoryOpen=true",
-  );
+  const gate = await prepareFreshChatPage(page);
   test.skip(!gate.ok, gate.reason);
-  await clearStaleClientState(page);
-  await page.reload();
-  await openFreshThread(page);
-  await expect(page.getByPlaceholder("Type your message...")).toBeVisible({
-    timeout: 60_000,
-  });
 }
 
 type StartRunOptions = {
@@ -255,13 +188,13 @@ test.describe("Auto reconnect UX after disconnect", () => {
     await startLongRun(page);
     const beforeDisconnectLength = await readAssistantTextLength(page);
 
-    await context.route(STREAM_ROUTE_PATTERN, (route) =>
+    await context.route(RUN_STREAM_ROUTE_PATTERN, (route) =>
       route.abort("addressunreachable"),
     );
 
     await forceOfflineDisconnect(context, 2_200);
 
-    await context.unroute(STREAM_ROUTE_PATTERN);
+    await context.unroute(RUN_STREAM_ROUTE_PATTERN);
 
     await expect
       .poll(
@@ -286,7 +219,7 @@ test.describe("Auto reconnect UX after disconnect", () => {
 
     const cancelButton = page.getByRole("button", { name: "Cancel" });
 
-    await context.route(STREAM_ROUTE_PATTERN, (route) =>
+    await context.route(RUN_STREAM_ROUTE_PATTERN, (route) =>
       route.abort("addressunreachable"),
     );
 
@@ -300,7 +233,7 @@ test.describe("Auto reconnect UX after disconnect", () => {
       timeout: 60_000,
     });
 
-    await context.unroute(STREAM_ROUTE_PATTERN);
+    await context.unroute(RUN_STREAM_ROUTE_PATTERN);
   });
 
   test("history spinner stays active while reconnecting and clears after completion", async ({
@@ -320,14 +253,14 @@ test.describe("Auto reconnect UX after disconnect", () => {
 
     await expect(historySpinner).toBeVisible({ timeout: 30_000 });
 
-    await context.route(STREAM_ROUTE_PATTERN, (route) =>
+    await context.route(RUN_STREAM_ROUTE_PATTERN, (route) =>
       route.abort("addressunreachable"),
     );
 
     await forceOfflineDisconnect(context, 2_200);
     await expect(historySpinner).toBeVisible({ timeout: 20_000 });
 
-    await context.unroute(STREAM_ROUTE_PATTERN);
+    await context.unroute(RUN_STREAM_ROUTE_PATTERN);
 
     await cancelButton.click();
     await expect(cancelButton).not.toBeVisible({ timeout: 60_000 });
@@ -350,7 +283,7 @@ test.describe("Auto reconnect UX after disconnect", () => {
     });
     await expect(intermediateButton.first()).toBeVisible({ timeout: 120_000 });
 
-    await context.route(STREAM_ROUTE_PATTERN, (route) =>
+    await context.route(RUN_STREAM_ROUTE_PATTERN, (route) =>
       route.abort("addressunreachable"),
     );
 
@@ -360,6 +293,6 @@ test.describe("Auto reconnect UX after disconnect", () => {
       page.getByText("An error occurred. Please try again."),
     ).toHaveCount(0);
 
-    await context.unroute(STREAM_ROUTE_PATTERN);
+    await context.unroute(RUN_STREAM_ROUTE_PATTERN);
   });
 });

@@ -1,8 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
-
-const STREAM_ROUTE_PATTERN =
-  /\/threads\/[^/]+\/runs(?:\/[^/]+)?\/stream(?:\?|$)/;
+import {
+  prepareFreshChatPage,
+  readAssistantTextLength,
+  RUN_STREAM_ROUTE_PATTERN,
+  waitForThreadId,
+} from "./helpers/chat-thread";
 
 function reconciliationPrompt(tag: string): string {
   return [
@@ -13,80 +15,9 @@ function reconciliationPrompt(tag: string): string {
   ].join(" ");
 }
 
-async function readThreadId(page: Page): Promise<string | null> {
-  return new URL(page.url()).searchParams.get("threadId");
-}
-
-async function waitForThreadId(
-  page: Page,
-  timeoutMs = 30_000,
-): Promise<string> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const threadId = await readThreadId(page);
-    if (threadId) return threadId;
-    await page.waitForTimeout(250);
-  }
-  throw new Error("Expected threadId in URL after submit");
-}
-
-async function readAssistantTextLength(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const assistantGroups = Array.from(
-      document.querySelectorAll("div.group.mr-auto"),
-    );
-    const lastAssistant = assistantGroups.at(-1) as HTMLElement | undefined;
-    if (!lastAssistant) return 0;
-    const segments = Array.from(lastAssistant.querySelectorAll("div.py-1")).map(
-      (node) => node.textContent ?? "",
-    );
-    return segments.join("\n").length;
-  });
-}
-
-async function clearStaleClientState(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const localKeys = Object.keys(window.localStorage);
-    for (const key of localKeys) {
-      if (key.startsWith("lg:thread:")) {
-        window.localStorage.removeItem(key);
-      }
-    }
-
-    const sessionKeys = Object.keys(window.sessionStorage);
-    for (const key of sessionKeys) {
-      if (key.startsWith("lg:thread:") || key.startsWith("lg:stream:")) {
-        window.sessionStorage.removeItem(key);
-      }
-    }
-  });
-}
-
-async function openFreshThread(page: Page): Promise<void> {
-  const newButton = page.getByRole("button", { name: /^New$/ }).first();
-  await expect(newButton).toBeVisible({ timeout: 60_000 });
-  await newButton.click();
-
-  await expect
-    .poll(() => readThreadId(page), {
-      timeout: 15_000,
-      message: "Expected threadId to be cleared for a fresh test thread",
-    })
-    .toBeNull();
-}
-
 async function prepareFreshPage(page: Page): Promise<void> {
-  const gate = await gotoAndDetectChatEnvironment(
-    page,
-    "/?chatHistoryOpen=true",
-  );
+  const gate = await prepareFreshChatPage(page);
   test.skip(!gate.ok, gate.reason);
-  await clearStaleClientState(page);
-  await page.reload();
-  await openFreshThread(page);
-  await expect(page.getByPlaceholder("Type your message...")).toBeVisible({
-    timeout: 60_000,
-  });
 }
 
 test("hydrates final assistant output without refresh when run finishes during stream disconnect", async ({
@@ -107,7 +38,7 @@ test("hydrates final assistant output without refresh when run finishes during s
   await waitForThreadId(page);
   await expect(cancelButton).toBeVisible({ timeout: 60_000 });
 
-  await context.route(STREAM_ROUTE_PATTERN, (route) =>
+  await context.route(RUN_STREAM_ROUTE_PATTERN, (route) =>
     route.abort("addressunreachable"),
   );
 
@@ -115,7 +46,7 @@ test("hydrates final assistant output without refresh when run finishes during s
 
   const lengthWhileBlocked = await readAssistantTextLength(page);
 
-  await context.unroute(STREAM_ROUTE_PATTERN);
+  await context.unroute(RUN_STREAM_ROUTE_PATTERN);
 
   await expect
     .poll(async () => readAssistantTextLength(page), {

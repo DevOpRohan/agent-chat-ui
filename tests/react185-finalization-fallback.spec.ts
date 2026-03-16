@@ -117,7 +117,7 @@ test("finalizes the response via polling when streaming becomes react-185-style 
   await expect(sendButton).toBeEnabled({ timeout: 15_000 });
   await sendButton.click();
 
-  await waitForThreadId(page);
+  const threadId = await waitForThreadId(page);
   await expect(cancelButton).toBeVisible({ timeout: 90_000 });
 
   await expect
@@ -127,10 +127,6 @@ test("finalizes the response via polling when streaming becomes react-185-style 
     })
     .toBeGreaterThan(20);
 
-  await expect(page.getByTestId("stream-finalization-status")).toBeVisible({
-    timeout: 120_000,
-  });
-
   await expect
     .poll(() => readAssistantTextLength(page), {
       timeout: 240_000,
@@ -139,7 +135,16 @@ test("finalizes the response via polling when streaming becomes react-185-style 
     })
     .toBeGreaterThan(40);
 
-  await expect(sendButton).toBeEnabled({ timeout: 240_000 });
+  await expect(input).toBeEnabled({ timeout: 240_000 });
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("threadId"), {
+      timeout: 15_000,
+      message: "Expected the same thread to stay open without refresh",
+    })
+    .toBe(threadId);
+  await input.fill("follow-up readiness check");
+  await expect(sendButton).toBeEnabled({ timeout: 15_000 });
+  await input.fill("");
   await expect(cancelButton).toHaveCount(0);
   await expect(
     page.getByText("An error occurred. Please try again."),

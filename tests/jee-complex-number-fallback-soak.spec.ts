@@ -92,8 +92,8 @@ async function readAssistantTextLength(page: Page): Promise<number> {
 }
 
 async function waitForRunCompletion(page: Page): Promise<void> {
-  const sendButton = page.getByRole("button", { name: "Send" });
   const cancelButton = page.getByRole("button", { name: "Cancel" });
+  const input = page.getByPlaceholder("Type your message...");
   await expect
     .poll(
       async () => ({
@@ -102,21 +102,31 @@ async function waitForRunCompletion(page: Page): Promise<void> {
           .getByTestId("stream-finalization-status")
           .isVisible()
           .catch(() => false),
-        sendEnabled: await sendButton.isEnabled().catch(() => false),
         cancelVisible: await cancelButton.isVisible().catch(() => false),
+        inputEnabled: await input.isEnabled().catch(() => false),
       }),
       {
         timeout: 300_000,
         message:
-          "Expected the run to complete with final assistant output, no active cancel control, and a restored send button",
+          "Expected the run to complete with final assistant output, no active cancel control, and a usable composer",
       },
     )
     .toEqual({
       assistantLength: expect.any(Number),
       finalizingVisible: false,
-      sendEnabled: true,
       cancelVisible: false,
+      inputEnabled: true,
     });
+}
+
+async function assertComposerReadyForFollowUp(page: Page): Promise<void> {
+  const input = page.getByPlaceholder("Type your message...");
+  const sendButton = page.getByRole("button", { name: "Send" });
+
+  await expect(input).toBeEnabled({ timeout: 15_000 });
+  await input.fill("follow-up readiness check");
+  await expect(sendButton).toBeEnabled({ timeout: 15_000 });
+  await input.fill("");
 }
 
 test.describe.configure({ mode: "serial" });
@@ -148,6 +158,7 @@ test.describe("JEE complex-number soak coverage", () => {
             message: `Expected non-empty assistant output after run ${runIndex + 1}`,
           })
           .toBeGreaterThan(0);
+        await assertComposerReadyForFollowUp(page);
 
         await expect(
           page.getByText("An error occurred. Please try again."),
@@ -212,6 +223,7 @@ test.describe("JEE complex-number soak coverage", () => {
           message: "Expected non-empty assistant output after artifact-open run",
         })
         .toBeGreaterThan(0);
+      await assertComposerReadyForFollowUp(page);
       await expect(
         page.getByText("An error occurred. Please try again."),
       ).toHaveCount(0);
