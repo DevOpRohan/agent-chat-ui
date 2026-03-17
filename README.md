@@ -82,7 +82,7 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > Submit UX is client-first: pressing `Enter` clears the composer immediately, shows the outgoing human message locally right away, flips the matching history row to `busy` without waiting for the next history poll, and then hydrates assistant output from backend polling.
 
 > [!NOTE]
-> Selected-thread polling cadence is `1500ms` while the backend thread is `busy`, `10000ms` when settled, with retry backoff at `3000ms`, `5000ms`, then `10000ms` after poll failures. History polling stays lighter: `5000ms` when there are active/unseen threads and `15000ms` otherwise.
+> Selected-thread polling stays fast (`1500ms`) while the backend thread/run is active (`busy` / `pending` / `running`). For settled threads, the runtime uses an activity-aware cadence: `15000ms` while visible/focused, `60000ms` after 5+ minutes hidden/unfocused inactivity, and `120000ms` after 30+ minutes hidden/unfocused inactivity. Poll retries still back off at `3000ms`, `5000ms`, then `10000ms` after failures. Settled background polls use lightweight status refresh and only fetch full thread state when something changed or when user activity/visibility resumes.
 
 > [!NOTE]
 > The chat now includes a light/dark mode toggle in the top-right of the UI (and on the setup screen). Theme preference is persisted via `next-themes`.

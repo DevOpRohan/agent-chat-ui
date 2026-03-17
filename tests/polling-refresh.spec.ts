@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { gotoAndDetectChatEnvironment } from "./helpers/environment-gates";
+import { waitForThreadId } from "./helpers/chat-thread";
 
 test("refresh keeps busy thread on polling path until completion", async ({
   page,
@@ -17,9 +18,15 @@ test("refresh keeps busy thread on polling path until completion", async ({
   await input.fill(prompt);
   await page.getByRole("button", { name: "Send" }).click();
 
-  await expect(page.getByText(prompt, { exact: false })).toBeVisible({
+  const submittedPrompt = page
+    .getByTestId("chat-scroll-container")
+    .getByText(prompt, { exact: false })
+    .last();
+  await expect(submittedPrompt).toBeVisible({
     timeout: 60_000,
   });
+
+  const threadId = await waitForThreadId(page, 60_000);
 
   const cancelButton = page.getByRole("button", { name: "Cancel" });
   await expect(cancelButton).toBeVisible({ timeout: 60_000 });
@@ -28,6 +35,13 @@ test("refresh keeps busy thread on polling path until completion", async ({
   });
 
   await page.reload();
+
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("threadId"), {
+      timeout: 15_000,
+      message: "Expected the active threadId to survive reload",
+    })
+    .toBe(threadId);
 
   await expect(page.getByTestId("thread-working-status")).toBeVisible({
     timeout: 60_000,

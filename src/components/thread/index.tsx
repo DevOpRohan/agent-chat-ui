@@ -1046,7 +1046,15 @@ export function Thread() {
       ) : null}
     </div>
   );
-  const showWorkingBadge = effectiveIsLoading || isThreadActiveStatus(runtime.threadStatus);
+  const hasAddressableThread = !!threadId;
+  const showWorkingBadge =
+    hasAddressableThread &&
+    (effectiveIsLoading || isThreadActiveStatus(runtime.threadStatus));
+  const disableComposerSubmit =
+    effectiveIsLoading ||
+    isThreadActiveStatus(runtime.threadStatus) ||
+    isUploading ||
+    (!input.trim() && contentBlocks.length === 0);
   const logoVariant = resolvedTheme === "dark" ? "dark" : "light";
   const desktopHistoryWidth = showDesktopHistoryPane ? historyWidthPx : 0;
   const desktopMainGridTemplate = isLargeScreen
@@ -1400,11 +1408,7 @@ export function Thread() {
                             <Button
                               type="submit"
                               className="ml-auto shadow-md transition-all"
-                              disabled={
-                                showWorkingBadge ||
-                                isUploading ||
-                                (!input.trim() && contentBlocks.length === 0)
-                              }
+                              disabled={disableComposerSubmit}
                             >
                               Send
                             </Button>

@@ -48,6 +48,12 @@ import {
   getMessagesFromState,
   type RuntimeMessageMetadata,
 } from "@/lib/thread-branching";
+import {
+  INTERACTION_REFRESH_THROTTLE_MS,
+  getThreadPollDelay,
+  isRunActiveStatus,
+  shouldHydrateThreadState,
+} from "@/lib/poll-runtime-polling";
 
 export type StateType = {
   context?: Record<string, unknown>;
@@ -116,7 +122,10 @@ type ThreadRuntimeContextType = {
   latestRunStatus: string | null;
   messages: Message[];
   phase: RuntimePhase;
-  refresh: (options?: { forceHistory?: boolean }) => Promise<void>;
+  refresh: (options?: {
+    forceHistory?: boolean;
+    forceHydrate?: boolean;
+  }) => Promise<void>;
   setBranch: (branch: string) => void;
   submit: (
     values: RuntimeSubmitInput,
@@ -127,12 +136,9 @@ type ThreadRuntimeContextType = {
   values: StateType;
 };
 
-const BUSY_POLL_INTERVAL_MS = 1500;
-const IDLE_POLL_INTERVAL_MS = 10000;
 const HISTORY_LIMIT = 100;
 const RUN_STATUS_LIST_LIMIT = 10;
 const REFRESH_THREADS_DELAY_MS = 750;
-const POLL_RETRY_DELAYS_MS = [3000, 5000, 10000] as const;
 
 const ThreadRuntimeContext = createContext<
   ThreadRuntimeContextType | undefined
@@ -363,16 +369,6 @@ async function checkGraphStatus(
   }
 }
 
-function getPollDelay(failureCount: number, threadStatus: string | null) {
-  if (failureCount > 0) {
-    return (
-      POLL_RETRY_DELAYS_MS[Math.min(failureCount - 1, POLL_RETRY_DELAYS_MS.length - 1)]
-    );
-  }
-
-  return isThreadBusy(threadStatus) ? BUSY_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
-}
-
 const ThreadRuntimeSession = ({
   children,
   apiKey,
@@ -432,11 +428,44 @@ const ThreadRuntimeSession = ({
   const rawStateRef = useRef(rawState);
   const historyDataRef = useRef(historyData);
   const threadStatusRef = useRef(threadStatus);
+  const latestRunStatusRef = useRef(latestRunStatus);
+  const activeRunIdRef = useRef(activeRunId);
   const phaseRef = useRef(phase);
   const optimisticStateRef = useRef(optimisticState);
   const refreshRequestRef = useRef(0);
   const pollFailureCountRef = useRef(0);
   const lastSettledThreadStatusRef = useRef<string | null>(threadStatus);
+  const lastThreadUpdatedAtRef = useRef<string | null>(null);
+  const forceHydrateNextPollRef = useRef(true);
+  const isPageVisibleRef = useRef(
+    typeof document === "undefined" ? true : document.visibilityState === "visible",
+  );
+  const isWindowFocusedRef = useRef(
+    typeof document === "undefined" ? true : document.hasFocus(),
+  );
+  const lastUserInteractionAtRef = useRef(Date.now());
+  const lastInteractionRefreshAtRef = useRef(0);
+
+  const persistThreadIdInUrl = useCallback((nextThreadId: string | null) => {
+    if (typeof window === "undefined") return;
+
+    const currentUrl = new URL(window.location.href);
+    if (nextThreadId) {
+      currentUrl.searchParams.set("threadId", nextThreadId);
+    } else {
+      currentUrl.searchParams.delete("threadId");
+    }
+
+    const nextRelativeUrl = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
+    const currentRelativeUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextRelativeUrl === currentRelativeUrl) {
+      return;
+    }
+
+    // Keep the browser location in sync immediately so a manual reload does not
+    // race ahead of the async query-state update.
+    window.history.replaceState(window.history.state, "", nextRelativeUrl);
+  }, []);
 
   useEffect(() => {
     threadIdRef.current = threadId;
@@ -455,12 +484,38 @@ const ThreadRuntimeSession = ({
   }, [threadStatus]);
 
   useEffect(() => {
+    latestRunStatusRef.current = latestRunStatus;
+  }, [latestRunStatus]);
+
+  useEffect(() => {
+    activeRunIdRef.current = activeRunId;
+  }, [activeRunId]);
+
+  useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
 
   useEffect(() => {
     optimisticStateRef.current = optimisticState;
   }, [optimisticState]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const effectiveThreadId = threadIdRef.current ?? threadId;
+    if (!effectiveThreadId) return;
+    if (phase !== "submitting" && phase !== "polling" && phase !== "hydrating") {
+      return;
+    }
+
+    const currentThreadId = new URL(window.location.href).searchParams.get(
+      "threadId",
+    );
+    if (currentThreadId === effectiveThreadId) {
+      return;
+    }
+
+    persistThreadIdInUrl(effectiveThreadId);
+  }, [persistThreadIdInUrl, phase, threadId]);
 
   useEffect(() => {
     if (!isIapAuth) {
@@ -503,17 +558,17 @@ const ThreadRuntimeSession = ({
       targetThreadId: string,
       options?: {
         forceHistory?: boolean;
+        forceHydrate?: boolean;
       },
     ) => {
       const refreshId = ++refreshRequestRef.current;
 
       try {
-        const [currentThread, recentRuns, nextRawState] = await Promise.all([
+        const [currentThread, recentRuns] = await Promise.all([
           client.threads.get<StateType>(targetThreadId),
           client.runs
             .list(targetThreadId, { limit: RUN_STATUS_LIST_LIMIT })
             .catch(() => []),
-          client.threads.getState<StateType>(targetThreadId),
         ]);
         if (
           threadIdRef.current !== targetThreadId ||
@@ -525,29 +580,84 @@ const ThreadRuntimeSession = ({
         const nextThreadStatus = currentThread.status ?? null;
         const nextActiveRun = selectActiveRun(recentRuns);
         const nextLatestRun = selectFreshestRun(recentRuns);
+        const nextRunStatus = nextLatestRun?.status ?? null;
+        const nextActiveRunId = nextActiveRun?.run_id ?? null;
+        const nextThreadUpdatedAt =
+          typeof currentThread.updated_at === "string"
+            ? currentThread.updated_at
+            : null;
+        const previousThreadStatus = threadStatusRef.current;
+        const previousRunStatus = latestRunStatusRef.current;
+        const previousActiveRunId = activeRunIdRef.current;
+        const previousThreadUpdatedAt = lastThreadUpdatedAtRef.current;
+        const threadBecameActive =
+          !isThreadBusy(previousThreadStatus) && isThreadBusy(nextThreadStatus);
+        const threadBecameSettled =
+          isThreadBusy(previousThreadStatus) && !isThreadBusy(nextThreadStatus);
+        const runChanged =
+          previousRunStatus !== nextRunStatus ||
+          previousActiveRunId !== nextActiveRunId;
+        const threadUpdated =
+          !!nextThreadUpdatedAt &&
+          nextThreadUpdatedAt !== previousThreadUpdatedAt;
+        const shouldHydrateState = shouldHydrateThreadState({
+          forceHistory: options?.forceHistory,
+          forceHydrate: options?.forceHydrate,
+          hasRawState: rawStateRef.current != null,
+          runChanged,
+          staleUiRecovery: forceHydrateNextPollRef.current,
+          threadBecameActive,
+          threadBecameSettled,
+          threadUpdated,
+        });
         const refreshedThreadSummary: Thread = {
           ...currentThread,
           status: nextThreadStatus,
-          updated_at:
-            currentThread.updated_at ?? new Date().toISOString(),
+          updated_at: currentThread.updated_at ?? new Date().toISOString(),
         };
-        const shouldRefreshHistory =
-          options?.forceHistory ||
-          historyDataRef.current.length === 0 ||
-          (isThreadBusy(lastSettledThreadStatusRef.current) &&
-            !isThreadBusy(nextThreadStatus));
 
         pollFailureCountRef.current = 0;
         lastSettledThreadStatusRef.current = nextThreadStatus;
+        lastThreadUpdatedAtRef.current = nextThreadUpdatedAt;
         setError(undefined);
-        setRawState(nextRawState);
         setThreadStatus(nextThreadStatus);
-        setLatestRunStatus(nextLatestRun?.status ?? null);
-        setActiveRunId(nextActiveRun?.run_id ?? null);
-        setPhase(isThreadBusy(nextThreadStatus) ? "polling" : "idle");
+        setLatestRunStatus(nextRunStatus);
+        setActiveRunId(nextActiveRunId);
+        setPhase(
+          isThreadBusy(nextThreadStatus) || isRunActiveStatus(nextRunStatus)
+            ? "polling"
+            : "idle",
+        );
         setThreads((previousThreads) =>
           upsertThreadSummary(previousThreads, refreshedThreadSummary),
         );
+        setOptimisticState((previous) => {
+          if (!previous || previous.threadId !== targetThreadId) {
+            return previous;
+          }
+
+          if (!isThreadBusy(nextThreadStatus) && nextActiveRun == null) {
+            return null;
+          }
+          return previous;
+        });
+
+        if (!shouldHydrateState) {
+          return;
+        }
+
+        const nextRawState = await client.threads.getState<StateType>(
+          targetThreadId,
+        );
+        if (
+          threadIdRef.current !== targetThreadId ||
+          refreshRequestRef.current !== refreshId
+        ) {
+          return;
+        }
+
+        forceHydrateNextPollRef.current = false;
+        setRawState(nextRawState);
         setOptimisticState((previous) => {
           if (!previous || previous.threadId !== targetThreadId) {
             return previous;
@@ -569,6 +679,11 @@ const ThreadRuntimeSession = ({
           }
           return previous;
         });
+
+        const shouldRefreshHistory =
+          options?.forceHistory ||
+          historyDataRef.current.length === 0 ||
+          threadBecameSettled;
 
         if (!shouldRefreshHistory) {
           return;
@@ -593,6 +708,7 @@ const ThreadRuntimeSession = ({
           return;
         }
 
+        forceHydrateNextPollRef.current = true;
         pollFailureCountRef.current += 1;
         console.error("Failed to refresh thread state", refreshError);
         if (!rawStateRef.current && historyDataRef.current.length === 0) {
@@ -605,7 +721,7 @@ const ThreadRuntimeSession = ({
   );
 
   const refresh = useCallback(
-    async (options?: { forceHistory?: boolean }) => {
+    async (options?: { forceHistory?: boolean; forceHydrate?: boolean }) => {
       const targetThreadId = threadIdRef.current;
       if (!targetThreadId) {
         setPhase("idle");
@@ -637,6 +753,8 @@ const ThreadRuntimeSession = ({
       setBranch("");
       pollFailureCountRef.current = 0;
       lastSettledThreadStatusRef.current = null;
+      lastThreadUpdatedAtRef.current = null;
+      forceHydrateNextPollRef.current = true;
       return;
     }
 
@@ -662,7 +780,9 @@ const ThreadRuntimeSession = ({
     );
     pollFailureCountRef.current = 0;
     lastSettledThreadStatusRef.current = null;
-    void refreshThreadState(threadId, { forceHistory: true });
+    lastThreadUpdatedAtRef.current = null;
+    forceHydrateNextPollRef.current = true;
+    void refreshThreadState(threadId, { forceHistory: true, forceHydrate: true });
   }, [refreshThreadState, threadId]);
 
   useEffect(() => {
@@ -676,7 +796,15 @@ const ThreadRuntimeSession = ({
       if (cancelled) return;
       timeoutId = window.setTimeout(
         tick,
-        getPollDelay(pollFailureCountRef.current, threadStatusRef.current),
+        getThreadPollDelay({
+          atMs: Date.now(),
+          failureCount: pollFailureCountRef.current,
+          isPageVisible: isPageVisibleRef.current,
+          isWindowFocused: isWindowFocusedRef.current,
+          lastUserInteractionAtMs: lastUserInteractionAtRef.current,
+          runStatus: latestRunStatusRef.current,
+          threadStatus: threadStatusRef.current,
+        }),
       );
     };
 
@@ -693,20 +821,66 @@ const ThreadRuntimeSession = ({
   useEffect(() => {
     if (!threadId) return;
 
+    isPageVisibleRef.current = document.visibilityState === "visible";
+    isWindowFocusedRef.current = document.hasFocus();
+
+    const refreshNow = (markInteraction = false) => {
+      const now = Date.now();
+      if (markInteraction) {
+        lastUserInteractionAtRef.current = now;
+      }
+      forceHydrateNextPollRef.current = true;
+      void refresh({ forceHydrate: true });
+    };
+
     const handleFocus = () => {
-      void refresh();
+      isWindowFocusedRef.current = true;
+      refreshNow(true);
+    };
+    const handleBlur = () => {
+      isWindowFocusedRef.current = false;
     };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void refresh();
+      const isVisible = document.visibilityState === "visible";
+      isPageVisibleRef.current = isVisible;
+      if (isVisible) {
+        isWindowFocusedRef.current = document.hasFocus();
+        refreshNow(true);
       }
+    };
+    const handleOnline = () => {
+      refreshNow(true);
+    };
+    const handleInteraction = () => {
+      const now = Date.now();
+      lastUserInteractionAtRef.current = now;
+      if (
+        now - lastInteractionRefreshAtRef.current <
+        INTERACTION_REFRESH_THROTTLE_MS
+      ) {
+        return;
+      }
+      lastInteractionRefreshAtRef.current = now;
+      refreshNow(false);
     };
 
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("pointerdown", handleInteraction, {
+      passive: true,
+    });
+    window.addEventListener("keydown", handleInteraction);
+    document.addEventListener("scroll", handleInteraction, true);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("pointerdown", handleInteraction);
+      window.removeEventListener("keydown", handleInteraction);
+      document.removeEventListener("scroll", handleInteraction, true);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [refresh, threadId]);
@@ -799,8 +973,9 @@ const ThreadRuntimeSession = ({
       phase === "submitting" ||
       phase === "polling" ||
       phase === "canceling" ||
-      isThreadBusy(threadStatus),
-    [phase, threadStatus],
+      isThreadBusy(threadStatus) ||
+      isRunActiveStatus(latestRunStatus),
+    [latestRunStatus, phase, threadStatus],
   );
 
   const interrupt = useMemo(
@@ -820,6 +995,7 @@ const ThreadRuntimeSession = ({
       setError(undefined);
 
       let targetThreadId = threadIdRef.current ?? null;
+      let persistedThreadId = false;
       try {
         if (!targetThreadId) {
           const createdThread = await client.threads.create({
@@ -828,6 +1004,11 @@ const ThreadRuntimeSession = ({
           });
           targetThreadId = createdThread.thread_id;
           threadIdRef.current = targetThreadId;
+          if (threadId !== targetThreadId) {
+            persistThreadIdInUrl(targetThreadId);
+            void setThreadId(targetThreadId);
+            persistedThreadId = true;
+          }
           syncThreadsSoon(targetThreadId);
         }
 
@@ -906,7 +1087,7 @@ const ThreadRuntimeSession = ({
         setLatestRunStatus(run.status ?? null);
         setThreadStatus("busy");
         setPhase("polling");
-        if (threadId !== targetThreadId) {
+        if (!persistedThreadId && threadId !== targetThreadId) {
           setThreadId(targetThreadId);
         }
         await refreshThreadState(targetThreadId, {
@@ -930,6 +1111,7 @@ const ThreadRuntimeSession = ({
       setThreadId,
       syncThreadsSoon,
       threadId,
+      persistThreadIdInUrl,
     ],
   );
 
