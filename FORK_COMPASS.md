@@ -1,8 +1,8 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-03-16_  
-_Branch: codex/poll_exp_  
-_Base: origin/main (`a9179f4`)_  
+_Last updated: 2026-03-17_
+_Branch: codex/optimal-polling_
+_Base: origin/codex/poll-runtime (`99d0aa8`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
 This document is the current map of fork-specific behavior in this worktree. It focuses on the poll-first runtime rewrite plus the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
@@ -19,7 +19,7 @@ This fork now uses a poll-first chat runtime.
 
 ## 2) Diff Snapshot
 
-Working tree snapshot vs `origin/main` for this migration branch:
+Working tree snapshot vs `origin/codex/poll-runtime` for this optimization branch:
 
 - Files changed: `22`
 - Insertions: `1080`
@@ -28,13 +28,14 @@ Working tree snapshot vs `origin/main` for this migration branch:
 
 Git state:
 
-- `HEAD`: `a9179f4`
-- `origin/main`: `a9179f4`
+- `HEAD`: `99d0aa8`
+- `origin/codex/poll-runtime`: `99d0aa8`
 - Unique commits in this worktree: none yet
-- Current migration is still uncommitted on top of `origin/main`
+- Current optimization is still uncommitted on top of `origin/codex/poll-runtime`
 
 ## 3) Recent Change
 
+- 2026-03-17: Optimize selected-thread polling for idle settled sessions by splitting lightweight status polling from full state hydration. Runtime now keeps `1500ms` for active thread/run states, uses `15000ms` for settled visible sessions, degrades to `60000ms` after 5+ minutes hidden/unfocused inactivity, and `120000ms` after 30+ minutes hidden/unfocused inactivity. Immediate refresh + full hydrate is triggered on focus, visibility regain, online, and throttled pointer/keyboard/scroll activity. Added pure polling heuristic tests. Main files: `src/providers/Stream.tsx`, `src/lib/poll-runtime-polling.ts`, `tests/poll-runtime-polling.spec.ts`, `README.md`, `FORK_COMPASS.md`.
 - 2026-03-16: Replace the stream-driven runtime with a polling runtime. The app now creates runs with `client.runs.create`, polls thread/run state on a fixed schedule, resumes polling after refresh/remount, removes reconnect/finalization/observer-mode machinery, simplifies active UX to `Working on your query...`, deletes stream-only hooks/libs/tests, and keeps branch/checkpoint metadata through local history processing. Main files: `src/providers/Stream.tsx`, `src/lib/thread-branching.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/history/index.tsx`, `src/lib/thread-activity.ts`, `tests/polling-refresh.spec.ts`.
 
 ## 4) Customization Map
@@ -86,14 +87,19 @@ Current runtime behavior:
   - `error`
 - Poll cadence:
   - `1500ms` while busy
-  - `10000ms` while settled
+  - `15000ms` while settled and visible/focused
+  - `60000ms` after 5+ minutes hidden/unfocused inactivity
+  - `120000ms` after 30+ minutes hidden/unfocused inactivity
   - retry backoff `3000ms`, `5000ms`, `10000ms`
+- Settled background polling is lightweight (thread/run status first) and only hydrates full thread state when a material change or explicit user-return signal requires it.
 - The provider performs immediate refresh on:
   - mount
   - thread switch
   - submit/edit/regenerate/resume
   - cancel completion
   - focus / visibility regain
+  - online
+  - throttled pointer / key / scroll interaction
 
 Important preserved behavior:
 
