@@ -1,40 +1,42 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-03-16_  
-_Branch: codex/poll_exp_  
-_Base: origin/main (`a9179f4`)_  
+_Last updated: 2026-05-17_
+_Branch: main / develop source baseline (`codex/poll-runtime` promoted)_
+_Base: origin/main (`99d0aa8`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
-This document is the current map of fork-specific behavior in this worktree. It focuses on the poll-first runtime rewrite plus the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
+This document is the current map of fork-specific behavior in this worktree. The poll-first runtime is now the source-of-truth baseline for the fork, alongside the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
 
 ## 1) Executive Summary
 
-This fork now uses a poll-first chat runtime.
+This fork now uses a poll-first chat runtime as its default architecture.
 
-- No SSE token streaming is used in the app runtime.
+- No SSE token streaming is used in the app runtime, which avoids holding browser/server token streams open for long-running agent work.
 - The selected thread is reconciled from LangGraph REST APIs (`threads.get`, `threads.getState`, `threads.getHistory`, `runs.list`, `runs.cancel`).
 - Refresh/remount/network recovery works by resuming polling while the backend thread remains `busy`.
 - Cross-tab behavior is backend-driven only. If a thread is `busy`, every tab shows the same working state and blocks duplicate sends.
+- This is the preferred path for long-running runs and Cloud Run/service scalability because clients hydrate from backend state instead of joining or rejoining a live stream.
 - Existing fork behavior for uploads, OpenAI PDF handling, recursion limits, `onDisconnect: "continue"`, thread history, artifact cards, and HITL resume/edit/regenerate is preserved.
 
 ## 2) Diff Snapshot
 
-Working tree snapshot vs `origin/main` for this migration branch:
+`origin/main` has been promoted to the poll runtime baseline:
 
-- Files changed: `22`
-- Insertions: `1080`
-- Deletions: `4681`
-- Snapshot note: excludes `tsconfig.tsbuildinfo`
+- Source branch: `codex/poll-runtime`
+- Baseline commit: `99d0aa8` (`docs: clarify poll runtime submit UX`)
+- Parent fork baseline: `a9179f4`
+- Migration commits included on `main`: `51d28c9`, `99d0aa8`
 
 Git state:
 
-- `HEAD`: `a9179f4`
-- `origin/main`: `a9179f4`
-- Unique commits in this worktree: none yet
-- Current migration is still uncommitted on top of `origin/main`
+- `origin/main`: `99d0aa8`
+- `origin/codex/poll-runtime`: `99d0aa8`
+- `origin/develop`: `99d0aa8`
+- `codex/optimal-polling`: contains one additional poll optimization commit beyond this baseline and is not part of the source-of-truth baseline unless promoted separately.
 
 ## 3) Recent Change
 
+- 2026-05-17: Promote `codex/poll-runtime` to `origin/main` and `origin/develop` as the source-of-truth branch baseline and refresh this compass so poll-first runtime is documented as the default architecture.
 - 2026-03-16: Replace the stream-driven runtime with a polling runtime. The app now creates runs with `client.runs.create`, polls thread/run state on a fixed schedule, resumes polling after refresh/remount, removes reconnect/finalization/observer-mode machinery, simplifies active UX to `Working on your query...`, deletes stream-only hooks/libs/tests, and keeps branch/checkpoint metadata through local history processing. Main files: `src/providers/Stream.tsx`, `src/lib/thread-branching.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/history/index.tsx`, `src/lib/thread-activity.ts`, `tests/polling-refresh.spec.ts`.
 
 ## 4) Customization Map
@@ -72,7 +74,7 @@ Primary files:
 
 ### 4.3 Poll-First Runtime
 
-Current runtime behavior:
+Current source-of-truth runtime behavior:
 
 - `src/providers/Stream.tsx` is now a polling-backed runtime provider despite the legacy filename.
 - The provider exposes `useThreadRuntime`.
@@ -171,7 +173,7 @@ Primary files:
 
 ## 5) Removed Stream-Only Subsystems
 
-Deleted as part of the poll-first migration:
+Deleted as part of the poll-first migration and intentionally kept out of the source-of-truth baseline:
 
 - `src/hooks/use-stream-auto-reconnect.ts`
 - `src/hooks/use-run-finalization-fallback.ts`

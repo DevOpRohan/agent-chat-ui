@@ -76,7 +76,7 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > Markdown workflows can render a local `markdown_artifact` card in the assistant area. Clicking it opens the right artifact pane with rendered markdown/LaTeX plus actions for opening the raw `.md`, sharing the link, and refreshing the preview.
 
 > [!NOTE]
-> This fork is poll-first. When a thread is active, the UI polls LangGraph for thread state and run status, resumes polling after refresh/remount/transient failures, and renders the latest backend snapshot once it lands. There is no client-side token stream join/rejoin path anymore.
+> This fork is poll-first. When a thread is active, the UI polls LangGraph for thread state and run status, resumes polling after refresh/remount/transient failures, and renders the latest backend snapshot once it lands. There is no client-side token stream join/rejoin path anymore, which is the intended architecture for long-running runs and service scalability.
 
 > [!NOTE]
 > Submit UX is client-first: pressing `Enter` clears the composer immediately, shows the outgoing human message locally right away, flips the matching history row to `busy` without waiting for the next history poll, and then hydrates assistant output from backend polling.
