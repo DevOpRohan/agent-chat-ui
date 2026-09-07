@@ -617,3 +617,22 @@
 - Main URL: `https://agent-chat-ui-6duluzey3a-el.a.run.app`
 - Main traffic: `100%` -> `agent-chat-ui-00178-hoh`
 - Image digest: `gcr.io/cerebryai/question_crafter_agent_ui@sha256:616a260493409b3c583fceccaa5a361ea4cd790f654e7087987e96a103e0bf7d`
+
+
+## Conversation navigator (2026-09-07)
+
+- Problem: long conversations need a compact way to preview and jump between user turns, based on the circled Codex reference. Screenshot text is reference content, not task instructions.
+- Baseline: fetched `origin/main` (`7c5f73d`); isolated worktree `agent-chat-ui-conversation-navigator`, branch `codex/conversation-navigator`. Original dirty worktree preserved.
+- Research: traced the poll runtime, visible-message filtering, render fallback, human rendering, resizable panes, and `use-stick-to-bottom` scroll ownership.
+- Plan: derive turns only from rendered messages; reserve a narrow left gutter; show markers for 3+ user turns, prompt/answer previews, current-reading marker, click/keyboard navigation, reduced-motion support, and a bounded scrollable rail. Keep hidden messages out and support attachment-only prompts.
+- Subproblems: turn extraction; scoped scroll anchors; release bottom-follow on navigation; track position during resize/poll updates; responsive and keyboard interaction; integration/regression validation.
+- 2026-09-07 | `pnpm install --frozen-lockfile` | PASS | Dependencies installed without changing the lockfile.
+- Delivery scope: requested branch + PR. Validate the production build locally with deterministic backend fixtures; hosted develop deployment remains a separate release-validation step.
+- 2026-09-07 | `pnpm lint`, `pnpm build` | PASS | Existing baseline lint warnings and Node/nuqs localStorage notice only.
+- 2026-09-07 | First browser iteration | Desktop preview/jump/draft/bottom-control passed. Mobile fixture incorrectly opened the modal history drawer, blocking keyboard input; corrected fixture to open history only at desktop widths. Custom multimodal fixture blocks also need the same SDK type cast used by the app.
+- 2026-09-07 | `PLAYWRIGHT_BASE_URL=http://localhost:3108 pnpm exec playwright test tests/conversation-navigator.spec.ts --workers=1` | PASS | 4 browser scenarios + auth setup, 11.1s. Covered preview filtering/attachments, click and smooth scroll, preserved draft, bottom-follow control, 60-turn mobile/dark/reduced-motion keyboard navigation, bounded rail, polling updates, thread switching, manual scroll, pane resize and artifact expand/restore. No page errors.
+- 2026-09-07 | `pnpm exec tsc --noEmit`, targeted ESLint, Prettier checks for new files/README/compass, `git diff --check` | PASS.
+- 2026-09-07 | Visual review | Desktop and 390px mobile screenshots inspected; markers remain in the left gutter, previews are readable in light/dark themes, long rail remains bounded, no horizontal overflow. Screenshots saved under ignored `test-results/conversation-navigator-{desktop,mobile}.png`.
+- 2026-09-07 | Final production build + browser rerun | PASS | Rebuilt after final integration cleanup, restarted local server, and reran all 4 scenarios + setup (11.9s). Busy-state assertions also confirm Cancel remains available and Send stays absent while polling.
+- Final learning: navigation must call `stopScroll()` before a scoped scroll, and the marker rail must scroll itself (never `scrollIntoView()` on its buttons) to avoid disturbing the chat. ResizeObserver and a single scheduled animation frame track reading position without new polling or runtime state.
+- Release limitation: validation used a local production build with intercepted LangGraph REST responses. Hosted develop deployment, live IAP/backend E2E, and production rollout were not performed for this PR request.
