@@ -58,6 +58,9 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > Thread history refresh uses lightweight thread search fields, lazy-loads history in 20-thread batches as you scroll (with a "Loading more history..." spinner), and pauses polling when the history panel is closed or the browser tab is hidden.
 
 > [!NOTE]
+> Conversations with three or more user turns show a compact navigator along the left edge of the chat. Hover or focus a marker to preview the prompt and response, then click or press Enter/Space to jump to that turn. Use Up/Down or Home/End to move between markers. The darker marker tracks your reading position; “Scroll to bottom” resumes following the latest messages. Long marker lists scroll within the rail, and navigation respects reduced-motion preferences.
+
+> [!NOTE]
 > You can rename a thread directly from its history row (pencil icon on hover/active row). The UI writes `thread_title` metadata via `threads.update(...)`, and the custom name is shown in chat history.
 
 > [!NOTE]

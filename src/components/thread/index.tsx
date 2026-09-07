@@ -20,6 +20,7 @@ import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
+import { ConversationNavigator } from "./conversation-navigator";
 import {
   DO_NOT_RENDER_ID_PREFIX,
   ensureToolCallsHaveResponses,
@@ -1018,6 +1019,8 @@ export function Thread() {
       typeof message.id !== "string" ||
       !message.id.startsWith(DO_NOT_RENDER_ID_PREFIX),
   );
+  const showConversationNavigator =
+    visibleMessages.filter((message) => message.type === "human").length >= 3;
   const messageRenderResetKey = `${threadId ?? "new"}:${visibleMessages
     .map((message, index) => String(message.id ?? `${message.type}-${index}`))
     .join("|")}`;
@@ -1028,6 +1031,7 @@ export function Thread() {
         return (
           <div
             key={String(message.id ?? `${message.type}-${index}`)}
+            data-conversation-turn={message.type === "human" ? index : undefined}
             className={cn(
               "max-w-[min(100%,72ch)] rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap",
               message.type === "human"
@@ -1223,6 +1227,7 @@ export function Thread() {
                   !chatStarted &&
                     "mt-[clamp(4rem,20vh,25vh)] flex flex-col items-stretch",
                   chatStarted && "grid grid-rows-[1fr_auto]",
+                  showConversationNavigator && "pl-9 sm:pl-12",
                 )}
                 contentClassName="pt-8 pb-16 max-w-3xl min-w-0 mx-auto flex w-full flex-col gap-4"
                 content={
@@ -1233,11 +1238,16 @@ export function Thread() {
                     <>
                       {visibleMessages.map((message, index) =>
                         message.type === "human" ? (
-                          <HumanMessage
+                          <div
                             key={message.id || `${message.type}-${index}`}
-                            message={message}
-                            isLoading={effectiveIsLoading}
-                          />
+                            data-conversation-turn={index}
+                            className="min-w-0"
+                          >
+                            <HumanMessage
+                              message={message}
+                              isLoading={effectiveIsLoading}
+                            />
+                          </div>
                         ) : (
                           <AssistantMessage
                             key={message.id || `${message.type}-${index}`}
@@ -1415,6 +1425,12 @@ export function Thread() {
                   </div>
                 }
               />
+              {showConversationNavigator && !isArtifactExpandedMode && (
+                <ConversationNavigator
+                  key={threadId ?? "new"}
+                  messages={visibleMessages}
+                />
+              )}
             </StickToBottom>
           </div>
 

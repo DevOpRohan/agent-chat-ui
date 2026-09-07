@@ -1,8 +1,8 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-05-17_
-_Branch: main / develop source baseline (`codex/poll-runtime` promoted)_
-_Base: origin/main (`99d0aa8`)_
+_Last updated: 2026-09-07_
+_Branch: codex/conversation-navigator_
+_Base: origin/main (`7c5f73d`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
 This document is the current map of fork-specific behavior in this worktree. The poll-first runtime is now the source-of-truth baseline for the fork, alongside the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
@@ -27,14 +27,23 @@ This fork now uses a poll-first chat runtime as its default architecture.
 - Parent fork baseline: `a9179f4`
 - Migration commits included on `main`: `51d28c9`, `99d0aa8`
 
-Git state:
+Navigator PR baseline (fetched 2026-09-07):
 
-- `origin/main`: `99d0aa8`
-- `origin/codex/poll-runtime`: `99d0aa8`
-- `origin/develop`: `99d0aa8`
-- `codex/optimal-polling`: contains one additional poll optimization commit beyond this baseline and is not part of the source-of-truth baseline unless promoted separately.
+- `origin/main`: `7c5f73d` (`docs: mark poll runtime as source of truth`).
+- Local upstream reference: `3165738`; baseline has 79 fork-only commits and a merge-base diff of 89 files, 11,907 insertions, 1,430 deletions (`git diff upstream/main...7c5f73d --shortstat`). These numbers describe the pinned baseline, before this PR.
+- Branch snapshot including this PR: 80 fork-only commits; 91 files changed, 12437 insertions(+), 1430 deletions(-) (`git diff upstream/main...HEAD --shortstat`).
+- Navigator change: adds a UI component and deterministic browser coverage; updates the thread shell, README, this compass, and scratchpad. No runtime, upload, authentication, dependency, or deployment configuration changes.
+
+Recent fork-only commit log:
+
+- This PR: `feat: add conversation turn navigator` — preview and jump between user turns.
+- `7c5f73d`: `docs: mark poll runtime as source of truth`
+- `99d0aa8`: `docs: clarify poll runtime submit UX`
+- `51d28c9`: `feat: migrate chat runtime to poll-first execution`
 
 ## 3) Recent Change
+
+- 2026-09-07: Add a compact conversation navigator for three or more visible user turns. Markers preview the prompt and first assistant text, track reading position, and jump within the chat scroll container. Keyboard navigation, attachment-only prompts, reduced motion, bounded long lists, pane resizing, and thread switching are supported. Hidden messages never enter previews.
 
 - 2026-05-17: Promote `codex/poll-runtime` to `origin/main` and `origin/develop` as the source-of-truth branch baseline and refresh this compass so poll-first runtime is documented as the default architecture.
 - 2026-03-16: Replace the stream-driven runtime with a polling runtime. The app now creates runs with `client.runs.create`, polls thread/run state on a fixed schedule, resumes polling after refresh/remount, removes reconnect/finalization/observer-mode machinery, simplifies active UX to `Working on your query...`, deletes stream-only hooks/libs/tests, and keeps branch/checkpoint metadata through local history processing. Main files: `src/providers/Stream.tsx`, `src/lib/thread-branching.ts`, `src/components/thread/index.tsx`, `src/components/thread/messages/ai.tsx`, `src/components/thread/messages/human.tsx`, `src/components/thread/history/index.tsx`, `src/lib/thread-activity.ts`, `tests/polling-refresh.spec.ts`.
@@ -142,6 +151,8 @@ Current behavior:
 - History activity indicators are backend-driven only.
 - Cross-tab ownership logic and observer mode were removed.
 - Last-seen tracking remains for unseen completion indicators.
+- A left-edge conversation navigator appears after three user turns. Selecting a turn releases bottom-follow so polling updates do not pull readers away from older messages; the existing bottom button restores following.
+- Navigator previews are plain text, with no tool payloads or reasoning blocks. Long marker lists scroll inside a bounded rail. The navigator is removed in full-width artifact mode.
 
 Primary files:
 
@@ -205,6 +216,8 @@ Start here when modifying the fork:
 
 - Runtime provider: `src/providers/Stream.tsx`
 - Thread shell: `src/components/thread/index.tsx`
+- Conversation navigator: `src/components/thread/conversation-navigator.tsx`
+- Navigator browser coverage: `tests/conversation-navigator.spec.ts`
 - History: `src/components/thread/history/index.tsx`
 - Assistant messages: `src/components/thread/messages/ai.tsx`
 - Human message edit/regenerate: `src/components/thread/messages/human.tsx`
