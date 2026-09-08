@@ -23,6 +23,8 @@ This guide explains how to build, push, and deploy the app with environment vari
 
 Each environment can have its own image with different build-time variables (like `NEXT_PUBLIC_API_URL`).
 
+Use the production URL above for browser validation. As verified on 2026-09-08, the production backend permits that origin, while the legacy `https://agent-chat-ui-6duluzey3a-el.a.run.app` alias and temporary revision-tag origins fail its CORS preflight. A healthy UI at an alias does not establish backend connectivity; verify `/api/auth/token`, backend `/info`, and thread history on the documented URL.
+
 ---
 
 ## Environment Variables Reference

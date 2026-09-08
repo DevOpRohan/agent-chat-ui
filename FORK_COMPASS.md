@@ -31,12 +31,13 @@ Navigator refinement baseline (fetched 2026-09-08):
 
 - `origin/main`: `e868177` (merged navigator PR #5).
 - Local upstream reference: `3165738`; this pinned baseline has 81 fork-only commits and a merge-base diff of 91 files, 12,437 insertions, 1,430 deletions (`git diff upstream/main...e868177 --shortstat`).
-- Branch snapshot including this PR: 82 fork-only commits; 91 files changed, 12930 insertions(+), 1430 deletions(-) (`git diff upstream/main...HEAD --shortstat`).
+- Branch snapshot including this PR: 83 fork-only commits; 91 files changed, 12944 insertions(+), 1430 deletions(-) (`git diff upstream/main...HEAD --shortstat`).
 - Refinement: updates the navigator, thread shell, deterministic browser coverage, README, this compass, scratchpad, and release guidance. Runtime, upload, authentication, and dependency behavior are unchanged.
 
 Recent fork-only commit log:
 
-- This PR: `feat: refine conversation navigation for desktop and touch` — quiet ticks, tapered previews, searchable outline, and contextual resize grips.
+- This PR: `docs: record navigator release verification` — pinned revisions, hosted checks, and canonical production URL.
+- `36a3ccc`: `feat: refine conversation navigation for desktop and touch` — quiet ticks, tapered previews, searchable outline, and contextual resize grips.
 - `e868177`: Merge navigator PR #5.
 - `8fe2775`: `feat: add conversation turn navigator` — preview and jump between user turns.
 - `7c5f73d`: `docs: mark poll runtime as source of truth`
