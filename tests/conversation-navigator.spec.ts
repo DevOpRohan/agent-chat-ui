@@ -174,46 +174,164 @@ test("previews visible turns and jumps without changing the draft or bottom cont
   });
 });
 
-test("keyboard navigation reaches a bounded long rail on mobile with reduced motion and dark theme", async ({
+test("narrow screens use a searchable outline with large targets and restore focus", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
   const { errors } = await openConversation(page, conversation(60));
-  const nav = navigator(page);
-  const first = nav.getByRole("button").first();
-  await first.focus();
-  await first.press("ArrowDown");
-  const second = nav.getByRole("button").nth(1);
-  await expect(second).toBeFocused();
-  await second.press("Enter");
+  await expect(navigator(page)).toHaveCount(0);
+  const trigger = page.getByRole("button", {
+    name: "Conversation outline",
+    exact: true,
+  });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", {
+    name: "Conversation",
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  const currentRow = dialog.locator('button[aria-current="location"]');
+  await expect(currentRow).toBeInViewport();
+  await expect(currentRow).toBeFocused();
+  const search = dialog.getByRole("searchbox", { name: "Find a message" });
+  await search.fill("topic 2");
+  const second = dialog.getByRole("button", {
+    name: "Turn 2: Explain topic 2",
+    exact: true,
+  });
+  expect((await second.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await second.click();
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
   await expectTurnNearTop(page, 2);
-  await expect(second).toHaveAttribute("aria-current", "location");
-  await second.press("End");
-  const last = nav.getByRole("button").last();
-  await expect(last).toBeFocused();
-  await expect(last).toBeInViewport();
-  await last.press("Enter");
-  await expectTurnNearTop(page, 118);
-  await expect(last).toHaveAttribute("aria-current", "location");
-  await last.press("Home");
-  await expect(first).toBeFocused();
-  await expect(first).toBeInViewport();
-  await first.press("Enter");
-  await expectTurnNearTop(page, 0);
-  await first.press("Escape");
-  await expect(page.getByRole("tooltip")).toBeHidden();
-  expect(await nav.evaluate((element) => element.clientHeight)).toBeLessThan(
-    340,
+  await trigger.click();
+  await expect(
+    dialog.getByRole("button", {
+      name: "Turn 2: Explain topic 2",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-current", "location");
+  await search.fill("no such message");
+  await expect(dialog.getByRole("status")).toContainText(
+    "No matching messages",
   );
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth),
-  ).toBeLessThanOrEqual(390);
-  await first.press("ArrowDown");
-  await expect(page.getByRole("tooltip")).toBeVisible();
+  await search.fill("");
   await page.screenshot({
     path: "test-results/conversation-navigator-mobile.png",
   });
+  await search.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  expect(errors).toEqual([]);
+});
+
+test("desktop ticks rest quietly, taper around hover and keyboard focus, and dismiss without losing focus", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const { errors } = await openConversation(page);
+  const nav = navigator(page);
+  const ticks = nav.getByTestId("conversation-tick");
+  await page.mouse.move(900, 50);
+  await expect
+    .poll(() =>
+      ticks.evaluateAll((nodes) =>
+        nodes.every((node) => node.getBoundingClientRect().width === 12),
+      ),
+    )
+    .toBeTruthy();
+  const grip = page.getByTestId("resize-handle-history-chat").locator("span");
+  await expect(grip).toHaveCSS("opacity", "0");
+  await page.screenshot({
+    path: "test-results/conversation-navigator-rest.png",
+  });
+  const fourth = nav.getByRole("button").nth(3);
+  await fourth.hover();
+  await expect
+    .poll(() =>
+      ticks.evaluateAll((nodes) =>
+        nodes.map((node) => node.getBoundingClientRect().width),
+      ),
+    )
+    .toEqual([16, 24, 36, 52, 36, 24, 16, 12]);
+  await expect(page.getByRole("tooltip")).toContainText("Explain topic 4");
+  await page.screenshot({
+    path: "test-results/conversation-navigator-hover.png",
+  });
+  await fourth.click();
+  await expectTurnNearTop(page, 6);
+  await page.mouse.move(900, 50);
+  await expect
+    .poll(() =>
+      ticks.evaluateAll((nodes) =>
+        nodes.every((node) => node.getBoundingClientRect().width === 12),
+      ),
+    )
+    .toBeTruthy();
+  await fourth.press("ArrowDown");
+  const fifth = nav.getByRole("button").nth(4);
+  await expect(fifth).toBeFocused();
+  await expect(ticks.nth(4)).toHaveCSS("width", "52px");
+  await fifth.press("Escape");
+  await expect(fifth).toBeFocused();
+  await expect(page.getByRole("tooltip")).toBeHidden();
+  await expect(ticks.nth(4)).toHaveCSS("width", "12px");
+  await fifth.press("End");
+  await nav.getByRole("button").last().press("Enter");
+  await expectTurnNearTop(page, 14);
+  await nav.getByRole("button").last().press("Home");
+  await expect(nav.getByRole("button").first()).toBeFocused();
+  await page.getByTestId("resize-handle-history-chat").hover();
+  await expect(grip).toHaveCSS("opacity", "1");
+  expect(errors).toEqual([]);
+});
+
+test("short conversations that fit need no navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  const { errors } = await openConversation(
+    page,
+    conversation(3).filter((message) => message.type === "human"),
+  );
+  await expect(navigator(page)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Conversation outline", exact: true }),
+  ).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("500 turns stay searchable without making the rail or page grow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const messages = conversation(500).map((message) =>
+    message.type === "ai"
+      ? { ...message, content: `Answer for ${message.id}` }
+      : message,
+  );
+  const { errors } = await openConversation(page, messages);
+  const nav = navigator(page);
+  await expect(nav.getByRole("button")).toHaveCount(500);
+  expect(await nav.evaluate((node) => node.clientHeight)).toBeLessThan(385);
+  await page
+    .getByRole("button", { name: "Conversation outline", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Conversation",
+    exact: true,
+  });
+  await dialog.getByRole("searchbox").fill("topic 425");
+  await expect(dialog.getByRole("button", { name: /^Turn / })).toHaveCount(1);
+  await dialog
+    .getByRole("button", { name: "Turn 425: Explain topic 425", exact: true })
+    .click();
+  await expectTurnNearTop(page, 848);
+  await expect(nav.getByRole("button").nth(424)).toBeInViewport();
   expect(errors).toEqual([]);
 });
 
@@ -226,7 +344,10 @@ test("poll updates preserve reading position and switching to a short thread rem
   await third.click();
   await expectTurnNearTop(page, 4);
   fixture.busy = true;
-  fixture.messages = conversation(9);
+  fixture.messages = [
+    ...conversation(8),
+    { id: "pending", type: "human", content: "Pending message" },
+  ];
   const before = fixture.stateReads;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect.poll(() => fixture.stateReads).toBeGreaterThan(before);
@@ -240,6 +361,10 @@ test("poll updates preserve reading position and switching to a short thread rem
   ).toHaveCount(0);
   await expectTurnNearTop(page, 4);
   await expect(third).toHaveAttribute("aria-current", "location");
+  await nav.getByRole("button").last().hover();
+  await expect(page.getByRole("tooltip")).toContainText(
+    "Waiting for a response",
+  );
   await page.getByText("Short conversation", { exact: true }).first().click();
   await expect(page).toHaveURL(/threadId=short-thread/);
   await expect(nav).toBeHidden();
@@ -284,5 +409,45 @@ test("manual scrolling and pane resizing keep the navigator scoped to the chat",
   await expect(nav).toHaveCount(0);
   await page.getByTestId("artifact-expand-toggle").click();
   await expect(nav).toBeVisible();
+  const artifactHandle = page.getByTestId("resize-handle-chat-artifact");
+  await artifactHandle.focus();
+  for (let step = 0; step < 12; step++) await artifactHandle.press("ArrowLeft");
+  await expect(nav).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Conversation outline", exact: true }),
+  ).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test.describe("touch input", () => {
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 1024, height: 900 },
+  });
+
+  test("wide touch screens use an outline without hover-dependent controls", async ({
+    page,
+  }) => {
+    const { errors } = await openConversation(page);
+    await expect(navigator(page)).toHaveCount(0);
+    const trigger = page.getByRole("button", {
+      name: "Conversation outline",
+      exact: true,
+    });
+    expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await trigger.tap();
+    const dialog = page.getByRole("dialog", {
+      name: "Conversation",
+      exact: true,
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("searchbox")).toHaveCount(0);
+    await dialog
+      .getByRole("button", { name: "Turn 1: Explain topic 1", exact: true })
+      .tap();
+    await expect(dialog).toBeHidden();
+    await expectTurnNearTop(page, 0);
+    expect(errors).toEqual([]);
+  });
 });
