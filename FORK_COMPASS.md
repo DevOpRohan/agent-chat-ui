@@ -1,8 +1,8 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-09-07_
-_Branch: codex/conversation-navigator_
-_Base: origin/main (`7c5f73d`)_
+_Last updated: 2026-09-08_
+_Branch: codex/conversation-navigator-polish_
+_Base: origin/main (`e868177`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
 This document is the current map of fork-specific behavior in this worktree. The poll-first runtime is now the source-of-truth baseline for the fork, alongside the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
@@ -27,21 +27,25 @@ This fork now uses a poll-first chat runtime as its default architecture.
 - Parent fork baseline: `a9179f4`
 - Migration commits included on `main`: `51d28c9`, `99d0aa8`
 
-Navigator PR baseline (fetched 2026-09-07):
+Navigator refinement baseline (fetched 2026-09-08):
 
-- `origin/main`: `7c5f73d` (`docs: mark poll runtime as source of truth`).
-- Local upstream reference: `3165738`; baseline has 79 fork-only commits and a merge-base diff of 89 files, 11,907 insertions, 1,430 deletions (`git diff upstream/main...7c5f73d --shortstat`). These numbers describe the pinned baseline, before this PR.
-- Branch snapshot including this PR: 80 fork-only commits; 91 files changed, 12437 insertions(+), 1430 deletions(-) (`git diff upstream/main...HEAD --shortstat`).
-- Navigator change: adds a UI component and deterministic browser coverage; updates the thread shell, README, this compass, and scratchpad. No runtime, upload, authentication, dependency, or deployment configuration changes.
+- `origin/main`: `e868177` (merged navigator PR #5).
+- Local upstream reference: `3165738`; this pinned baseline has 81 fork-only commits and a merge-base diff of 91 files, 12,437 insertions, 1,430 deletions (`git diff upstream/main...e868177 --shortstat`).
+- Branch snapshot including this PR: 82 fork-only commits; 91 files changed, 12930 insertions(+), 1430 deletions(-) (`git diff upstream/main...HEAD --shortstat`).
+- Refinement: updates the navigator, thread shell, deterministic browser coverage, README, this compass, scratchpad, and release guidance. Runtime, upload, authentication, and dependency behavior are unchanged.
 
 Recent fork-only commit log:
 
-- This PR: `feat: add conversation turn navigator` — preview and jump between user turns.
+- This PR: `feat: refine conversation navigation for desktop and touch` — quiet ticks, tapered previews, searchable outline, and contextual resize grips.
+- `e868177`: Merge navigator PR #5.
+- `8fe2775`: `feat: add conversation turn navigator` — preview and jump between user turns.
 - `7c5f73d`: `docs: mark poll runtime as source of truth`
 - `99d0aa8`: `docs: clarify poll runtime submit UX`
 - `51d28c9`: `feat: migrate chat runtime to poll-first execution`
 
 ## 3) Recent Change
+
+- 2026-09-08: Refine conversation navigation with uniform 12px resting ticks and tapered hover/focus expansion. Show controls only for overflowing conversations with at least three turns. Use an outline sheet on touch/narrow panes, with search for 12+ turns and a desktop outline shortcut for long chats. Hold reading position while exploring the outline; restore keyboard focus on close. Pane grips appear only on hover/focus/drag.
 
 - 2026-09-07: Add a compact conversation navigator for three or more visible user turns. Markers preview the prompt and first assistant text, track reading position, and jump within the chat scroll container. Keyboard navigation, attachment-only prompts, reduced motion, bounded long lists, pane resizing, and thread switching are supported. Hidden messages never enter previews.
 
@@ -151,8 +155,10 @@ Current behavior:
 - History activity indicators are backend-driven only.
 - Cross-tab ownership logic and observer mode were removed.
 - Last-seen tracking remains for unseen completion indicators.
-- A left-edge conversation navigator appears after three user turns. Selecting a turn releases bottom-follow so polling updates do not pull readers away from older messages; the existing bottom button restores following.
-- Navigator previews are plain text, with no tool payloads or reasoning blocks. Long marker lists scroll inside a bounded rail. The navigator is removed in full-width artifact mode.
+- Navigation appears for 3+ visible user turns only when the chat overflows. Pointer devices with chat width >=640px show a bounded left-edge rail: uniform 12px ticks at rest, 52/36/24/16px taper around hover or keyboard focus, 24px click targets, and a darker reading marker.
+- Touch/narrow panes use a header outline action and modal sheet with large rows. At 12+ turns, search is available and desktop also exposes the outline. Opening it pauses bottom-follow and centers/focuses the current row; closing restores trigger focus. Selecting a turn scrolls only the chat. The existing bottom button restores following.
+- Navigator previews/search use prompt and first assistant text, excluding hidden messages, tool payloads, and reasoning blocks. Attachment-only prompts have a fallback label; a pending final response has quiet status text. Arrow keys, Home/End, PageUp/PageDown, Escape, reduced motion, pane resizing, and thread switches are supported. Full-width artifacts hide navigation.
+- History/chat and chat/artifact resize grips retain their hit areas and keyboard controls but appear only on hover, keyboard focus, or drag; hover titles describe the resize action.
 
 Primary files:
 

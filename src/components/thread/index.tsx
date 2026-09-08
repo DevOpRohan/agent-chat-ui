@@ -428,6 +428,9 @@ export function Thread() {
     parseAsBoolean.withDefault(false),
   );
   const [input, setInput] = useState("");
+  const [navigatorTriggerContainer, setNavigatorTriggerContainer] =
+    useState<HTMLDivElement | null>(null);
+  const [conversationRailVisible, setConversationRailVisible] = useState(false);
   const [enterToSend, setEnterToSend] = useState(true);
   const {
     contentBlocks,
@@ -1097,6 +1100,7 @@ export function Thread() {
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize history and chat panes"
+        title="Drag to resize history and chat panes"
         aria-hidden={showDesktopHistoryHandle ? undefined : "true"}
         tabIndex={showDesktopHistoryHandle ? 0 : -1}
         onPointerDown={handleHistoryResizePointerDown}
@@ -1104,9 +1108,9 @@ export function Thread() {
       >
         <span
           className={cn(
-            "bg-border pointer-events-none my-auto h-20 w-px rounded-full transition-colors",
+            "bg-foreground/30 pointer-events-none my-auto h-12 w-px rounded-full opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none",
             paneDragState.type === "history"
-              ? "bg-primary"
+              ? "bg-primary opacity-100"
               : "group-hover:bg-foreground/40",
           )}
         />
@@ -1170,7 +1174,7 @@ export function Thread() {
             )}
             {chatStarted && (
               <div className="relative z-10 flex items-center gap-3 p-2">
-                <div className="relative flex items-center justify-start gap-2">
+                <div className="relative flex min-w-0 items-center justify-start gap-2">
                   <div className="absolute left-0 z-10">
                     {(!chatHistoryOpen || !isLargeScreen) && (
                       <Button
@@ -1188,7 +1192,7 @@ export function Thread() {
                     )}
                   </div>
                   <motion.button
-                    className="flex cursor-pointer items-center gap-2"
+                    className="flex min-w-0 cursor-pointer items-center gap-2"
                     onClick={() => setThreadId(null)}
                     animate={{
                       marginLeft: !chatHistoryOpen ? 48 : 0,
@@ -1204,12 +1208,13 @@ export function Thread() {
                       height={40}
                       variant={logoVariant}
                     />
-                    <span className="text-xl font-semibold tracking-tight">
+                    <span className="truncate text-xl font-semibold tracking-tight">
                       Question Crafter
                     </span>
                   </motion.button>
                 </div>
-                <div className="ml-auto">
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                  <div ref={setNavigatorTriggerContainer} />
                   <ThreadSettings
                     enterToSend={enterToSend}
                     onEnterToSendChange={setEnterToSend}
@@ -1227,7 +1232,7 @@ export function Thread() {
                   !chatStarted &&
                     "mt-[clamp(4rem,20vh,25vh)] flex flex-col items-stretch",
                   chatStarted && "grid grid-rows-[1fr_auto]",
-                  showConversationNavigator && "pl-9 sm:pl-12",
+                  conversationRailVisible && "pl-16",
                 )}
                 contentClassName="pt-8 pb-16 max-w-3xl min-w-0 mx-auto flex w-full flex-col gap-4"
                 content={
@@ -1429,6 +1434,9 @@ export function Thread() {
                 <ConversationNavigator
                   key={threadId ?? "new"}
                   messages={visibleMessages}
+                  triggerContainer={navigatorTriggerContainer}
+                  isWorking={showWorkingBadge}
+                  onRailVisibilityChange={setConversationRailVisible}
                 />
               )}
             </StickToBottom>
@@ -1446,6 +1454,7 @@ export function Thread() {
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize chat and artifact panes"
+              title="Drag to resize chat and artifact panes"
               aria-hidden={showDesktopArtifactHandle ? undefined : "true"}
               tabIndex={showDesktopArtifactHandle ? 0 : -1}
               onPointerDown={handleArtifactResizePointerDown}
@@ -1453,9 +1462,9 @@ export function Thread() {
             >
               <span
                 className={cn(
-                  "bg-border pointer-events-none my-auto h-20 w-px rounded-full transition-colors",
+                  "bg-foreground/30 pointer-events-none my-auto h-12 w-px rounded-full opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none",
                   paneDragState.type === "artifact"
-                    ? "bg-primary"
+                    ? "bg-primary opacity-100"
                     : "group-hover:bg-foreground/40",
                 )}
               />

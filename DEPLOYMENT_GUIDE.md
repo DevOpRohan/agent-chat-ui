@@ -222,6 +222,10 @@ docker buildx imagetools inspect "gcr.io/cerebryai/question_crafter_agent_ui:lat
 
 ## Deploy to Cloud Run
 
+For an existing service, deploy a pinned image digest with `--no-traffic` first, preserving its runtime/IAP configuration. Set only the environment-specific OpenAI secret reference with `--update-secrets OPENAI_API_KEY=OPENAI_API_KEY_DEV:latest` for develop or `OPENAI_API_KEY_PROD:latest` for production. Public build arguments must also target the corresponding LangGraph environment; a develop image must not be promoted as a production image.
+
+Validate the develop tag, then a production candidate tag. Promote the exact verified production revision using `--to-revisions=REVISION_NAME=100`, preserving the develop tag and recording the prior production revision for rollback. Avoid `LATEST` when different environments share this service. Cloud Build can build the Dockerfile remotely using the same build arguments when local storage is limited.
+
 ### Production Deployment (Full Traffic)
 
 ```bash
@@ -231,7 +235,7 @@ gcloud run deploy agent-chat-ui \
   --platform managed \
   --allow-unauthenticated \
   --set-env-vars "IAP_AUDIENCE=/projects/55487246974/locations/asia-south1/services/agent-chat-ui,LANGGRAPH_AUTH_JWT_ISSUER=agent-chat-ui-frontend-a8b6a18a,LANGGRAPH_AUTH_JWT_AUDIENCE=question_crafter-backend-a8b6a18a,MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=question_crafter_public,NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,OPENAI_FILES_PURPOSE=assistants,OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
-  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
+  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY_PROD:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
 ```
 
 > ⚠️ **Important — Verify traffic after deploy**: `gcloud run deploy` may report a stale revision as "serving 100%" if the new image has the same digest as an existing revision (Cloud Run deduplicates revisions by image content). Always verify after deploying:
@@ -259,7 +263,7 @@ gcloud run deploy agent-chat-ui \
   --no-traffic \
   --tag develop \
   --set-env-vars "IAP_AUDIENCE=/projects/55487246974/locations/asia-south1/services/agent-chat-ui,LANGGRAPH_AUTH_JWT_ISSUER=agent-chat-ui-frontend-a8b6a18a,LANGGRAPH_AUTH_JWT_AUDIENCE=question_crafter-backend-a8b6a18a,MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=question_crafter_public,NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,OPENAI_FILES_PURPOSE=assistants,OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
-  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
+  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY_DEV:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
 ```
 
 ### Develop Deployment (Pinned Image Example)
@@ -272,7 +276,7 @@ gcloud run deploy agent-chat-ui \
   --no-traffic \
   --tag develop \
   --set-env-vars "IAP_AUDIENCE=/projects/55487246974/locations/asia-south1/services/agent-chat-ui,LANGGRAPH_AUTH_JWT_ISSUER=agent-chat-ui-frontend-a8b6a18a,LANGGRAPH_AUTH_JWT_AUDIENCE=question_crafter-backend-a8b6a18a,MODEL_PROVIDER=OPENAI,GCS_BUCKET_NAME=question_crafter_public,NEXT_PUBLIC_MODEL_PROVIDER=OPENAI,NEXT_PUBLIC_AGENT_RECURSION_LIMIT=50,OPENAI_FILES_PURPOSE=assistants,OPENAI_FILES_EXPIRES_AFTER_ANCHOR=created_at,OPENAI_FILES_EXPIRES_AFTER_SECONDS=2592000" \
-  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
+  --set-secrets "OPENAI_API_KEY=OPENAI_API_KEY_DEV:latest,LANGGRAPH_AUTH_JWT_SECRET=LANGGRAPH_AUTH_JWT_SECRET:latest"
 ```
 
 Access at: `https://develop---agent-chat-ui-6duluzey3a-el.a.run.app`
