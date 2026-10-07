@@ -359,3 +359,28 @@ gcloud run logs read --service agent-chat-ui --region asia-south1 --limit 50
 - With Uniform Bucket-Level Access (UBLA), do not set object ACLs
 - For public previews, grant `Storage Object Viewer` to `allUsers` via bucket IAM
 - The app returns both `gs://` and `https://storage.googleapis.com/<bucket>/<object>` URLs
+
+## Daily-budget release (2026-10-08 IST)
+
+Runtime source `ca5faf6684e4249be5d3a9f031b4a7131fea67c1` is pushed to `codex/user-cost-limits`. Cloud Build `6718459b-fd73-4810-aa84-4f045c29d8c3` in `us-east1` succeeded with separately compiled development and production API endpoints.
+
+| Environment | Cloud Run revision | Image digest | Routing |
+| --- | --- | --- | --- |
+| Development | `agent-chat-ui-used-meter-dev-1008` | `sha256:25bc708fd804e7155721fce88cc785dd78ed89557be72c59368a70d3a54836cc` | `develop` tag, 0% canonical traffic |
+| Production | `agent-chat-ui-used-meter-prod-1008` | `sha256:e8a0b2f9b0234eae23167e4ff23f55f39396a54dcc48eb38d30921bf0bb72941` | 100% canonical traffic |
+
+Both images are in `us-east1-docker.pkg.dev/cerebryai/question-crafter-user-limits/ui`. The Cloud Run service is `agent-chat-ui`, project `cerebryai`, region `asia-south1`. Development was verified first; production was staged at zero traffic and checked Ready before promotion. IAP remains enabled, recursion limit remains 50, and 2 CPU / 2 GiB resources are unchanged. Development references `OPENAI_API_KEY_DEV:latest`; production references `OPENAI_API_KEY_PROD:latest`. Existing JWT secret references remain unchanged. No credential values or local environment files were read for this release.
+
+Authenticated Safari acceptance passed at the development tag and at [the canonical production origin](https://agent-chat-ui-55487246974.asia-south1.run.app). Both displayed the current balance as `$5 left of $5` and `0% used` in the final two-line tooltip. Production used a fresh tab, preserving the existing unsent draft. No real agent messages were submitted during UI acceptance. Use the canonical long production URL: the shorter Cloud Run alias and candidate tags are not backend CORS origins.
+
+Validation: production build with integrated lint/type checks passed. The complete 22-scenario notification, budget and navigator suite passed before the final copy/arc refinement; all four affected final budget scenarios passed afterward, including genuine mobile touch, hover/focus, delayed IST rollover and 0/30/49/50/74/75/100-percent SVG/colour assertions. Desktop/mobile screenshots were reviewed. Existing lint and build warnings remain. Local fixture tests and hosted authenticated read checks are distinct; the hosted UI suite was not run through automated IAP login.
+
+Rollback target is `agent-chat-ui-nav-36a3ccc-prod-0908`:
+
+```bash
+gcloud run services update-traffic agent-chat-ui \
+  --project cerebryai --region asia-south1 \
+  --to-revisions agent-chat-ui-nav-36a3ccc-prod-0908=100
+```
+
+The backend admission repair and quota/extra-credit API acceptance are tracked in the QuestionCrafterAgent and user-limit monitoring repositories.

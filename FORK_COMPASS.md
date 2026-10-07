@@ -36,10 +36,12 @@ Navigator refinement baseline (fetched 2026-09-08):
 
 Daily-budget implementation snapshot (2026-10-08):
 
-- `40e060f`: 84 fork-only commits against the pinned `upstream/main`; 95 files changed, 13,673 insertions and 1,476 deletions (`git diff upstream/main...40e060f --shortstat`).
+- Runtime source `ca5faf6`: 86 fork-only commits against the pinned `upstream/main`; 95 files changed, 13,868 insertions and 1,476 deletions (`git diff upstream/main...ca5faf6 --shortstat`). Release documentation follows in a separate commit.
 
 Recent fork-only commit log:
 
+- `ca5faf6`: `fix: show used budget arc with concise tooltip` — neutral track, used-percentage arc and exactly two tooltip lines.
+- `37a3f23`: `feat: tuck daily budget into a compact composer control` — footer placement, hover/focus/touch details and semantic thresholds.
 - `40e060f`: `feat: show daily budget and durable limit notifications` — current-day balance ring, extra credits, midnight IST reset, five-second quota notices and preserved drafts.
 
 - This PR: `feat: refine conversation navigation for desktop and touch` — quiet ticks, tapered previews, searchable outline, and contextual resize grips.
@@ -255,6 +257,6 @@ Start here when modifying the fork:
 - `src/providers/Stream.tsx` and `src/providers/client.ts`: shared retry hook; one actionable toast for rejected submissions.
 - Composer, human-message editor, and agent-inbox approval paths await run admission, preserve rejected drafts, and suppress duplicate error/success messages.
 - `tests/user-cost-limit.spec.ts` and `playwright.user-limits.config.ts`: deterministic SDK and browser coverage, without model calls.
-- Existing fork commit/diff snapshots above are historical. This feature adds no commits yet.
+- Runtime source `ca5faf6` is deployed to development and production. Release evidence and rollback target are recorded in `DEPLOYMENT_GUIDE.md`; earlier snapshots above remain historical.
 - `src/components/thread/daily-budget.tsx`: quiet 24px static budget ring in a 36px composer-footer button. Hover/focus/tap reveals only remaining/total USD and percent used in a centered rounded tooltip; no other rows or labels. The coloured arc depicts used percentage over a neutral grey track. Green/amber/red thresholds are 50% and 75% of base plus extra credits; 0% has no coloured arc and exhausted/zero-allowance budgets are fully red. Minute/run-state refresh and unavailable state never fabricate a balance. Runtime provides the existing authenticated transport to `GET /user/limits`.
 - Pending-approval reset effects compare interrupt contents, so identical polling responses keep single and batch edits intact.
