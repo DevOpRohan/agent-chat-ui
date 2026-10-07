@@ -300,7 +300,7 @@ test("daily ring stays quiet and reveals current details on hover and keyboard f
   const details = page.locator('[data-slot="tooltip-content"]');
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: $5.00 left of $5.00 today",
+    "Daily budget: $5 left of $5, 0% used",
   );
   await expect(details).toHaveCount(0);
   await expect(ring).toHaveText("");
@@ -319,13 +319,13 @@ test("daily ring stays quiet and reveals current details on hover and keyboard f
   await page.clock.fastForward(61_000);
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: $5.20 left of $7.00 today",
+    "Daily budget: $5.20 left of $7, 25% used",
   );
   await ring.hover();
   await expect(details).toBeVisible();
-  await expect(details).toContainText("Spent today: $1.80");
-  await expect(details).toContainText("Extra credits: $2.00");
-  await expect(details).toContainText("Resets at midnight IST");
+  await expect(
+    details.locator(':scope > [data-testid="daily-budget-details"] > p'),
+  ).toHaveText(["$5.20 left of $7", "25% used"]);
   await page.waitForTimeout(250);
   await page.screenshot({
     path: testInfo.outputPath("daily-budget-desktop-details.png"),
@@ -345,20 +345,20 @@ test("daily ring stays quiet and reveals current details on hover and keyboard f
   await page.clock.fastForward(61_000);
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: $0.00 left of $7.00 today",
+    "Daily budget: $0 left of $7, 107% used",
   );
   fixture.budgetStatus = 503;
   await page.clock.fastForward(61_000);
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: Daily budget temporarily unavailable",
+    "Daily budget: Budget unavailable",
   );
   fixture.budgetStatus = 200;
   fixture.budget.remaining_microusd = -1;
   await page.clock.fastForward(61_000);
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: Daily budget temporarily unavailable",
+    "Daily budget: Budget unavailable",
   );
   fixture.budgetStatus = 404;
   await page.clock.fastForward(61_000);
@@ -373,7 +373,7 @@ test("daily ring clears the old balance at the reset boundary", async ({
   const ring = page.getByTestId("daily-budget");
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: $5.00 left of $5.00 today",
+    "Daily budget: $5 left of $5, 0% used",
   );
   fixture.budget = {
     ...fixture.budget,
@@ -386,7 +386,7 @@ test("daily ring clears the old balance at the reset boundary", async ({
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: $1.00 left of $5.00 today",
+    "Daily budget: $1 left of $5, 80% used",
   );
   fixture.budgetDelayMs = 3500;
   fixture.budgetStatus = 503;
@@ -396,12 +396,12 @@ test("daily ring clears the old balance at the reset boundary", async ({
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: Updating daily budget…",
+    "Daily budget: Checking budget…",
     { timeout: 3000 },
   );
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: Daily budget temporarily unavailable",
+    "Daily budget: Budget unavailable",
     { timeout: 5000 },
   );
 });
@@ -415,12 +415,14 @@ test.describe("budget touch details", () => {
   test("tap toggles details, outside dismisses, and the footer stays compact", async ({
     page,
   }, testInfo) => {
+    await page.emulateMedia({ colorScheme: "dark" });
     await openChat(page);
+    await expect(page.locator("html")).toHaveClass(/dark/);
     const ring = page.getByTestId("daily-budget");
     const details = page.locator('[data-slot="tooltip-content"]');
     await expect(ring).toHaveAttribute(
       "aria-label",
-      "Daily budget: $5.00 left of $5.00 today",
+      "Daily budget: $5 left of $5, 0% used",
     );
     await expect(details).toHaveCount(0);
     const box = await ring.boundingBox();
@@ -431,7 +433,9 @@ test.describe("budget touch details", () => {
     });
     await ring.tap();
     await expect(details).toBeVisible();
-    await expect(details).toContainText("$5.00 left of $5.00 today");
+    await expect(
+      details.locator(':scope > [data-testid="daily-budget-details"] > p'),
+    ).toHaveText(["$5 left of $5", "0% used"]);
     await page.waitForTimeout(250);
     await page.screenshot({
       path: testInfo.outputPath("daily-budget-mobile-details.png"),
@@ -450,45 +454,69 @@ test.describe("budget touch details", () => {
 
 test("budget ring colours use the full daily allowance at the 50 and 75 percent thresholds", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.clock.install();
   const fixture = await openChat(page);
   const ring = page.getByTestId("daily-budget");
   await expect(ring).toHaveAttribute(
     "aria-label",
-    "Daily budget: $5.00 left of $5.00 today",
+    "Daily budget: $5 left of $5, 0% used",
   );
+  await expect(ring.locator("circle")).toHaveCount(1);
+  await expect(ring.locator("circle").first()).toHaveClass(/text-zinc-200/);
   for (const [percent, colour] of [
+    [30, "green"],
     [49, "green"],
     [50, "amber"],
     [74, "amber"],
     [75, "red"],
     [100, "red"],
   ] as const) {
+    const allowance = percent === 30 ? 5 : 10;
     fixture.budget = {
       ...fixture.budget,
-      extra_credit_microusd: 5_000_000,
-      limit_microusd: 10_000_000,
-      spent_microusd: percent * 100_000,
-      remaining_microusd: (100 - percent) * 100_000,
+      extra_credit_microusd: (allowance - 5) * 1_000_000,
+      limit_microusd: allowance * 1_000_000,
+      spent_microusd: percent * allowance * 10_000,
+      remaining_microusd: (100 - percent) * allowance * 10_000,
     };
     await page.clock.fastForward(61_000);
     await expect(ring).toHaveAttribute(
       "aria-label",
-      `Daily budget: $${((100 - percent) / 10).toFixed(2)} left of $10.00 today`,
+      `Daily budget: $${(((100 - percent) * allowance) / 100).toFixed(2).replace(/\.00$/, "")} left of $${allowance}, ${percent}% used`,
     );
     await expect(ring.locator("svg")).toHaveClass(
       new RegExp(`text-${colour}-600`),
+    );
+    await expect(ring.locator("circle").nth(1)).toHaveAttribute(
+      "stroke-dasharray",
+      `${percent} 100`,
     );
     await page.getByPlaceholder("Type your message...").focus();
     await ring.focus();
     await expect(page.locator('[data-slot="tooltip-content"]')).toContainText(
       `${percent}% used`,
     );
+    if (percent === 30) {
+      await page.clock.runFor(500);
+      await page.screenshot({
+        path: testInfo.outputPath("budget-used-30-tooltip.png"),
+      });
+    }
     await page.keyboard.press("Escape");
     await page.mouse.move(0, 0);
+    if (percent === 75) {
+      await page.getByText("Original answer", { exact: true }).click();
+      await page.clock.runFor(500);
+      await expect(page.locator('[data-slot="tooltip-content"]')).toHaveCount(
+        0,
+      );
+      await page.screenshot({
+        path: testInfo.outputPath("budget-used-75-rest.png"),
+      });
+    }
   }
-  await expect(ring.locator("circle").first()).toHaveClass("opacity-70");
+  await expect(ring.locator("circle").first()).toHaveClass(/text-zinc-200/);
   fixture.budget = {
     ...fixture.budget,
     base_limit_microusd: 0,
@@ -499,4 +527,8 @@ test("budget ring colours use the full daily allowance at the 50 and 75 percent 
   };
   await page.clock.fastForward(61_000);
   await expect(ring.locator("svg")).toHaveClass(/text-red-600/);
+  await expect(ring.locator("circle").nth(1)).toHaveAttribute(
+    "stroke-dasharray",
+    "100 100",
+  );
 });

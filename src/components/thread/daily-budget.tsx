@@ -19,7 +19,8 @@ const budgetSchema = z.object({
   resets_at: z.string(),
 });
 type Budget = z.infer<typeof budgetSchema>;
-const dollars = (micros: number) => `$${(micros / 1_000_000).toFixed(2)}`;
+const dollars = (micros: number) =>
+  `$${(micros / 1_000_000).toFixed(2).replace(/\.00$/, "")}`;
 
 export function DailyBudget() {
   const { fetchDailyBudget, isWorking } = useThreadRuntime();
@@ -104,9 +105,6 @@ export function DailyBudget() {
   }, [fetchDailyBudget, isWorking]);
 
   if (status === "unsupported") return null;
-  const fraction = budget?.limit_microusd
-    ? budget.remaining_microusd / budget.limit_microusd
-    : 0;
   const used = budget
     ? budget.limit_microusd
       ? budget.spent_microusd / budget.limit_microusd
@@ -120,17 +118,17 @@ export function DailyBudget() {
         ? "text-amber-600 dark:text-amber-400"
         : "text-green-600 dark:text-green-400";
   const summary = budget
-    ? `${dollars(budget.remaining_microusd)} left of ${dollars(budget.limit_microusd)} today`
+    ? `${dollars(budget.remaining_microusd)} left of ${dollars(budget.limit_microusd)}`
     : status === "unavailable"
-      ? "Daily budget temporarily unavailable"
-      : "Updating daily budget…";
+      ? "Budget unavailable"
+      : "Checking budget…";
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>
         <button
           type="button"
           data-testid="daily-budget"
-          aria-label={`Daily budget: ${summary}`}
+          aria-label={`Daily budget: ${summary}${budget ? `, ${Math.floor(used * 100)}% used` : ""}`}
           aria-expanded={open}
           className="text-muted-foreground hover:bg-background/70 hover:text-foreground focus-visible:ring-ring flex size-9 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2"
           onPointerDown={(event) => event.preventDefault()}
@@ -151,20 +149,22 @@ export function DailyBudget() {
               fill="none"
               stroke="currentColor"
               strokeWidth="3"
-              className={budget && fraction === 0 ? "opacity-70" : "opacity-20"}
+              className="text-zinc-200 dark:text-zinc-700"
             />
-            <circle
-              cx="18"
-              cy="18"
-              r="14"
-              pathLength="100"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeDasharray={budget ? `${fraction * 100} 100` : "3 7"}
-              strokeLinecap="round"
-              className="opacity-70"
-            />
+            {budget && used > 0 && (
+              <circle
+                cx="18"
+                cy="18"
+                r="14"
+                pathLength="100"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeDasharray={`${Math.min(1, used) * 100} 100`}
+                strokeLinecap="round"
+                className="opacity-70"
+              />
+            )}
           </svg>
         </button>
       </TooltipTrigger>
@@ -172,24 +172,11 @@ export function DailyBudget() {
         side="top"
         align="end"
         sideOffset={8}
-        className="max-w-[calc(100vw-2rem)] text-left text-wrap"
+        className="max-w-[calc(100vw-2rem)] rounded-xl px-3 py-2 text-center text-wrap"
       >
         <div data-testid="daily-budget-details" className="space-y-1 py-1">
           <p className="font-semibold">{summary}</p>
-          {budget ? (
-            <>
-              <p>{Math.floor(used * 100)}% used</p>
-              <p>Spent today: {dollars(budget.spent_microusd)}</p>
-              <p>
-                Daily limit: {dollars(budget.base_limit_microusd)} · Extra
-                credits: {dollars(budget.extra_credit_microusd)}
-              </p>
-              <p>Resets at midnight IST</p>
-            </>
-          ) : (
-            <p>Your balance will update automatically.</p>
-          )}
-          <p className="opacity-75">Updates about once a minute</p>
+          {budget && <p>{Math.floor(used * 100)}% used</p>}
         </div>
       </TooltipContent>
     </Tooltip>
