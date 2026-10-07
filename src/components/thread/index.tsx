@@ -1334,7 +1334,6 @@ export function Thread() {
                         </p>
                       </div>
                     ) : null}
-                    <DailyBudget />
                     <div
                       ref={dropRef}
                       className={cn(
@@ -1405,29 +1404,32 @@ export function Thread() {
                             className="hidden"
                             disabled={isUploading}
                           />
-                          {showWorkingBadge ? (
-                            <Button
-                              type="button"
-                              key="stop"
-                              onClick={() => void handleCancel()}
-                              className="ml-auto"
-                            >
-                              <LoaderCircle className="h-4 w-4 animate-spin" />
-                              Cancel
-                            </Button>
-                          ) : (
-                            <Button
-                              type="submit"
-                              className="ml-auto shadow-md transition-all"
-                              disabled={
-                                showWorkingBadge ||
-                                isUploading ||
-                                (!input.trim() && contentBlocks.length === 0)
-                              }
-                            >
-                              Send
-                            </Button>
-                          )}
+                          <div className="ml-auto flex items-center gap-1">
+                            <DailyBudget />
+                            {showWorkingBadge ? (
+                              <Button
+                                type="button"
+                                key="stop"
+                                onClick={() => void handleCancel()}
+                                className="ml-auto"
+                              >
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                                Cancel
+                              </Button>
+                            ) : (
+                              <Button
+                                type="submit"
+                                className="ml-auto shadow-md transition-all"
+                                disabled={
+                                  showWorkingBadge ||
+                                  isUploading ||
+                                  (!input.trim() && contentBlocks.length === 0)
+                                }
+                              >
+                                Send
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </form>
                     </div>

@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { useThreadRuntime } from "@/providers/Stream";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const money = z.number().int().nonnegative().safe();
 const budgetSchema = z.object({
@@ -18,6 +23,7 @@ const dollars = (micros: number) => `$${(micros / 1_000_000).toFixed(2)}`;
 
 export function DailyBudget() {
   const { fetchDailyBudget, isWorking } = useThreadRuntime();
+  const [open, setOpen] = useState(false);
   const [budget, setBudget] = useState<Budget | null>(null);
   const [status, setStatus] = useState<
     "loading" | "ready" | "unavailable" | "unsupported"
@@ -101,60 +107,91 @@ export function DailyBudget() {
   const fraction = budget?.limit_microusd
     ? budget.remaining_microusd / budget.limit_microusd
     : 0;
+  const used = budget
+    ? budget.limit_microusd
+      ? budget.spent_microusd / budget.limit_microusd
+      : 1
+    : 0;
+  const ringColor = !budget
+    ? "text-muted-foreground"
+    : used >= 0.75
+      ? "text-red-600 dark:text-red-400"
+      : used >= 0.5
+        ? "text-amber-600 dark:text-amber-400"
+        : "text-green-600 dark:text-green-400";
+  const summary = budget
+    ? `${dollars(budget.remaining_microusd)} left of ${dollars(budget.limit_microusd)} today`
+    : status === "unavailable"
+      ? "Daily budget temporarily unavailable"
+      : "Updating daily budget…";
   return (
-    <div
-      data-testid="daily-budget"
-      role="status"
-      title="Updates about once a minute"
-      className="text-muted-foreground mx-auto mb-2 flex w-full max-w-3xl items-center gap-2.5 px-1 text-xs"
-    >
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 36 36"
-        className="size-9 shrink-0 -rotate-90"
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          data-testid="daily-budget"
+          aria-label={`Daily budget: ${summary}`}
+          aria-expanded={open}
+          className="text-muted-foreground hover:bg-background/70 hover:text-foreground focus-visible:ring-ring flex size-9 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={(event) => {
+            event.preventDefault();
+            setOpen((value) => !value);
+          }}
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 36 36"
+            className={`size-6 -rotate-90 ${ringColor}`}
+          >
+            <circle
+              cx="18"
+              cy="18"
+              r="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              className={budget && fraction === 0 ? "opacity-70" : "opacity-20"}
+            />
+            <circle
+              cx="18"
+              cy="18"
+              r="14"
+              pathLength="100"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeDasharray={budget ? `${fraction * 100} 100` : "3 7"}
+              strokeLinecap="round"
+              className="opacity-70"
+            />
+          </svg>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side="top"
+        align="end"
+        sideOffset={8}
+        className="max-w-[calc(100vw-2rem)] text-left text-wrap"
       >
-        <circle
-          cx="18"
-          cy="18"
-          r="14"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-          className="opacity-15"
-        />
-        <circle
-          cx="18"
-          cy="18"
-          r="14"
-          pathLength="100"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-          strokeDasharray={budget ? `${fraction * 100} 100` : "3 7"}
-          strokeLinecap="round"
-          className={
-            budget
-              ? fraction > 0.2
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-amber-600 dark:text-amber-400"
-              : "opacity-40"
-          }
-        />
-      </svg>
-      <div className="min-w-0">
-        <p className="text-foreground text-sm font-medium">
-          {budget
-            ? `${dollars(budget.remaining_microusd)} left of ${dollars(budget.limit_microusd)} today`
-            : status === "unavailable"
-              ? "Daily budget temporarily unavailable"
-              : "Updating daily budget…"}
-        </p>
-        <p>
-          {budget
-            ? `Resets at midnight IST${budget.extra_credit_microusd ? ` · Includes ${dollars(budget.extra_credit_microusd)} extra credits` : ""}`
-            : "Your balance will update automatically."}
-        </p>
-      </div>
-    </div>
+        <div data-testid="daily-budget-details" className="space-y-1 py-1">
+          <p className="font-semibold">{summary}</p>
+          {budget ? (
+            <>
+              <p>{Math.floor(used * 100)}% used</p>
+              <p>Spent today: {dollars(budget.spent_microusd)}</p>
+              <p>
+                Daily limit: {dollars(budget.base_limit_microusd)} · Extra
+                credits: {dollars(budget.extra_credit_microusd)}
+              </p>
+              <p>Resets at midnight IST</p>
+            </>
+          ) : (
+            <p>Your balance will update automatically.</p>
+          )}
+          <p className="opacity-75">Updates about once a minute</p>
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }

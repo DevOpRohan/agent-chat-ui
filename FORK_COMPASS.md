@@ -34,7 +34,13 @@ Navigator refinement baseline (fetched 2026-09-08):
 - Branch snapshot including this PR: 82 fork-only commits; 91 files changed, 12930 insertions(+), 1430 deletions(-) (`git diff upstream/main...HEAD --shortstat`).
 - Refinement: updates the navigator, thread shell, deterministic browser coverage, README, this compass, scratchpad, and release guidance. Runtime, upload, authentication, and dependency behavior are unchanged.
 
+Daily-budget implementation snapshot (2026-10-08):
+
+- `40e060f`: 84 fork-only commits against the pinned `upstream/main`; 95 files changed, 13,673 insertions and 1,476 deletions (`git diff upstream/main...40e060f --shortstat`).
+
 Recent fork-only commit log:
+
+- `40e060f`: `feat: show daily budget and durable limit notifications` — current-day balance ring, extra credits, midnight IST reset, five-second quota notices and preserved drafts.
 
 - This PR: `feat: refine conversation navigation for desktop and touch` — quiet ticks, tapered previews, searchable outline, and contextual resize grips.
 - `e868177`: Merge navigator PR #5.
@@ -250,5 +256,5 @@ Start here when modifying the fork:
 - Composer, human-message editor, and agent-inbox approval paths await run admission, preserve rejected drafts, and suppress duplicate error/success messages.
 - `tests/user-cost-limit.spec.ts` and `playwright.user-limits.config.ts`: deterministic SDK and browser coverage, without model calls.
 - Existing fork commit/diff snapshots above are historical. This feature adds no commits yet.
-- `src/components/thread/daily-budget.tsx`: compact remaining-budget ring above the composer, extra-credit total, midnight IST reset, minute/run-state refresh, and unavailable state without a fabricated balance. Runtime provides the existing authenticated transport to `GET /user/limits`.
+- `src/components/thread/daily-budget.tsx`: quiet 24px static budget ring in a 36px composer-footer button. Hover/focus/tap reveals remaining/total USD, spent, percent used, credits and IST reset. Green/amber/red thresholds are 50% and 75% of base plus extra credits; exhausted budgets remain visibly red. Minute/run-state refresh and unavailable state never fabricate a balance. Runtime provides the existing authenticated transport to `GET /user/limits`.
 - Pending-approval reset effects compare interrupt contents, so identical polling responses keep single and batch edits intact.
