@@ -686,3 +686,14 @@ Plan: keep one notification outside the page loading boundary, with separate quo
 
 - 2026-10-08 | Release complete | Pushed runtime source ca5faf6. Cloud Build 6718459b-fd73-4810-aa84-4f045c29d8c3 succeeded; separate dev/prod image digests and rollback target are in DEPLOYMENT_GUIDE.md. Verified develop first, staged production at zero traffic, then promoted agent-chat-ui-used-meter-prod-1008 to 100%. IAP, recursion50, resource limits and environment-specific upload secret references were verified intact.
 - 2026-10-08 | Hosted acceptance | Existing authenticated Safari session showed $5 left of $5 / 0% used in both final environments. Production validation used a new canonical-origin tab and preserved the user's existing draft tab. No model requests were sent. Temporary local test servers were stopped; tracked source was clean before this documentation-only update.
+
+
+## 2026-10-08 — Attachment count limits
+
+Problem: unrestricted PDF/image batches inflate model contexts. Latest request permits 20 images and 2 PDFs per message and tool call.
+Plan: consolidate picker/drop/paste admission, count completed plus in-flight attachments, reject excess batches before upload, preserve successful files on partial failure, and show both independent counters. Preserve the existing 100 MB server upload size and URL/OpenAI file ID contracts. API upload endpoints accept one file per request, so aggregate message/tool enforcement belongs in the backend as well.
+Evidence: initial inspection confirmed three duplicated Promise.all paths with no count guard. Isolated worktree starts at origin/main 06ef3a7; existing dirty developer checkout remains untouched.
+
+- 2026-10-08 | Validation | Production build, integrated lint/type validation and explicit TypeScript check passed. Existing lint warnings and the build-only nuqs/localStorage warning remain. Initial three attachment scenarios passed. Final suite includes restored-attachment retry protection and adjacent daily-budget/navigation regressions. Mobile screenshot reviewed: counts, PDF removal controls and Send fit in 390px.
+- 2026-10-08 | Review refinement | Rejected submission restoration now preserves files added to the next draft; final submission checks block a combined over-limit draft until attachments are removed. Counter and submit guard use the shared maximum constants. No live model calls or storage uploads were made by local tests.
+- 2026-10-08 | Final local regression | All 26 attachment, quota/budget and conversation-navigation Playwright scenarios passed in 1.2 minutes against the local production build, including concurrent reservations and oversized restoration rejection.

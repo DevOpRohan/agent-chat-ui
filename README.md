@@ -130,7 +130,9 @@ When these environment variables are set, the application will use them instead 
 > When `NEXT_PUBLIC_AUTH_MODE=iap`, the UI calls `/api/auth/token` to validate IAP headers and mint a LangGraph JWT for `Authorization: Bearer <token>`.
 
 > [!NOTE]
-> For image/PDF uploads, this project now:
+> For image/PDF uploads, each message allows **up to 20 images and 2 PDFs**. The composer shows both counts, including files still uploading. Picker, drag/drop and paste share the same limit; an over-limit selection is rejected before upload. Remove existing attachments or select fewer files and try again.
+>
+> This project:
 >
 > - Sends images as URL content blocks for small client payloads and fast previews.
 > - Sends PDFs as file ID blocks when using OpenAI (to satisfy LangChain’s OpenAI converter), or as URL blocks for other providers. See FORK_COMPASS.md for details.

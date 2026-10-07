@@ -1,6 +1,16 @@
-import { useState, useRef, useEffect, ChangeEvent } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  ChangeEvent,
+  SetStateAction,
+} from "react";
 import { toast } from "sonner";
-import { ExtendedContentBlock, fileToContentBlock } from "@/lib/multimodal-utils";
+import {
+  ExtendedContentBlock,
+  fileToContentBlock,
+} from "@/lib/multimodal-utils";
 
 export const SUPPORTED_FILE_TYPES = [
   "image/jpeg",
@@ -10,6 +20,9 @@ export const SUPPORTED_FILE_TYPES = [
   "application/pdf",
 ];
 
+export const MAX_IMAGE_ATTACHMENTS = 20;
+export const MAX_PDF_ATTACHMENTS = 2;
+
 interface UseFileUploadOptions {
   initialBlocks?: ExtendedContentBlock[];
 }
@@ -17,77 +30,113 @@ interface UseFileUploadOptions {
 export function useFileUpload({
   initialBlocks = [],
 }: UseFileUploadOptions = {}) {
-  const [contentBlocks, setContentBlocks] = useState<ExtendedContentBlock[]>(
-    initialBlocks,
-  );
-  const [isUploading, setIsUploading] = useState(false);
+  const [contentBlocks, updateContentBlocks] =
+    useState<ExtendedContentBlock[]>(initialBlocks);
+  const blocksRef = useRef(contentBlocks);
+  const pendingRef = useRef<File[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const draftVersion = useRef(0);
+  const isUploading = pendingFiles.length > 0;
   const dropRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
 
-  // Helper to check for duplicates - handles both mimeType and mime_type
-  const isDuplicate = (file: File, blocks: ExtendedContentBlock[]) => {
-    if (file.type === "application/pdf") {
-      return blocks.some(
-        (b) =>
-          b.type === "file" &&
-          ((b as any).mimeType === "application/pdf" || (b as any).mime_type === "application/pdf") &&
-          (b as any).metadata?.filename === file.name,
+  const setContentBlocks = useCallback(
+    (value: SetStateAction<ExtendedContentBlock[]>) => {
+      const next =
+        typeof value === "function" ? value(blocksRef.current) : value;
+      blocksRef.current = next;
+      updateContentBlocks(next);
+    },
+    [],
+  );
+
+  const countAttachments = (blocks: ExtendedContentBlock[], files: File[]) => ({
+    images:
+      blocks.filter((block) => block.type === "image").length +
+      files.filter((file) => file.type.startsWith("image/")).length,
+    pdfs:
+      blocks.filter(
+        (block) =>
+          block.type === "file" &&
+          ((block as any).mimeType === "application/pdf" ||
+            (block as any).mime_type === "application/pdf"),
+      ).length + files.filter((file) => file.type === "application/pdf").length,
+  });
+
+  // All entry points reserve capacity synchronously, including unfinished uploads.
+  const uploadFiles = useCallback(
+    async (files: File[]) => {
+      const uniqueFiles: File[] = [];
+      const duplicates: File[] = [];
+      const invalid = files.filter(
+        (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
       );
-    }
-    if (SUPPORTED_FILE_TYPES.includes(file.type)) {
-      return blocks.some(
-        (b) =>
-          b.type === "image" &&
-          (b as any).metadata?.name === file.name &&
-          ((b as any).mimeType === file.type || (b as any).mime_type === file.type),
+      for (const file of files.filter((file) =>
+        SUPPORTED_FILE_TYPES.includes(file.type),
+      )) {
+        const duplicate =
+          [...pendingRef.current, ...uniqueFiles].some(
+            (pending) =>
+              pending.type === file.type && pending.name === file.name,
+          ) ||
+          blocksRef.current.some((block) => {
+            const mime = (block as any).mimeType || (block as any).mime_type;
+            const name =
+              (block as any).metadata?.filename ||
+              (block as any).metadata?.name;
+            return mime === file.type && name === file.name;
+          });
+        (duplicate ? duplicates : uniqueFiles).push(file);
+      }
+      if (invalid.length) {
+        toast.error(
+          "Unsupported file type. Please upload a JPEG, PNG, GIF, WEBP image or a PDF.",
+        );
+      }
+      if (duplicates.length) {
+        toast.error(
+          `Duplicate file(s) detected: ${duplicates.map((file) => file.name).join(", ")}. Each file can only be uploaded once per message.`,
+        );
+      }
+      if (!uniqueFiles.length) return;
+      const nextCount = countAttachments(blocksRef.current, [
+        ...pendingRef.current,
+        ...uniqueFiles,
+      ]);
+      if (
+        nextCount.images > MAX_IMAGE_ATTACHMENTS ||
+        nextCount.pdfs > MAX_PDF_ATTACHMENTS
+      ) {
+        toast.error(
+          "Each message allows up to 20 images and 2 PDFs. No files from this selection were uploaded. Remove attachments or choose fewer files.",
+        );
+        return;
+      }
+      const version = draftVersion.current;
+      pendingRef.current = [...pendingRef.current, ...uniqueFiles];
+      setPendingFiles(pendingRef.current);
+      const results = await Promise.allSettled(
+        uniqueFiles.map(fileToContentBlock),
       );
-    }
-    return false;
-  };
+      if (version !== draftVersion.current) return;
+      // Keep successful uploads if another upload fails, and release every reservation.
+      const newBlocks = results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      );
+      setContentBlocks((previous) => [...previous, ...newBlocks]);
+      pendingRef.current = pendingRef.current.filter(
+        (file) => !uniqueFiles.includes(file),
+      );
+      setPendingFiles(pendingRef.current);
+    },
+    [setContentBlocks],
+  );
 
   const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    const fileArray = Array.from(files);
-    const validFiles = fileArray.filter((file) =>
-      SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    const invalidFiles = fileArray.filter(
-      (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    const duplicateFiles = validFiles.filter((file) =>
-      isDuplicate(file, contentBlocks),
-    );
-    const uniqueFiles = validFiles.filter(
-      (file) => !isDuplicate(file, contentBlocks),
-    );
-
-    if (invalidFiles.length > 0) {
-      toast.error(
-        "You have uploaded invalid file type. Please upload a JPEG, PNG, GIF, WEBP image or a PDF.",
-      );
-    }
-    if (duplicateFiles.length > 0) {
-      toast.error(
-        `Duplicate file(s) detected: ${duplicateFiles.map((f) => f.name).join(", ")}. Each file can only be uploaded once per message.`,
-      );
-    }
-
-    if (uniqueFiles.length > 0) {
-      setIsUploading(true);
-      try {
-        const newBlocks = await Promise.all(
-          uniqueFiles.map(fileToContentBlock),
-        );
-        setContentBlocks((prev) => [...prev, ...newBlocks]);
-      } catch (err) {
-        // error toasts are handled inside upload utilities
-      } finally {
-        setIsUploading(false);
-      }
-    }
+    const files = Array.from(e.target.files || []);
     e.target.value = "";
+    await uploadFiles(files);
   };
 
   // Drag and drop handlers
@@ -118,43 +167,7 @@ export function useFileUpload({
 
       if (!e.dataTransfer) return;
 
-      const files = Array.from(e.dataTransfer.files);
-      const validFiles = files.filter((file) =>
-        SUPPORTED_FILE_TYPES.includes(file.type),
-      );
-      const invalidFiles = files.filter(
-        (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
-      );
-      const duplicateFiles = validFiles.filter((file) =>
-        isDuplicate(file, contentBlocks),
-      );
-      const uniqueFiles = validFiles.filter(
-        (file) => !isDuplicate(file, contentBlocks),
-      );
-
-      if (invalidFiles.length > 0) {
-        toast.error(
-          "You have uploaded invalid file type. Please upload a JPEG, PNG, GIF, WEBP image or a PDF.",
-        );
-      }
-      if (duplicateFiles.length > 0) {
-        toast.error(
-          `Duplicate file(s) detected: ${duplicateFiles.map((f) => f.name).join(", ")}. Each file can only be uploaded once per message.`,
-        );
-      }
-      if (uniqueFiles.length > 0) {
-        setIsUploading(true);
-        try {
-          const newBlocks = await Promise.all(
-            uniqueFiles.map(fileToContentBlock),
-          );
-          setContentBlocks((prev) => [...prev, ...newBlocks]);
-        } catch (err) {
-          // error toasts are handled inside upload utilities
-        } finally {
-          setIsUploading(false);
-        }
-      }
+      await uploadFiles(Array.from(e.dataTransfer.files));
     };
     const handleWindowDragEnd = (e: DragEvent) => {
       dragCounter.current = 0;
@@ -204,13 +217,18 @@ export function useFileUpload({
       window.removeEventListener("dragover", handleWindowDragOver);
       dragCounter.current = 0;
     };
-  }, [contentBlocks]);
+  }, [uploadFiles]);
 
   const removeBlock = (idx: number) => {
     setContentBlocks((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const resetBlocks = () => setContentBlocks([]);
+  const resetBlocks = () => {
+    draftVersion.current += 1;
+    pendingRef.current = [];
+    setPendingFiles([]);
+    setContentBlocks([]);
+  };
 
   /**
    * Handle paste event for files (images, PDFs)
@@ -233,56 +251,7 @@ export function useFileUpload({
       return;
     }
     e.preventDefault();
-    const validFiles = files.filter((file) =>
-      SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    const invalidFiles = files.filter(
-      (file) => !SUPPORTED_FILE_TYPES.includes(file.type),
-    );
-    const checkDuplicate = (file: File) => {
-      if (file.type === "application/pdf") {
-        return contentBlocks.some(
-          (b) =>
-            b.type === "file" &&
-            ((b as any).mimeType === "application/pdf" || (b as any).mime_type === "application/pdf") &&
-            (b as any).metadata?.filename === file.name,
-        );
-      }
-      if (SUPPORTED_FILE_TYPES.includes(file.type)) {
-        return contentBlocks.some(
-          (b) =>
-            b.type === "image" &&
-            (b as any).metadata?.name === file.name &&
-            ((b as any).mimeType === file.type || (b as any).mime_type === file.type),
-        );
-      }
-      return false;
-    };
-    const duplicateFiles = validFiles.filter(checkDuplicate);
-    const uniqueFiles = validFiles.filter((file) => !checkDuplicate(file));
-    if (invalidFiles.length > 0) {
-      toast.error(
-        "You have pasted an invalid file type. Please paste a JPEG, PNG, GIF, WEBP image or a PDF.",
-      );
-    }
-    if (duplicateFiles.length > 0) {
-      toast.error(
-        `Duplicate file(s) detected: ${duplicateFiles.map((f) => f.name).join(", ")}. Each file can only be uploaded once per message.`,
-      );
-    }
-    if (uniqueFiles.length > 0) {
-      setIsUploading(true);
-      try {
-        const newBlocks = await Promise.all(
-          uniqueFiles.map(fileToContentBlock),
-        );
-        setContentBlocks((prev) => [...prev, ...newBlocks]);
-      } catch (err) {
-        // error toasts are handled inside upload utilities
-      } finally {
-        setIsUploading(false);
-      }
-    }
+    await uploadFiles(files);
   };
 
   return {
@@ -295,5 +264,6 @@ export function useFileUpload({
     dragOver,
     handlePaste,
     isUploading,
+    attachmentCounts: countAttachments(contentBlocks, pendingFiles),
   };
 }
