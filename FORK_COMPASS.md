@@ -1,8 +1,8 @@
 # Fork Compass — Agent Chat UI Customizations
 
 _Last updated: 2026-10-08_
-_Branch: codex/attachment-count-limits_
-_Base: origin/main (`06ef3a7`)_
+_Branch: main / develop_
+_Runtime release: PR #7 (`597dcb8`, source `15f6f1c`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
 This document is the current map of fork-specific behavior in this worktree. The poll-first runtime is now the source-of-truth baseline for the fork, alongside the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
@@ -41,11 +41,12 @@ Daily-budget implementation snapshot (2026-10-08):
 Attachment-limit implementation snapshot (2026-10-08):
 
 - Parent `06ef3a7`: 87 fork-only commits; 95 files changed, 13,899 insertions and 1,475 deletions against pinned `upstream/main`.
-- This change consolidates three upload paths and adds deterministic picker/drop/paste, in-flight, removal, failure and mobile coverage. Its implementation snapshot has 88 fork-only commits and changes 96 files against the merge base; release documentation records validation separately.
+- Runtime source `15f6f1c`: 88 fork-only commits; 96 files changed, 14,276 insertions and 1,572 deletions against pinned `upstream/main` (`git diff upstream/main...15f6f1c --shortstat`). PR #7 merged the identical tree as `597dcb8`; release documentation follows separately.
+- The change consolidates three upload paths and adds deterministic picker/drop/paste, in-flight, removal, failure, oversized retry and mobile coverage.
 
 Recent fork-only commit log:
 
-- This PR: `fix: cap composer attachments at 20 images and 2 PDFs`.
+- `15f6f1c`: `fix: cap composer attachments at 20 images and 2 PDFs` — shared picker/drop/paste admission, in-flight reservations, visible independent counters and final retry validation.
 
 - `ca5faf6`: `fix: show used budget arc with concise tooltip` — neutral track, used-percentage arc and exactly two tooltip lines.
 - `37a3f23`: `feat: tuck daily budget into a compact composer control` — footer placement, hover/focus/touch details and semantic thresholds.
@@ -270,3 +271,8 @@ Start here when modifying the fork:
 - Runtime source `ca5faf6` is deployed to development and production. Release evidence and rollback target are recorded in `DEPLOYMENT_GUIDE.md`; earlier snapshots above remain historical.
 - `src/components/thread/daily-budget.tsx`: quiet 24px static budget ring in a 36px composer-footer button. Hover/focus/tap reveals only remaining/total USD and percent used in a centered rounded tooltip; no other rows or labels. The coloured arc depicts used percentage over a neutral grey track. Green/amber/red thresholds are 50% and 75% of base plus extra credits; 0% has no coloured arc and exhausted/zero-allowance budgets are fully red. Minute/run-state refresh and unavailable state never fabricate a balance. Runtime provides the existing authenticated transport to `GET /user/limits`.
 - Pending-approval reset effects compare interrupt contents, so identical polling responses keep single and batch edits intact.
+
+## Attachment-limit release (2026-10-08)
+
+- `main` and `develop` contain PR #7. Cloud Run development and production revisions are `agent-chat-ui-attachments-dev-1008` and `agent-chat-ui-attachments-prod-1008`; production receives 100% canonical traffic. Pinned image digests, source/tree identity, rollback target and exact hosted validation scope are recorded in `DEPLOYMENT_GUIDE.md`.
+- All 26 local browser scenarios, standalone lint, production build and TypeScript checks passed. Hosted development rejected a three-PDF selection before upload; authenticated production displayed the new counters. No model call was made for acceptance.

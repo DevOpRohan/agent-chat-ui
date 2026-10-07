@@ -384,3 +384,21 @@ gcloud run services update-traffic agent-chat-ui \
 ```
 
 The backend admission repair and quota/extra-credit API acceptance are tracked in the QuestionCrafterAgent and user-limit monitoring repositories.
+
+
+## Attachment-limit release (2026-10-08 IST)
+
+Runtime source `15f6f1c93409ab0f6dc4ab531723a73699007bb7` was merged through PR #7 as `597dcb865b3e19506b651a7e0e07f4749fbe0383`. Both have the exact tree `b5737de2d03a2483da794b717d02e45fa19d6d87`; `main` and `develop` were synchronized before deployment. Cloud Build `65de961b-e75c-49d5-ae18-c598ccd40b28` succeeded with separately compiled development/production API endpoints.
+
+| Environment | Cloud Run revision | Image digest |
+| --- | --- | --- |
+| Development | `agent-chat-ui-attachments-dev-1008` | `sha256:3ce63867afce41c4e395404d2137b5b463f8b637e85e14a639c8d3a04082102a` |
+| Production | `agent-chat-ui-attachments-prod-1008` | `sha256:70d462169e7ff5d60a35f72e93e144cc6b23710b6d74311331f44191ab2527e1` |
+
+Images remain in `us-east1-docker.pkg.dev/cerebryai/question-crafter-user-limits/ui`; service/project/region remain `agent-chat-ui` / `cerebryai` / `asia-south1`. The release preserves IAP, 2 CPU / 2 GiB, the 100MB per-file limit, and OpenAI/GCS upload behavior. Development uses `OPENAI_API_KEY_DEV:latest`; production uses `OPENAI_API_KEY_PROD:latest`; the existing JWT secret reference is preserved.
+
+Validation: `pnpm lint`, production build with integrated type checking, explicit TypeScript check, and all 26 deterministic attachment/budget/navigation Playwright scenarios passed. Existing baseline lint warnings and the build-only nuqs/localStorage warning remain. A 390px mobile screenshot was visually reviewed. Local tests mocked storage/model calls. Authenticated development acceptance verified the visible independent counters and rejection of three synthetic PDFs before upload, with zero attachments retained and Send disabled. The complete automated suite ran locally; hosted acceptance was exercised through Safari.
+
+Rollback: `gcloud run services update-traffic agent-chat-ui --project cerebryai --region asia-south1 --to-revisions agent-chat-ui-used-meter-prod-1008=100`. This preserves the prior deployed production UI.
+
+Release outcome: the development tag remains on `agent-chat-ui-attachments-dev-1008` at 0% canonical traffic; production `agent-chat-ui-attachments-prod-1008` is Ready/ContainerHealthy and receives 100%. Authenticated canonical production acceptance confirmed the new 0/20-image and 0/2-PDF counters plus the existing budget display. A production native-picker rejection attempt was inconclusive because Safari kept its Upload button disabled for the synthetic fixture selection; it was canceled without transferring files. The corresponding hosted development rejection passed. No generation requests were submitted, and existing user thread tabs were preserved.
