@@ -174,30 +174,37 @@ export function useFileUpload({
               "Remove and reattach existing PDFs so their page count can be verified before adding more files.",
             );
           }
-          const form = new FormData();
-          pdfs.forEach((file) => form.append("files", file));
-          const response = await fetch("/api/upload/pdf-pages", {
-            method: "POST",
-            body: form,
-            signal: AbortSignal.timeout(30_000),
-          });
-          const result = await response.json();
-          if (!response.ok)
-            throw new Error(
-              result.error ||
-                "Could not verify PDF page count. Use an unencrypted, readable PDF.",
-            );
-          const counts: unknown = result.page_counts;
-          if (
-            !Array.isArray(counts) ||
-            counts.length !== pdfs.length ||
-            counts.some((pages) => !Number.isSafeInteger(pages) || pages < 1)
-          ) {
-            throw new Error(
-              "Could not verify PDF page count. Please reattach the PDFs and try again.",
-            );
+          const counts: number[] = [];
+          // Keep each request within the existing per-file transport envelope.
+          // One combined multipart body can exceed Cloud Run's HTTP/1 request cap.
+          for (const pdf of pdfs) {
+            const form = new FormData();
+            form.append("files", pdf);
+            const response = await fetch("/api/upload/pdf-pages", {
+              method: "POST",
+              body: form,
+              signal: AbortSignal.timeout(30_000),
+            });
+            const result = await response.json();
+            if (!response.ok)
+              throw new Error(
+                result.error ||
+                  "Could not verify PDF page count. Use an unencrypted, readable PDF.",
+              );
+            const pageCounts: unknown = result.page_counts;
+            if (
+              !Array.isArray(pageCounts) ||
+              pageCounts.length !== 1 ||
+              !Number.isSafeInteger(pageCounts[0]) ||
+              pageCounts[0] < 1
+            ) {
+              throw new Error(
+                "Could not verify PDF page count. Please reattach the PDFs and try again.",
+              );
+            }
+            if (version !== draftVersion.current) return;
+            counts.push(pageCounts[0]);
           }
-          if (version !== draftVersion.current) return;
           const totalPages =
             countPdfPages(blocksRef.current, pendingRef.current) +
             counts.reduce((sum, pages) => sum + pages, 0);

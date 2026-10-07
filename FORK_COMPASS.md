@@ -46,11 +46,11 @@ Attachment-limit implementation snapshot (2026-10-08):
 
 Combined PDF-page implementation snapshot (2026-10-08):
 
-- This change starts from `9c40dde` (90 fork-only commits against pinned upstream). It adds local actual-byte page counting and 12 focused page-budget scenarios; final source/tree and release identities follow in the deployment record.
+- Runtime source `bf51fb3`: 91 fork-only commits against pinned `upstream/main`; 103 files changed, 15,178 insertions and 1,573 deletions (`git diff upstream/main...bf51fb3 --shortstat`). PR #8 merged the identical tree as `89efa8c`. It adds local actual-byte page counting and 12 focused page-budget scenarios.
 
 Recent fork-only commit log:
 
-- This PR: `fix: enforce a combined 64-page PDF attachment budget` — count-only preflight, both direct upload guards, atomic reservations, verified page metadata and backend rejection notices.
+- `bf51fb3`: `fix: enforce a combined 64-page PDF attachment budget` — count-only preflight, both direct upload guards, atomic reservations, verified page metadata and backend rejection notices.
 
 - `15f6f1c`: `fix: cap composer attachments at 20 images and 2 PDFs` — shared picker/drop/paste admission, in-flight reservations, visible independent counters and final retry validation.
 
@@ -85,7 +85,7 @@ What stays fork-specific:
 - PDFs use OpenAI Files IDs when `MODEL_PROVIDER=OPENAI`.
 - Non-OpenAI PDFs stay URL-backed.
 - Upload size limit remains `100MB`.
-- Each composer message permits at most **20 images and 2 PDFs, with 64 PDF pages combined**. Picker, drop and paste use one admission path that reserves in-flight slots and serializes page-count admission across overlapping batches. A same-origin count-only request checks actual PDF bytes before storage/provider uploads. Removal, failed uploads and draft reset release capacity; an old preflight cannot hold or contaminate a new draft. Completed and pending PDF pages share a visible, politely announced counter. Enter waits for uploads and validates restored attachment counts/pages; unverified older PDFs must be reattached.
+- Each composer message permits at most **20 images and 2 PDFs, with 64 PDF pages combined**. Picker, drop and paste use one admission path that reserves in-flight slots and serializes page-count admission across overlapping batches. A separate same-origin count-only request for each PDF checks actual bytes before storage/provider uploads; counts are combined under the same admission lock. Separate requests avoid creating an oversized combined HTTP/1 body. Removal, failed uploads and draft reset release capacity; an old preflight cannot hold or contaminate a new draft. Completed and pending PDF pages share a visible, politely announced counter. Enter waits for uploads and validates restored attachment counts/pages; unverified older PDFs must be reattached.
 - `/api/upload/pdf-pages` counts one or two PDFs using local Poppler `pdfinfo`, bounded to 10 seconds and 64KiB output per parser. Encrypted, malformed and ambiguous metadata fail closed. `/api/upload` and `/api/openai/upload` independently inspect the actual bytes and reject PDFs over 64 pages before storage/provider writes. All retain the 100MiB per-file cap. The QuestionCrafter backend authoritatively recounts the combined PDF content before model/tool calls; client `page_count` metadata is UX information, not security authority.
 
 Primary files:

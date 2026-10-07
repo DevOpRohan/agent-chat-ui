@@ -325,6 +325,7 @@ for (const action of ["picker", "paste", "drop"] as const) {
       page.getByText(/64 pages combined; received 65/),
     ).toBeVisible();
     expect(fixture.uploads).toHaveLength(0);
+    expect(fixture.preflights).toEqual([["a.pdf"], ["b.pdf"]]);
     await expect(page.getByTestId("pdf-page-count")).toHaveText(
       "0/64 PDF pages",
     );
@@ -336,6 +337,7 @@ for (const action of ["picker", "paste", "drop"] as const) {
     await expect(page.getByTestId("pdf-page-count")).toHaveText(
       "64/64 PDF pages",
     );
+    expect(fixture.preflights.every((batch) => batch.length === 1)).toBe(true);
     await page
       .getByRole("button", { name: "Remove PDF", exact: true })
       .first()
