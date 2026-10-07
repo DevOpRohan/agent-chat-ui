@@ -48,6 +48,7 @@ import { Label } from "../ui/label";
 import {
   MAX_IMAGE_ATTACHMENTS,
   MAX_PDF_ATTACHMENTS,
+  MAX_PDF_PAGES,
   useFileUpload,
 } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
@@ -448,6 +449,9 @@ export function Thread() {
     handlePaste,
     isUploading,
     attachmentCounts,
+    pdfPages,
+    unverifiedPdfPages,
+    checkingPdfPages,
   } = useFileUpload();
   const [viewportWidthPx, setViewportWidthPx] = useState(() =>
     typeof window === "undefined" ? 1440 : window.innerWidth,
@@ -783,6 +787,14 @@ export function Thread() {
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (isUploading) return;
+    if (unverifiedPdfPages) {
+      toast.error("Remove and reattach the PDFs so their page count can be verified before sending.");
+      return;
+    }
+    if (pdfPages > MAX_PDF_PAGES) {
+      toast.error(`PDF attachments contain ${pdfPages} pages; maximum ${MAX_PDF_PAGES} combined. Remove extra pages or attachments before sending.`);
+      return;
+    }
     if (
       attachmentCounts.images > MAX_IMAGE_ATTACHMENTS ||
       attachmentCounts.pdfs > MAX_PDF_ATTACHMENTS
@@ -1409,11 +1421,14 @@ export function Thread() {
                               >
                                 {attachmentCounts.images}/{MAX_IMAGE_ATTACHMENTS} images · {attachmentCounts.pdfs}/{MAX_PDF_ATTACHMENTS} PDFs
                               </span>
+                              <span className="text-xs" aria-live="polite" data-testid="pdf-page-count">
+                                {unverifiedPdfPages ? "Reattach PDFs to verify pages" : checkingPdfPages ? "Checking PDF pages…" : `${pdfPages}/${MAX_PDF_PAGES} PDF pages`}
+                              </span>
                             </span>
                             {isUploading && (
                               <span className="text-muted-foreground ml-2 flex items-center gap-2 text-sm">
                                 <LoaderCircle className="h-4 w-4 animate-spin" />
-                                Uploading...
+                                <span className="sr-only sm:not-sr-only">Uploading...</span>
                               </span>
                             )}
                           </Label>
@@ -1422,7 +1437,7 @@ export function Thread() {
                             type="file"
                             onChange={handleFileUpload}
                             multiple
-                            aria-label={`Upload up to ${MAX_IMAGE_ATTACHMENTS} images and ${MAX_PDF_ATTACHMENTS} PDFs`}
+                            aria-label={`Upload up to ${MAX_IMAGE_ATTACHMENTS} images and ${MAX_PDF_ATTACHMENTS} PDFs, ${MAX_PDF_PAGES} PDF pages combined`}
                             accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
                             className="hidden"
                             disabled={isUploading}

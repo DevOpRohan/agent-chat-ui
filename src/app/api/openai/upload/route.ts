@@ -1,4 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { MAX_UPLOAD_BYTES } from "@/lib/attachment-limits";
+import {
+  isPdfFile,
+  PdfValidationError,
+  readPdfPageCount,
+  requirePdfPageBudget,
+} from "@/lib/pdf-page-count";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // allow long uploads
@@ -34,7 +41,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const MAX_BYTES = Number(process.env.OPENAI_UPLOAD_MAX_BYTES || 100 * 1024 * 1024); // 100MB
+    const MAX_BYTES = Math.min(
+      Number(process.env.OPENAI_UPLOAD_MAX_BYTES) || MAX_UPLOAD_BYTES,
+      MAX_UPLOAD_BYTES,
+    );
 
     const httpsUrl = body.url || gsToHttps(body.gcsUrl);
     if (!httpsUrl) {
@@ -55,32 +65,63 @@ export async function POST(req: NextRequest) {
           { status: 413 },
         );
       }
-    } catch {/* ignore */}
+    } catch {
+      /* ignore */
+    }
 
     // Download whole file into Buffer (simple and reliable for <= 100MB)
     const fileRes = await fetch(httpsUrl);
     if (!fileRes.ok) {
       const txt = await fileRes.text().catch(() => "");
       return NextResponse.json(
-        { error: "Failed to fetch file", upstream_status: fileRes.status, upstream_body: txt },
+        {
+          error: "Failed to fetch file",
+          upstream_status: fileRes.status,
+          upstream_body: txt,
+        },
         { status: 400 },
       );
     }
     const ab = await fileRes.arrayBuffer();
     if (ab.byteLength > MAX_BYTES) {
       return NextResponse.json(
-        { error: "File too large", max_bytes: MAX_BYTES, content_length: ab.byteLength },
+        {
+          error: "File too large",
+          max_bytes: MAX_BYTES,
+          content_length: ab.byteLength,
+        },
         { status: 413 },
       );
     }
     const buf = Buffer.from(ab);
-    const contentType = body.mime_type || fileRes.headers.get("content-type") || "application/octet-stream";
+    const contentType =
+      body.mime_type ||
+      fileRes.headers.get("content-type") ||
+      "application/octet-stream";
+
+    const isPdf = isPdfFile(
+      contentType,
+      body.filename || httpsUrl.split(/[?#]/)[0],
+      buf,
+    );
+    const pageCount = isPdf ? await readPdfPageCount(buf) : undefined;
+    if (pageCount !== undefined) requirePdfPageBudget(pageCount);
 
     // Build multipart form using Web FormData/Blob
     const form = new FormData();
-    form.append("purpose", body.purpose || process.env.OPENAI_FILES_PURPOSE || "assistants");
-    const expAnchor = body.expires_after?.anchor ?? process.env.OPENAI_FILES_EXPIRES_AFTER_ANCHOR ?? "created_at";
-    const expSeconds = body.expires_after?.seconds ?? (process.env.OPENAI_FILES_EXPIRES_AFTER_SECONDS ? Number(process.env.OPENAI_FILES_EXPIRES_AFTER_SECONDS) : 60 * 60 * 24 * 90);
+    form.append(
+      "purpose",
+      body.purpose || process.env.OPENAI_FILES_PURPOSE || "assistants",
+    );
+    const expAnchor =
+      body.expires_after?.anchor ??
+      process.env.OPENAI_FILES_EXPIRES_AFTER_ANCHOR ??
+      "created_at";
+    const expSeconds =
+      body.expires_after?.seconds ??
+      (process.env.OPENAI_FILES_EXPIRES_AFTER_SECONDS
+        ? Number(process.env.OPENAI_FILES_EXPIRES_AFTER_SECONDS)
+        : 60 * 60 * 24 * 90);
     form.append("expires_after[anchor]", String(expAnchor));
     form.append("expires_after[seconds]", String(expSeconds));
     const blob = new Blob([buf], { type: contentType });
@@ -94,13 +135,18 @@ export async function POST(req: NextRequest) {
     const data = await uploadRes.json();
     if (!uploadRes.ok) {
       return NextResponse.json(
-        { error: data?.error?.message || "Failed to upload to OpenAI", openai_status: uploadRes.status, openai_raw: data },
+        {
+          error: data?.error?.message || "Failed to upload to OpenAI",
+          openai_status: uploadRes.status,
+          openai_raw: data,
+        },
         { status: 500 },
       );
     }
 
     return NextResponse.json({
       file_id: data.id,
+      page_count: pageCount,
       filename: data.filename,
       bytes: data.bytes,
       purpose: data.purpose,
@@ -108,6 +154,11 @@ export async function POST(req: NextRequest) {
       expires_at: data.expires_at,
     });
   } catch (e) {
+    if (e instanceof PdfValidationError)
+      return NextResponse.json(
+        { error: e.message, code: e.code },
+        { status: e.status },
+      );
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }

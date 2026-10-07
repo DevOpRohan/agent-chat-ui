@@ -24,6 +24,20 @@ export class UserLimitError extends Error {
   }
 }
 
+function getPdfNotice(detail: unknown) {
+  if (!detail || typeof detail !== "object") return undefined;
+  const value = detail as { code?: unknown; message?: unknown };
+  if (typeof value.message !== "string") return undefined;
+  if (value.code === "PDF_PAGE_LIMIT_EXCEEDED")
+    return { title: "PDF page limit exceeded", description: value.message };
+  if (value.code === "PDF_PAGE_COUNT_UNAVAILABLE")
+    return {
+      title: "PDF pages could not be verified",
+      description: value.message,
+    };
+  return undefined;
+}
+
 export function getUserLimitNotice(error: unknown) {
   if (error instanceof UserLimitError) return messages[error.code];
   if (!error || typeof error !== "object") return undefined;
@@ -33,12 +47,16 @@ export function getUserLimitNotice(error: unknown) {
     text?: unknown;
     message?: unknown;
   };
+  const pdfNotice = getPdfNotice(value.detail) || getPdfNotice(value);
+  if (pdfNotice) return pdfNotice;
   if (isCode(value.code)) return messages[value.code];
   if (isCode(value.detail)) return messages[value.detail];
   const raw = value.text ?? value.message;
   if (typeof raw !== "string") return undefined;
   try {
     const body = JSON.parse(raw.replace(/^HTTP \d+: /, ""));
+    const pdfNotice = getPdfNotice(body.detail) || getPdfNotice(body);
+    if (pdfNotice) return pdfNotice;
     const code = body.code ?? body.detail ?? body.message;
     return isCode(code) ? messages[code] : undefined;
   } catch {

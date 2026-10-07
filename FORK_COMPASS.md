@@ -44,7 +44,13 @@ Attachment-limit implementation snapshot (2026-10-08):
 - Runtime source `15f6f1c`: 88 fork-only commits; 96 files changed, 14,276 insertions and 1,572 deletions against pinned `upstream/main` (`git diff upstream/main...15f6f1c --shortstat`). PR #7 merged the identical tree as `597dcb8`; release documentation follows separately.
 - The change consolidates three upload paths and adds deterministic picker/drop/paste, in-flight, removal, failure, oversized retry and mobile coverage.
 
+Combined PDF-page implementation snapshot (2026-10-08):
+
+- This change starts from `9c40dde` (90 fork-only commits against pinned upstream). It adds local actual-byte page counting and 12 focused page-budget scenarios; final source/tree and release identities follow in the deployment record.
+
 Recent fork-only commit log:
+
+- This PR: `fix: enforce a combined 64-page PDF attachment budget` — count-only preflight, both direct upload guards, atomic reservations, verified page metadata and backend rejection notices.
 
 - `15f6f1c`: `fix: cap composer attachments at 20 images and 2 PDFs` — shared picker/drop/paste admission, in-flight reservations, visible independent counters and final retry validation.
 
@@ -79,8 +85,8 @@ What stays fork-specific:
 - PDFs use OpenAI Files IDs when `MODEL_PROVIDER=OPENAI`.
 - Non-OpenAI PDFs stay URL-backed.
 - Upload size limit remains `100MB`.
-- Each composer message permits at most **20 images and 2 PDFs**, independently. Picker, drop and paste use one admission path that reserves in-flight slots, rejects excess selections before network work and preserves successful uploads when a sibling fails. Removal releases capacity. Both counts are visible and announced politely; Enter waits for uploads.
-- Upload APIs accept one file per request; the QuestionCrafter backend separately enforces per-message/tool aggregate attachment limits.
+- Each composer message permits at most **20 images and 2 PDFs, with 64 PDF pages combined**. Picker, drop and paste use one admission path that reserves in-flight slots and serializes page-count admission across overlapping batches. A same-origin count-only request checks actual PDF bytes before storage/provider uploads. Removal, failed uploads and draft reset release capacity; an old preflight cannot hold or contaminate a new draft. Completed and pending PDF pages share a visible, politely announced counter. Enter waits for uploads and validates restored attachment counts/pages; unverified older PDFs must be reattached.
+- `/api/upload/pdf-pages` counts one or two PDFs using local Poppler `pdfinfo`, bounded to 10 seconds and 64KiB output per parser. Encrypted, malformed and ambiguous metadata fail closed. `/api/upload` and `/api/openai/upload` independently inspect the actual bytes and reject PDFs over 64 pages before storage/provider writes. All retain the 100MiB per-file cap. The QuestionCrafter backend authoritatively recounts the combined PDF content before model/tool calls; client `page_count` metadata is UX information, not security authority.
 
 Primary files:
 
@@ -241,7 +247,10 @@ Start here when modifying the fork:
 - Runtime provider: `src/providers/Stream.tsx`
 - Thread shell: `src/components/thread/index.tsx`
 - Conversation navigator: `src/components/thread/conversation-navigator.tsx`
+- Attachment limits and parser: `src/lib/attachment-limits.ts`, `src/lib/pdf-page-count.ts`
+- Count-only upload preflight: `src/app/api/upload/pdf-pages/route.ts`
 - Attachment browser coverage: `tests/attachment-limits.spec.ts`
+- Real PDF, route and reset coverage: `tests/pdf-pages.spec.ts`, `tests/helpers/pdf-fixtures.ts`
 - Navigator browser coverage: `tests/conversation-navigator.spec.ts`
 - History: `src/components/thread/history/index.tsx`
 - Assistant messages: `src/components/thread/messages/ai.tsx`
