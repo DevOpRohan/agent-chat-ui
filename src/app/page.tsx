@@ -9,15 +9,17 @@ import React from "react";
 
 export default function DemoPage(): React.ReactNode {
   return (
-    <React.Suspense fallback={<div>Loading (layout)...</div>}>
+    <>
       <Toaster />
-      <ThreadProvider>
-        <ThreadRuntimeProvider>
-          <ArtifactProvider>
-            <Thread />
-          </ArtifactProvider>
-        </ThreadRuntimeProvider>
-      </ThreadProvider>
-    </React.Suspense>
+      <React.Suspense fallback={<div>Loading (layout)...</div>}>
+        <ThreadProvider>
+          <ThreadRuntimeProvider>
+            <ArtifactProvider>
+              <Thread />
+            </ArtifactProvider>
+          </ThreadRuntimeProvider>
+        </ThreadProvider>
+      </React.Suspense>
+    </>
   );
 }

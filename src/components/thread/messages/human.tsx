@@ -8,6 +8,8 @@ import { BranchSwitcher, CommandBar } from "./shared";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 import { isPreviewableContentBlock } from "@/lib/multimodal-utils";
 import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
+import { getUserLimitMessage } from "@/lib/user-limit-error";
+import { toast } from "sonner";
 
 function EditableContent({
   value,
@@ -50,30 +52,26 @@ export function HumanMessage({
   const [value, setValue] = useState("");
   const contentString = getContentString(message.content);
 
-  const handleSubmitEdit = () => {
-    setIsEditing(false);
-
+  const handleSubmitEdit = async () => {
+    if (isLoading) return;
     const newMessage: Message = { type: "human", content: value };
-    thread.submit(
-      { messages: [newMessage] },
-      {
-        config: {
-          recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+    try {
+      await thread.submit(
+        { messages: [newMessage] },
+        {
+          config: {
+            recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+          },
+          multitaskStrategy: "reject",
+          onDisconnect: "continue",
+          checkpoint: parentCheckpoint,
         },
-        multitaskStrategy: "reject",
-        onDisconnect: "continue",
-        checkpoint: parentCheckpoint,
-        optimisticValues: (prev) => {
-          const values = meta?.firstSeenState?.values;
-          if (!values) return prev;
-
-          return {
-            ...values,
-            messages: [...(values.messages ?? []), newMessage],
-          };
-        },
-      },
-    );
+      );
+      setIsEditing(false);
+    } catch (error) {
+      if (!getUserLimitMessage(error))
+        toast.error("Failed to submit edit. Please try again.");
+    }
   };
 
   return (

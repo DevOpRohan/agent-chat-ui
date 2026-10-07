@@ -40,6 +40,10 @@ import {
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 import { THREAD_HISTORY_PAGE_SIZE, useThreads } from "./Thread";
 import { toast } from "sonner";
+import {
+  getUserLimitNotice,
+  stopUserLimitRetries,
+} from "@/lib/user-limit-error";
 import { useTheme } from "next-themes";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import {
@@ -103,7 +107,10 @@ type ThreadRuntimeContextType = {
   cancel: () => Promise<void>;
   client: Client;
   error: unknown;
-  experimental_branchTree: ReturnType<typeof getBranchContext<StateType>>["branchTree"];
+  fetchDailyBudget: () => Promise<Response>;
+  experimental_branchTree: ReturnType<
+    typeof getBranchContext<StateType>
+  >["branchTree"];
   getMessagesMetadata: (
     message: Message,
     index?: number,
@@ -365,12 +372,14 @@ async function checkGraphStatus(
 
 function getPollDelay(failureCount: number, threadStatus: string | null) {
   if (failureCount > 0) {
-    return (
-      POLL_RETRY_DELAYS_MS[Math.min(failureCount - 1, POLL_RETRY_DELAYS_MS.length - 1)]
-    );
+    return POLL_RETRY_DELAYS_MS[
+      Math.min(failureCount - 1, POLL_RETRY_DELAYS_MS.length - 1)
+    ];
   }
 
-  return isThreadBusy(threadStatus) ? BUSY_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
+  return isThreadBusy(threadStatus)
+    ? BUSY_POLL_INTERVAL_MS
+    : IDLE_POLL_INTERVAL_MS;
 }
 
 const ThreadRuntimeSession = ({
@@ -396,12 +405,23 @@ const ThreadRuntimeSession = ({
     [isIapAuth],
   );
   const callerOptions = useMemo(
-    () => (authFetch ? { fetch: authFetch } : undefined),
+    () => ({
+      onFailedResponseHook: stopUserLimitRetries,
+      ...(authFetch ? { fetch: authFetch } : {}),
+    }),
     [authFetch],
   );
   const defaultHeaders = useMemo(
     () => (authHeader ? { Authorization: authHeader } : undefined),
     [authHeader],
+  );
+  const fetchDailyBudget = useCallback(
+    () => (authFetch ?? fetch)(`${apiUrl.replace(/\/$/, "")}/user/limits`, {
+      headers: !isIapAuth && apiKey ? { "X-Api-Key": apiKey } : undefined,
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    }),
+    [apiKey, apiUrl, authFetch, isIapAuth],
   );
   const client = useMemo(
     () =>
@@ -424,9 +444,8 @@ const ThreadRuntimeSession = ({
   const [threadStatus, setThreadStatus] = useState<string | null>(null);
   const [latestRunStatus, setLatestRunStatus] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [optimisticState, setOptimisticState] = useState<OptimisticState | null>(
-    null,
-  );
+  const [optimisticState, setOptimisticState] =
+    useState<OptimisticState | null>(null);
 
   const threadIdRef = useRef(threadId);
   const rawStateRef = useRef(rawState);
@@ -528,8 +547,7 @@ const ThreadRuntimeSession = ({
         const refreshedThreadSummary: Thread = {
           ...currentThread,
           status: nextThreadStatus,
-          updated_at:
-            currentThread.updated_at ?? new Date().toISOString(),
+          updated_at: currentThread.updated_at ?? new Date().toISOString(),
         };
         const shouldRefreshHistory =
           options?.forceHistory ||
@@ -733,11 +751,7 @@ const ThreadRuntimeSession = ({
 
   const branchContext = useMemo(() => {
     const usableHistory =
-      historyData.length > 0
-        ? historyData
-        : rawState
-          ? [rawState]
-          : [];
+      historyData.length > 0 ? historyData : rawState ? [rawState] : [];
     return getBranchContext<StateType>(branch, usableHistory);
   }, [branch, historyData, rawState]);
 
@@ -914,9 +928,23 @@ const ThreadRuntimeSession = ({
         });
       } catch (submitError) {
         console.error("Failed to create run", submitError);
-        setError(submitError);
+        const limitNotice = getUserLimitNotice(submitError);
+        if (limitNotice) {
+          toast.error(limitNotice.title, {
+            id: "user-limit",
+            description: limitNotice.description,
+            closeButton: true,
+            duration: 5000,
+            position: "top-center",
+            richColors: true,
+          });
+        }
+        setError(limitNotice ? undefined : submitError);
         setPhase(threadIdRef.current ? "idle" : "error");
         setOptimisticState(null);
+        if (limitNotice && targetThreadId) {
+          await refreshThreadState(targetThreadId, { forceHistory: true });
+        }
         throw submitError;
       }
     },
@@ -974,6 +1002,7 @@ const ThreadRuntimeSession = ({
       cancel,
       client,
       error,
+      fetchDailyBudget,
       experimental_branchTree: branchContext.branchTree,
       getMessagesMetadata,
       history: branchContext.flatHistory,
@@ -1001,6 +1030,7 @@ const ThreadRuntimeSession = ({
       cancel,
       client,
       error,
+      fetchDailyBudget,
       getMessagesMetadata,
       historyData.length,
       interrupt,

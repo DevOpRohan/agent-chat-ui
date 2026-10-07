@@ -251,3 +251,11 @@ The frontend will call `/api/auth/token`, validate the IAP signed header, mint a
 ### API Key Auth (no IAP)
 
 If your LangGraph deployment expects API keys, leave `NEXT_PUBLIC_AUTH_MODE` unset and enter the key in the UI. `NEXT_PUBLIC_API_URL` should still point directly to your LangGraph deployment URL.
+
+## Daily cost limit feedback
+
+A backend rejection with `DAILY_COST_LIMIT_EXCEEDED` shows **Daily limit reached** and: “You’ve reached your daily limit. It resets at midnight IST. To get more credits, please contact your reporting manager.” `USAGE_UNAVAILABLE` shows **Usage check temporarily unavailable** and asks the user to retry shortly; it does not claim their allowance has been spent. Both notices appear at the top center for five seconds, remain visible through polling or loading changes, and can be dismissed. The backend exposes the machine code through `X-User-Limit-Code` in CORS. These two responses stop automatic SDK retries and preserve send/edit/approval drafts. Existing work keeps polling; manual cancellation remains available. No new UI environment variable or direct Firestore access is needed.
+
+Run the deterministic budget browser suite against a local server with `pnpm exec playwright test --config=playwright.user-limits.config.ts`.
+
+The daily budget circle above the composer shows remaining USD and the total allowance for today, including extra credits. It uses the authenticated `GET /user/limits` endpoint, refreshes every minute and when run activity changes, and clears the previous balance at the server-provided IST reset time. Failed or invalid reads show a temporary-unavailability state; servers without this endpoint (404) omit the circle. The UI never reads Firestore directly.

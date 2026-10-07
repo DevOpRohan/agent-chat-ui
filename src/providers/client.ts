@@ -1,4 +1,5 @@
 import { Client } from "@langchain/langgraph-sdk";
+import { stopUserLimitRetries } from "@/lib/user-limit-error";
 import {
   createAuthFetch,
   getCachedAuthHeader,
@@ -12,9 +13,12 @@ export function createClient(apiUrl: string, apiKey: string | undefined) {
   return new Client({
     apiKey: useIapAuth ? undefined : apiKey,
     apiUrl,
+    callerOptions: {
+      onFailedResponseHook: stopUserLimitRetries,
+      ...(useIapAuth ? { fetch: createAuthFetch() } : {}),
+    },
     ...(useIapAuth
       ? {
-          callerOptions: { fetch: createAuthFetch() },
           defaultHeaders: authHeader
             ? { Authorization: authHeader }
             : undefined,

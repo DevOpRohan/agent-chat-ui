@@ -41,6 +41,8 @@ import { parseAsBoolean, useQueryState } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
 import { toast } from "sonner";
+import { getUserLimitMessage } from "@/lib/user-limit-error";
+import { DailyBudget } from "./daily-budget";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { useFileUpload } from "@/hooks/use-file-upload";
@@ -849,6 +851,7 @@ export function Thread() {
       setPendingSubmittedMessage(null);
       setInput(previousInput);
       setContentBlocks(previousContentBlocks);
+      if (getUserLimitMessage(error)) return;
       if (isConflictLikeError(error)) {
         showThreadRunningToast();
         return;
@@ -1331,6 +1334,7 @@ export function Thread() {
                         </p>
                       </div>
                     ) : null}
+                    <DailyBudget />
                     <div
                       ref={dropRef}
                       className={cn(

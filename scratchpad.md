@@ -653,3 +653,27 @@
 - 2026-09-08 | Navigator E2E against local production build | PASS | 8 scenarios + setup, 22.0s. Covers resting/hover/focus/Escape, current-row focus, search/empty results, 500 turns, genuine coarse-pointer tablet, narrow pane fallback, draft/bottom control, pending response, polling, thread switches, artifact expansion, and short non-overflowing chats. No page errors. Broader pane-layout/submit-guard tests were attempted locally and skipped because live backend setup is absent.
 - 2026-09-08 | Visual review | Inspected desktop resting/hover screenshots and dark mobile outline. Quiet gutter, readable preview, responsive header and bounded sheet confirmed.
 - 2026-09-08 | Local cleanup | Removed 1,276MB of generated Next.js builds plus 1.041GB unused Docker build cache and 1.639MB dangling layers. Retained source, tagged images, and all persistent volumes. Builds now run remotely.
+
+
+## 2026-10-07 — Daily cost rejection UX
+
+Problem: backend admission must reject the next request after daily spending reaches its allowance without interrupting already accepted work.
+Plan: exact error codes, one central toast, no automatic quota retries; preserve each submission draft and normal polling.
+Evidence: 7 deterministic browser checks passed (SDK retry count, send, edit, regeneration, approval edit, batch approval, active polling). TypeScript and lint passed; existing lint warnings remain. Approval callers previously did not await admission and could show success before the backend accepted the request; they now await it. No model calls were made by these tests.
+Deployment: pending development image verification, then separate production build. Backend and cost monitor are tracked in their own repositories.
+
+- 2026-10-07 | Build and deployment | Cloud Build `912a89eb-e630-4c58-879d-b278772dc102` produced separate dev/prod images. Development revision `agent-chat-ui-limits-dev-1007` is ready under `develop`; production traffic remains on its previous revision. Runtime/build recursion limit remains 50; IAP, polling, upload behavior and secrets remain configured as in the deployment guide.
+- 2026-10-07 | Regression | All 8 conversation-navigator scenarios passed in addition to the 7 quota scenarios. Both production image builds succeeded.
+- 2026-10-07 | Deployed UI | Existing authenticated Safari session loaded the development composer through IAP. Quota-specific live admission validation is pending backend enforcement. The gcloud proxy alone returned the IAP login page and was not counted as an authenticated UI test.
+- 2026-10-07 | Handoff | User requested direct backend pushes and will configure LangSmith before further API tests. Backend `main` and `develop` now both contain `30768a54`. Collector infrastructure is deployed and one-minute schedules are enabled. Pending live quota acceptance and production UI promotion are documented in the monitoring repository's `docs/DEPLOYMENT.md`. UI production traffic remains unchanged. Temporary local UI test server and Firestore emulator were stopped after verification.
+
+## 2026-10-08 IST — Stable daily-limit notifications
+
+Problem: production still serves the pre-limit UI; usage-check errors flash as polling clears runtime error state. User requests a clear, polite notice lasting five seconds, midnight IST reset copy, and reporting-manager guidance.
+Plan: keep one notification outside the page loading boundary, with separate quota-exhausted and temporary-unavailability titles. Preserve drafts, keep polling, stop classified retries, and verify visible duration plus dismissal. Deploy development first, then a separately built production bundle. Independently diagnose the backend availability error; never label it as exhausted quota.
+
+- 2026-10-08 | First regression run | 17 of 18 passed. Approval edits reset when the quota rejection refreshed the pending interrupt. Root cause: reset effects depended on object identity, and polling returns a new object for identical data. Added equality guards at both single and batch approval reset effects so unchanged server state preserves local edits. Screenshot capture now waits for the entrance transition before visual review.
+- 2026-10-08 | Validation isolation | Existing UI node_modules became unavailable during the rebuild; cause unverified. Reinstalled frozen dependencies only in the sanitized validation directory. No user source or secret files were removed or read.
+- 2026-10-08 | Notification regression rerun | All 18 checks passed, including the approval-draft regression.
+- 2026-10-08 | Scope update | User requested a budget circle above the composer. Added authenticated current-day remaining/total USD, included extra credits, minute/run-state refresh and IST rollover invalidation. Missing or invalid balances remain explicitly unavailable; unsupported generic servers hide the feature. Added allowance, exhaustion, credits, malformed/503/404 and rollover browser checks. Canceled obsolete cloud builds before deployment.
+- 2026-10-08 | Review | Added an independent IST reset timer so a slow balance refresh or submission-state change cannot leave yesterday’s amount visible. Switching API/auth transport clears the previous balance. Delayed-fetch rollover regression added.

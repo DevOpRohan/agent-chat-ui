@@ -3,6 +3,8 @@ import { DEFAULT_AGENT_RECURSION_LIMIT } from "@/lib/constants";
 import { END } from "@langchain/langgraph/web";
 import { Interrupt } from "@langchain/langgraph-sdk";
 import { toast } from "sonner";
+import { getUserLimitMessage } from "@/lib/user-limit-error";
+import isEqual from "lodash/isEqual";
 import {
   Dispatch,
   KeyboardEvent,
@@ -55,8 +57,12 @@ export default function useInterruptedActions({
   const [hasAddedResponse, setHasAddedResponse] = useState(false);
   const [approveAllowed, setApproveAllowed] = useState(false);
   const initialHumanInterruptEditValue = useRef<Record<string, string>>({});
+  const previousInterrupt = useRef<Interrupt<HITLRequest> | null>(null);
 
   useEffect(() => {
+    // Polls return new objects for the same pending approval; keep local edits.
+    if (isEqual(previousInterrupt.current, interrupt)) return;
+    previousInterrupt.current = interrupt;
     const hitlValue = interrupt.value as HITLRequest | undefined;
     initialHumanInterruptEditValue.current = {};
 
@@ -85,28 +91,22 @@ export default function useInterruptedActions({
     }
   }, [interrupt]);
 
-  const resumeRun = (decisions: Decision[]): boolean => {
-    try {
-      thread.submit(
-        {},
-        {
-          config: {
-            recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
-          },
-          multitaskStrategy: "reject",
-          onDisconnect: "continue",
-          command: {
-            resume: {
-              decisions,
-            },
+  const resumeRun = async (decisions: Decision[]): Promise<void> => {
+    await thread.submit(
+      {},
+      {
+        config: {
+          recursion_limit: DEFAULT_AGENT_RECURSION_LIMIT,
+        },
+        multitaskStrategy: "reject",
+        onDisconnect: "continue",
+        command: {
+          resume: {
+            decisions,
           },
         },
-      );
-      return true;
-    } catch (error) {
-      console.error("Error sending human response", error);
-      return false;
-    }
+      },
+    );
   };
 
   const handleSubmit = async (
@@ -139,17 +139,13 @@ export default function useInterruptedActions({
     }
 
     let errorOccurred = false;
-    initialHumanInterruptEditValue.current = {};
 
     try {
       setLoading(true);
       setSubmitting(true);
 
-      const resumedSuccessfully = resumeRun([decision]);
-      if (!resumedSuccessfully) {
-        errorOccurred = true;
-        return;
-      }
+      await resumeRun([decision]);
+      initialHumanInterruptEditValue.current = {};
 
       toast("Success", {
         description: "Response submitted successfully.",
@@ -160,6 +156,7 @@ export default function useInterruptedActions({
     } catch (error: any) {
       console.error("Error sending human response", error);
       errorOccurred = true;
+      if (getUserLimitMessage(error)) return;
 
       if ("message" in error && error.message.includes("Invalid assistant")) {
         toast("Error: Invalid assistant ID", {
@@ -191,10 +188,9 @@ export default function useInterruptedActions({
   ) => {
     e.preventDefault();
     setLoading(true);
-    initialHumanInterruptEditValue.current = {};
 
     try {
-      thread.submit(
+      await thread.submit(
         {},
         {
           config: {
@@ -208,12 +204,14 @@ export default function useInterruptedActions({
         },
       );
 
+      initialHumanInterruptEditValue.current = {};
       toast("Success", {
         description: "Marked thread as resolved.",
         duration: 3000,
       });
     } catch (error) {
       console.error("Error marking thread as resolved", error);
+      if (getUserLimitMessage(error)) return;
       toast.error("Error", {
         description: "Failed to mark thread as resolved.",
         richColors: true,

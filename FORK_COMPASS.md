@@ -1,8 +1,8 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-09-08_
-_Branch: codex/conversation-navigator-polish_
-_Base: origin/main (`e868177`)_
+_Last updated: 2026-10-08_
+_Branch: codex/user-cost-limits_
+_Base: origin/main (`9674b3a`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
 This document is the current map of fork-specific behavior in this worktree. The poll-first runtime is now the source-of-truth baseline for the fork, alongside the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
@@ -241,3 +241,14 @@ Start here when modifying the fork:
 - Message metadata for branches/checkpoints is derived from `threads.getHistory({ limit: 100 })`; older checkpoints beyond that window may not expose branch controls in the UI.
 - `LoadExternalComponent` still receives a `stream` prop because that is the upstream component API shape, even though the backing object is the polling runtime.
 - `DEPLOYMENT_GUIDE.md` did not need changes for this migration because env vars and deployment flow stayed the same.
+
+## Daily cost admission feedback (2026-10-08)
+
+- `src/lib/user-limit-error.ts`: exact machine-code classification, separate quota and temporary-check-unavailable notices, and terminal SDK retry hook. Other throttling keeps the existing retry behavior.
+- `src/app/page.tsx`: toaster sits outside the page loading boundary so notifications survive loading transitions. Quota notices stay at the top center for five seconds with a close button, midnight IST reset guidance and reporting-manager credit instructions.
+- `src/providers/Stream.tsx` and `src/providers/client.ts`: shared retry hook; one actionable toast for rejected submissions.
+- Composer, human-message editor, and agent-inbox approval paths await run admission, preserve rejected drafts, and suppress duplicate error/success messages.
+- `tests/user-cost-limit.spec.ts` and `playwright.user-limits.config.ts`: deterministic SDK and browser coverage, without model calls.
+- Existing fork commit/diff snapshots above are historical. This feature adds no commits yet.
+- `src/components/thread/daily-budget.tsx`: compact remaining-budget ring above the composer, extra-credit total, midnight IST reset, minute/run-state refresh, and unavailable state without a fabricated balance. Runtime provides the existing authenticated transport to `GET /user/limits`.
+- Pending-approval reset effects compare interrupt contents, so identical polling responses keep single and batch edits intact.

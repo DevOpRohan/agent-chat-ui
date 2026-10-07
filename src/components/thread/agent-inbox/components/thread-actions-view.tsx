@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import isEqual from "lodash/isEqual";
 import { Interrupt } from "@langchain/langgraph-sdk";
 import { Button } from "@/components/ui/button";
 import { ThreadIdCopyable } from "./thread-id";
@@ -6,6 +7,7 @@ import { InboxItemInput } from "./inbox-item-input";
 import useInterruptedActions from "../hooks/use-interrupted-actions";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { getUserLimitMessage } from "@/lib/user-limit-error";
 import { useQueryState } from "nuqs";
 import { constructOpenInStudioURL, buildDecisionFromState } from "../utils";
 import { Decision, HITLRequest, DecisionType, ActionRequest } from "../types";
@@ -99,6 +101,7 @@ export function ThreadActionsView({
     Map<number, Decision>
   >(new Map());
   const [submittingAll, setSubmittingAll] = useState(false);
+  const previousInterrupt = useRef<Interrupt<HITLRequest> | null>(null);
 
   const hitlValue = interrupt.value;
   const actionRequests = useMemo(
@@ -153,6 +156,8 @@ export function ThreadActionsView({
   });
 
   useEffect(() => {
+    if (isEqual(previousInterrupt.current, interrupt)) return;
+    previousInterrupt.current = interrupt;
     setCurrentIndex(0);
     setAddressedActions(new Map());
   }, [interrupt]);
@@ -172,7 +177,7 @@ export function ThreadActionsView({
     window.open(studioUrl, "_blank");
   };
 
-  const handleApproveAll = useCallback(() => {
+  const handleApproveAll = useCallback(async () => {
     if (!hasMultipleActions) return;
 
     try {
@@ -180,7 +185,7 @@ export function ThreadActionsView({
         type: "approve",
       }));
 
-      runtime.submit(
+      await runtime.submit(
         {},
         {
           config: {
@@ -200,6 +205,7 @@ export function ThreadActionsView({
       });
     } catch (error) {
       console.error("Error approving all actions", error);
+      if (getUserLimitMessage(error)) return;
       toast.error("Error", {
         description: "Failed to approve all actions.",
         richColors: true,
@@ -209,7 +215,7 @@ export function ThreadActionsView({
     }
   }, [actionRequests, hasMultipleActions, runtime]);
 
-  const handleSubmitAll = useCallback(() => {
+  const handleSubmitAll = useCallback(async () => {
     if (!hasMultipleActions) return;
 
     if (addressedActions.size !== actionRequests.length) {
@@ -232,7 +238,7 @@ export function ThreadActionsView({
         return decision;
       });
 
-      runtime.submit(
+      await runtime.submit(
         {},
         {
           config: {
@@ -253,6 +259,7 @@ export function ThreadActionsView({
       setAddressedActions(new Map());
     } catch (error) {
       console.error("Error submitting all actions", error);
+      if (getUserLimitMessage(error)) return;
       toast.error("Error", {
         description: "Failed to submit actions.",
         richColors: true,
