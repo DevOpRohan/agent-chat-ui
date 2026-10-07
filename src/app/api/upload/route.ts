@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Storage } from "@google-cloud/storage";
 import { v4 as uuidv4 } from "uuid";
+import { MAX_UPLOAD_BYTES } from "@/lib/attachment-limits";
+import {
+  isPdfFile,
+  PdfValidationError,
+  readPdfPageCount,
+  requirePdfPageBudget,
+} from "@/lib/pdf-page-count";
 // Use Web FormData/Blob from undici (built-in in Next.js node runtime)
 
 export const runtime = "nodejs";
@@ -22,24 +29,16 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-    if (!file) {
+    if (!(file instanceof File)) {
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
     }
 
-    const MAX_BYTES = 100 * 1024 * 1024; // 100 MB
+    const MAX_BYTES = MAX_UPLOAD_BYTES;
     const size = (file as any).size as number | undefined;
     if (typeof size === "number" && size > MAX_BYTES) {
       return NextResponse.json(
         { error: "File too large", max_bytes: MAX_BYTES, content_length: size },
         { status: 413 },
-      );
-    }
-
-    const bucketName = process.env.GCS_BUCKET_NAME;
-    if (!bucketName) {
-      return NextResponse.json(
-        { error: "Bucket not configured" },
-        { status: 500 },
       );
     }
 
@@ -57,12 +56,25 @@ export async function POST(req: NextRequest) {
     }
     const buf = Buffer.from(arrayBuffer);
 
+    const isPdf = isPdfFile(file.type, file.name, buf);
+    const pageCount = isPdf ? await readPdfPageCount(buf) : undefined;
+    if (pageCount !== undefined) requirePdfPageBudget(pageCount);
+    const mimeType = isPdf ? "application/pdf" : file.type;
+
+    const bucketName = process.env.GCS_BUCKET_NAME;
+    if (!bucketName) {
+      return NextResponse.json(
+        { error: "Bucket not configured" },
+        { status: 500 },
+      );
+    }
+
     const storage = new Storage();
     const filename = `${uuidv4()}-${file.name}`;
     const gcsFile = storage.bucket(bucketName).file(filename);
     // Simple upload via save() using the in-memory buffer
     await gcsFile.save(buf, {
-      contentType: file.type || "application/octet-stream",
+      contentType: mimeType || "application/octet-stream",
       resumable: false,
       // Do not set object ACLs when Uniform Bucket-Level Access is enabled.
       // Public readability should be configured at the bucket IAM policy.
@@ -74,7 +86,6 @@ export async function POST(req: NextRequest) {
     // Optionally upload PDFs to OpenAI when provider is OPENAI
     let openaiFileId: string | undefined = undefined;
     const provider = (process.env.MODEL_PROVIDER || "").toUpperCase();
-    const isPdf = (file.type || "").toLowerCase() === "application/pdf";
     if (provider === "OPENAI" && isPdf) {
       const apiKey = process.env.OPENAI_API_KEY;
       if (apiKey) {
@@ -117,11 +128,17 @@ export async function POST(req: NextRequest) {
       gsUrl,
       httpsUrl,
       openaiFileId,
-      mime_type: file.type,
+      mime_type: mimeType,
+      page_count: pageCount,
       filename: file.name,
       size: size ?? buf.length,
     });
   } catch (e) {
+    if (e instanceof PdfValidationError)
+      return NextResponse.json(
+        { error: e.message, code: e.code },
+        { status: e.status },
+      );
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: message }, { status: 500 });
   }

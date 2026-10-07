@@ -402,3 +402,12 @@ Validation: `pnpm lint`, production build with integrated type checking, explici
 Rollback: `gcloud run services update-traffic agent-chat-ui --project cerebryai --region asia-south1 --to-revisions agent-chat-ui-used-meter-prod-1008=100`. This preserves the prior deployed production UI.
 
 Release outcome: the development tag remains on `agent-chat-ui-attachments-dev-1008` at 0% canonical traffic; production `agent-chat-ui-attachments-prod-1008` is Ready/ContainerHealthy and receives 100%. Authenticated canonical production acceptance confirmed the new 0/20-image and 0/2-PDF counters plus the existing budget display. A production native-picker rejection attempt was inconclusive because Safari kept its Upload button disabled for the synthetic fixture selection; it was canceled without transferring files. The corresponding hosted development rejection passed. No generation requests were submitted, and existing user thread tabs were preserved.
+
+
+## Combined PDF page budget (2026-10-08 IST)
+
+The runtime requires Poppler `pdfinfo`. The Alpine runner installs `poppler-utils` and executes `pdfinfo -v` during the image build, so a missing binary fails the build. No new environment variables or credentials are required. Local development must install Poppler as described in README.
+
+The existing Cloud Run IAP perimeter protects the same-origin count-only multipart endpoint `/api/upload/pdf-pages`. It accepts up to two PDFs, counts actual bytes through a private temporary file with a 10-second subprocess timeout, 64KiB output bound and finally cleanup, and rejects more than 64 pages combined. It does not write to GCS, OpenAI or another parser service. The two existing upload routes also enforce actual-byte per-file validation before external uploads. Aggregate validation before a model run is additionally owned by the QuestionCrafter backend; client counts are not an authorization boundary.
+
+Release validation and exact image/revision identities will be recorded after develop-first acceptance and production promotion. The rollback target before this change is `agent-chat-ui-attachments-prod-1008`.

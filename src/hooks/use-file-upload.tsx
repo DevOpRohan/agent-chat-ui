@@ -20,8 +20,26 @@ export const SUPPORTED_FILE_TYPES = [
   "application/pdf",
 ];
 
-export const MAX_IMAGE_ATTACHMENTS = 20;
-export const MAX_PDF_ATTACHMENTS = 2;
+import {
+  MAX_IMAGE_ATTACHMENTS,
+  MAX_PDF_ATTACHMENTS,
+  MAX_PDF_PAGES,
+  MAX_UPLOAD_BYTES,
+  pdfPageLimitMessage,
+} from "@/lib/attachment-limits";
+export {
+  MAX_IMAGE_ATTACHMENTS,
+  MAX_PDF_ATTACHMENTS,
+  MAX_PDF_PAGES,
+} from "@/lib/attachment-limits";
+
+const isPdfBlock = (block: ExtendedContentBlock) =>
+  block.type === "file" &&
+  ((block as any).mimeType === "application/pdf" ||
+    (block as any).mime_type === "application/pdf");
+const hasPageCount = (block: ExtendedContentBlock) =>
+  Number.isSafeInteger(block.metadata?.page_count) &&
+  Number(block.metadata?.page_count) > 0;
 
 interface UseFileUploadOptions {
   initialBlocks?: ExtendedContentBlock[];
@@ -36,6 +54,8 @@ export function useFileUpload({
   const pendingRef = useRef<File[]>([]);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const draftVersion = useRef(0);
+  const pendingPages = useRef(new Map<File, number>());
+  const pageCheckQueue = useRef(Promise.resolve());
   const isUploading = pendingFiles.length > 0;
   const dropRef = useRef<HTMLDivElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -63,6 +83,16 @@ export function useFileUpload({
             (block as any).mime_type === "application/pdf"),
       ).length + files.filter((file) => file.type === "application/pdf").length,
   });
+
+  const countPdfPages = (blocks: ExtendedContentBlock[], files: File[]) =>
+    blocks
+      .filter(isPdfBlock)
+      .reduce(
+        (sum, block) =>
+          sum + (hasPageCount(block) ? Number(block.metadata?.page_count) : 0),
+        0,
+      ) +
+    files.reduce((sum, file) => sum + (pendingPages.current.get(file) || 0), 0);
 
   // All entry points reserve capacity synchronously, including unfinished uploads.
   const uploadFiles = useCallback(
@@ -113,22 +143,98 @@ export function useFileUpload({
         );
         return;
       }
+      if (uniqueFiles.some((file) => file.size > MAX_UPLOAD_BYTES)) {
+        toast.error(
+          "File too large. The maximum size is 100MB. No files from this selection were uploaded.",
+        );
+        return;
+      }
       const version = draftVersion.current;
       pendingRef.current = [...pendingRef.current, ...uniqueFiles];
       setPendingFiles(pendingRef.current);
-      const results = await Promise.allSettled(
-        uniqueFiles.map(fileToContentBlock),
-      );
-      if (version !== draftVersion.current) return;
-      // Keep successful uploads if another upload fails, and release every reservation.
-      const newBlocks = results.flatMap((result) =>
-        result.status === "fulfilled" ? [result.value] : [],
-      );
-      setContentBlocks((previous) => [...previous, ...newBlocks]);
-      pendingRef.current = pendingRef.current.filter(
-        (file) => !uniqueFiles.includes(file),
-      );
-      setPendingFiles(pendingRef.current);
+      const previousCheck = pageCheckQueue.current;
+      let finishCheck!: () => void;
+      pageCheckQueue.current = new Promise<void>((resolve) => {
+        finishCheck = resolve;
+      });
+      try {
+        // Serialize PDF admission only. Accepted uploads can run concurrently.
+        await previousCheck;
+        if (version !== draftVersion.current) return;
+        const pdfs = uniqueFiles.filter(
+          (file) => file.type === "application/pdf",
+        );
+        if (pdfs.length) {
+          if (
+            blocksRef.current.some(
+              (block) => isPdfBlock(block) && !hasPageCount(block),
+            )
+          ) {
+            throw new Error(
+              "Remove and reattach existing PDFs so their page count can be verified before adding more files.",
+            );
+          }
+          const form = new FormData();
+          pdfs.forEach((file) => form.append("files", file));
+          const response = await fetch("/api/upload/pdf-pages", {
+            method: "POST",
+            body: form,
+            signal: AbortSignal.timeout(30_000),
+          });
+          const result = await response.json();
+          if (!response.ok)
+            throw new Error(
+              result.error ||
+                "Could not verify PDF page count. Use an unencrypted, readable PDF.",
+            );
+          const counts: unknown = result.page_counts;
+          if (
+            !Array.isArray(counts) ||
+            counts.length !== pdfs.length ||
+            counts.some((pages) => !Number.isSafeInteger(pages) || pages < 1)
+          ) {
+            throw new Error(
+              "Could not verify PDF page count. Please reattach the PDFs and try again.",
+            );
+          }
+          if (version !== draftVersion.current) return;
+          const totalPages =
+            countPdfPages(blocksRef.current, pendingRef.current) +
+            counts.reduce((sum, pages) => sum + pages, 0);
+          if (totalPages > MAX_PDF_PAGES)
+            throw new Error(pdfPageLimitMessage(totalPages));
+          pdfs.forEach((file, index) =>
+            pendingPages.current.set(file, counts[index]),
+          );
+          setPendingFiles([...pendingRef.current]);
+        }
+        finishCheck();
+        const results = await Promise.allSettled(
+          uniqueFiles.map(fileToContentBlock),
+        );
+        if (version !== draftVersion.current) return;
+        // Keep successful uploads if another upload fails, and release every reservation.
+        const newBlocks = results.flatMap((result) =>
+          result.status === "fulfilled" ? [result.value] : [],
+        );
+        setContentBlocks((previous) => [...previous, ...newBlocks]);
+      } catch (error) {
+        if (version === draftVersion.current)
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "Could not check PDF pages. Please try again.",
+          );
+      } finally {
+        finishCheck();
+        if (version === draftVersion.current) {
+          uniqueFiles.forEach((file) => pendingPages.current.delete(file));
+          pendingRef.current = pendingRef.current.filter(
+            (file) => !uniqueFiles.includes(file),
+          );
+          setPendingFiles(pendingRef.current);
+        }
+      }
     },
     [setContentBlocks],
   );
@@ -225,7 +331,9 @@ export function useFileUpload({
 
   const resetBlocks = () => {
     draftVersion.current += 1;
+    pageCheckQueue.current = Promise.resolve();
     pendingRef.current = [];
+    pendingPages.current.clear();
     setPendingFiles([]);
     setContentBlocks([]);
   };
@@ -265,5 +373,13 @@ export function useFileUpload({
     handlePaste,
     isUploading,
     attachmentCounts: countAttachments(contentBlocks, pendingFiles),
+    pdfPages: countPdfPages(contentBlocks, pendingFiles),
+    unverifiedPdfPages: contentBlocks.some(
+      (block) => isPdfBlock(block) && !hasPageCount(block),
+    ),
+    checkingPdfPages: pendingFiles.some(
+      (file) =>
+        file.type === "application/pdf" && !pendingPages.current.has(file),
+    ),
   };
 }

@@ -8,6 +8,7 @@ type UploadResponse = {
   mime_type: string;
   filename: string;
   size: number;
+  page_count?: number;
 };
 
 async function upload(file: File): Promise<UploadResponse> {
@@ -30,20 +31,23 @@ async function upload(file: File): Promise<UploadResponse> {
 
 // Custom content block type that extends SDK types with URL-based sources
 // This supports our GCS URL-based uploads alongside base64
-export type ExtendedContentBlock = ContentBlock.Multimodal.Data | {
-  type: "image";
-  source_type: "url";
-  mime_type: string;
-  url: string;
-  metadata?: Record<string, unknown>;
-} | {
-  type: "file";
-  source_type: "url" | "id";
-  mime_type: string;
-  url?: string;
-  id?: string;
-  metadata?: Record<string, unknown>;
-};
+export type ExtendedContentBlock =
+  | ContentBlock.Multimodal.Data
+  | {
+      type: "image";
+      source_type: "url";
+      mime_type: string;
+      url: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      type: "file";
+      source_type: "url" | "id";
+      mime_type: string;
+      url?: string;
+      id?: string;
+      metadata?: Record<string, unknown>;
+    };
 
 // Returns a Promise of a typed multimodal block for images or PDFs
 export async function fileToContentBlock(
@@ -64,11 +68,17 @@ export async function fileToContentBlock(
     return Promise.reject(new Error(`Unsupported file type: ${file.type}`));
   }
 
-  const { gsUrl, httpsUrl, openaiFileId } = await upload(file);
+  const {
+    gsUrl,
+    httpsUrl,
+    openaiFileId,
+    page_count: pageCount,
+    mime_type: mimeType,
+  } = await upload(file);
 
   const provider = (process.env.NEXT_PUBLIC_MODEL_PROVIDER || "").toUpperCase();
 
-  if (supportedImageTypes.includes(file.type)) {
+  if (supportedImageTypes.includes(mimeType)) {
     return {
       type: "image",
       source_type: "url",
@@ -86,7 +96,7 @@ export async function fileToContentBlock(
       source_type: "id",
       mime_type: "application/pdf",
       id: openaiFileId,
-      metadata: { filename: file.name, gsUrl, httpsUrl },
+      metadata: { filename: file.name, gsUrl, httpsUrl, page_count: pageCount },
     };
   }
 
@@ -96,7 +106,7 @@ export async function fileToContentBlock(
     source_type: "url",
     mime_type: "application/pdf",
     url: httpsUrl,
-    metadata: { filename: file.name, gsUrl, httpsUrl },
+    metadata: { filename: file.name, gsUrl, httpsUrl, page_count: pageCount },
   };
 }
 
@@ -104,12 +114,15 @@ export async function fileToContentBlock(
 // Removed legacy base64 helpers; preview remains backward-compatible.
 
 // Type guard for previewable content blocks (image or PDF via base64, url, or id)
-export function isPreviewableContentBlock(block: unknown): block is ExtendedContentBlock {
+export function isPreviewableContentBlock(
+  block: unknown,
+): block is ExtendedContentBlock {
   if (typeof block !== "object" || block === null || !("type" in block))
     return false;
   const t = (block as { type?: unknown }).type;
   const st = (block as { source_type?: unknown }).source_type;
-  const mt = (block as { mime_type?: unknown; mimeType?: unknown }).mime_type ||
+  const mt =
+    (block as { mime_type?: unknown; mimeType?: unknown }).mime_type ||
     (block as { mimeType?: unknown }).mimeType;
 
   if (t === "image") {
@@ -121,7 +134,11 @@ export function isPreviewableContentBlock(block: unknown): block is ExtendedCont
   }
   if (t === "file") {
     return (
-      (st === "base64" || st === "url" || st === "id" || st === "text" || !st) &&
+      (st === "base64" ||
+        st === "url" ||
+        st === "id" ||
+        st === "text" ||
+        !st) &&
       mt === "application/pdf"
     );
   }
