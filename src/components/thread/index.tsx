@@ -45,7 +45,11 @@ import { getUserLimitMessage } from "@/lib/user-limit-error";
 import { DailyBudget } from "./daily-budget";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
-import { useFileUpload } from "@/hooks/use-file-upload";
+import {
+  MAX_IMAGE_ATTACHMENTS,
+  MAX_PDF_ATTACHMENTS,
+  useFileUpload,
+} from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import { markThreadSeen } from "@/lib/thread-activity";
 import {
@@ -443,6 +447,7 @@ export function Thread() {
     dragOver,
     handlePaste,
     isUploading,
+    attachmentCounts,
   } = useFileUpload();
   const [viewportWidthPx, setViewportWidthPx] = useState(() =>
     typeof window === "undefined" ? 1440 : window.innerWidth,
@@ -777,6 +782,16 @@ export function Thread() {
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
+    if (isUploading) return;
+    if (
+      attachmentCounts.images > MAX_IMAGE_ATTACHMENTS ||
+      attachmentCounts.pdfs > MAX_PDF_ATTACHMENTS
+    ) {
+      toast.error(
+        `Each message allows up to ${MAX_IMAGE_ATTACHMENTS} images and ${MAX_PDF_ATTACHMENTS} PDFs. Remove extra attachments before sending.`,
+      );
+      return;
+    }
     if (input.trim().length === 0 && contentBlocks.length === 0) return;
     if (shouldBlockWhileCurrentThreadBusy("submit")) {
       return;
@@ -850,7 +865,7 @@ export function Thread() {
     } catch (error) {
       setPendingSubmittedMessage(null);
       setInput(previousInput);
-      setContentBlocks(previousContentBlocks);
+      setContentBlocks((current) => [...previousContentBlocks, ...current]);
       if (getUserLimitMessage(error)) return;
       if (isConflictLikeError(error)) {
         showThreadRunningToast();
@@ -1385,8 +1400,15 @@ export function Thread() {
                             aria-disabled={isUploading}
                           >
                             <Plus className="text-muted-foreground size-5" />
-                            <span className="text-muted-foreground text-sm">
-                              Upload PDF or Image
+                            <span className="text-muted-foreground flex flex-col text-sm">
+                              <span>Upload PDF or Image</span>
+                              <span
+                                className="text-xs"
+                                aria-live="polite"
+                                data-testid="attachment-counts"
+                              >
+                                {attachmentCounts.images}/{MAX_IMAGE_ATTACHMENTS} images · {attachmentCounts.pdfs}/{MAX_PDF_ATTACHMENTS} PDFs
+                              </span>
                             </span>
                             {isUploading && (
                               <span className="text-muted-foreground ml-2 flex items-center gap-2 text-sm">
@@ -1400,6 +1422,7 @@ export function Thread() {
                             type="file"
                             onChange={handleFileUpload}
                             multiple
+                            aria-label={`Upload up to ${MAX_IMAGE_ATTACHMENTS} images and ${MAX_PDF_ATTACHMENTS} PDFs`}
                             accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
                             className="hidden"
                             disabled={isUploading}

@@ -1,8 +1,8 @@
 # Fork Compass — Agent Chat UI Customizations
 
 _Last updated: 2026-10-08_
-_Branch: codex/user-cost-limits_
-_Base: origin/main (`9674b3a`)_
+_Branch: codex/attachment-count-limits_
+_Base: origin/main (`06ef3a7`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
 This document is the current map of fork-specific behavior in this worktree. The poll-first runtime is now the source-of-truth baseline for the fork, alongside the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
@@ -38,7 +38,14 @@ Daily-budget implementation snapshot (2026-10-08):
 
 - Runtime source `ca5faf6`: 86 fork-only commits against the pinned `upstream/main`; 95 files changed, 13,868 insertions and 1,476 deletions (`git diff upstream/main...ca5faf6 --shortstat`). Release documentation follows in a separate commit.
 
+Attachment-limit implementation snapshot (2026-10-08):
+
+- Parent `06ef3a7`: 87 fork-only commits; 95 files changed, 13,899 insertions and 1,475 deletions against pinned `upstream/main`.
+- This change consolidates three upload paths and adds deterministic picker/drop/paste, in-flight, removal, failure and mobile coverage. Its implementation snapshot has 88 fork-only commits and changes 96 files against the merge base; release documentation records validation separately.
+
 Recent fork-only commit log:
+
+- This PR: `fix: cap composer attachments at 20 images and 2 PDFs`.
 
 - `ca5faf6`: `fix: show used budget arc with concise tooltip` — neutral track, used-percentage arc and exactly two tooltip lines.
 - `37a3f23`: `feat: tuck daily budget into a compact composer control` — footer placement, hover/focus/touch details and semantic thresholds.
@@ -71,6 +78,8 @@ What stays fork-specific:
 - PDFs use OpenAI Files IDs when `MODEL_PROVIDER=OPENAI`.
 - Non-OpenAI PDFs stay URL-backed.
 - Upload size limit remains `100MB`.
+- Each composer message permits at most **20 images and 2 PDFs**, independently. Picker, drop and paste use one admission path that reserves in-flight slots, rejects excess selections before network work and preserves successful uploads when a sibling fails. Removal releases capacity. Both counts are visible and announced politely; Enter waits for uploads.
+- Upload APIs accept one file per request; the QuestionCrafter backend separately enforces per-message/tool aggregate attachment limits.
 
 Primary files:
 
@@ -231,6 +240,7 @@ Start here when modifying the fork:
 - Runtime provider: `src/providers/Stream.tsx`
 - Thread shell: `src/components/thread/index.tsx`
 - Conversation navigator: `src/components/thread/conversation-navigator.tsx`
+- Attachment browser coverage: `tests/attachment-limits.spec.ts`
 - Navigator browser coverage: `tests/conversation-navigator.spec.ts`
 - History: `src/components/thread/history/index.tsx`
 - Assistant messages: `src/components/thread/messages/ai.tsx`
