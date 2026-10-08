@@ -436,4 +436,21 @@ Uploaded PDF responses and native file metadata include `page_count` and, when s
 
 The existing `LANGGRAPH_AUTH_JWT_SECRET` signs HS256 receipts with fixed issuer `agent-chat-ui/pdf-page-count`, audience `questioncrafter/pdf-page-count`, purpose `pdf-page-count`, version 1 and a 30-day expiry. This audience cannot be used for normal authentication. No new key/configuration is introduced; missing keys or invalid/expired receipts preserve the backend's count-from-bytes fallback. The composer exposes PAGE_COUNT in ATTACHMENTS_INFO while keeping the JWT out of model-readable text. Receipts remain in native metadata and can be reused by backend tools for the same immutable source.
 
-The earlier page-budget development revision was staged successfully, but production promotion was held for this metadata optimization. Final receipt-aware image/revision identities and acceptance evidence follow after release.
+The earlier page-budget development revision was staged successfully, but production promotion was held for this metadata optimization. Final receipt-aware release identities and acceptance scope are recorded below.
+
+
+Receipt release source: tested `baa71bdab39b9cf97bd03fc7b1451b6d32626835`, merged in PR #10 as `8374d10af771b55eb14198f5129338f6685d2b1b`; both have tree `a393b7b75a5edfecd8beba9357ec4d7038e823ab`. Final dual-image build: `ddd24dd2-acdd-4038-a291-30664c58a559`, project `cerebryai`, Cloud Build region `us-east1`.
+
+Receipt validation: final production build, lint, TypeScript and formatting passed; 40 full-suite scenarios and one additional focused URL/OpenAI-ID metadata scenario passed. Restoration preserves the receipt, ATTACHMENTS_INFO contains PAGE_COUNT only, claimed client counts are ignored by the upload signer, and a fixture produced by Node jose passed the actual Python PyJWT verifier with identical URL/generation/file-ID bindings. These checks use synthetic keys and mocked storage/provider writes. A real hosted storage/provider upload is outside release acceptance; no generation request is sent.
+
+
+| Environment | Final revision | Image digest | Traffic |
+| --- | --- | --- | --- |
+| Development | `agent-chat-ui-pdf-receipt-dev-1008` | `sha256:33b9faffe7b1ed92481ea43cc6fdd1994a022707ca60827586694b635ed75cf1` | `develop` tag; 0% canonical |
+| Production | `agent-chat-ui-pdf-receipt-prod-1008` | `sha256:a04f5cc4b003fc3768089207e440b649d9a1884c129a6f03eb37c9666b50e597` | 100% canonical |
+
+Final build succeeded at 2026-10-08 00:17:21 UTC. Both images report Poppler 25.12.0. Develop was deployed first; production was staged at zero traffic and promoted only after the backend receipt commit `45f16711d7fb92bb6e3f2ca41127f5cb8c8650ce` was confirmed active/DEPLOYED in both API environments. Final Cloud Run checks confirm exact image digests, Ready and ContainerHealthy for both revisions, IAP enabled, unchanged 2CPU/2GiB/HTTP1, environment-specific OPENAI_API_KEY_DEV/PROD references, and the existing shared JWT-secret reference. The prior production and budget tags remain available. Rollback remains `agent-chat-ui-attachments-prod-1008`.
+
+Hosted upload acceptance is **unverified** for this release: native Safari automation reported active user interaction and was stopped without changing or uploading content; the existing test auth-state HTTP check redirected to sign-in (302), and no test bearer was configured. No hosted count request, real storage/provider upload or model generation was submitted. This limitation is separate from the passing local route/browser/receipt tests and verified Cloud Run deployment health. Synthetic Node-to-Python signature interoperability passed; real upload receipt issuance was tested with mocked storage/provider boundaries.
+
+Local evidence: `test-results/attachment-limits-mobile.png` (390px, 64/64 pages), `/tmp/ui-page-receipt-build.log`, and `/tmp/ui-pdf-receipt-release-evidence.json` (safe deployment fields only). The final documentation-only commit does not change the tested/built runtime source and does not require rebuilding images.

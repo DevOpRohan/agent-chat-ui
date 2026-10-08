@@ -48,9 +48,13 @@ Combined PDF-page implementation snapshot (2026-10-08):
 
 - Runtime source `bf51fb3`: 91 fork-only commits against pinned `upstream/main`; 103 files changed, 15,178 insertions and 1,573 deletions (`git diff upstream/main...bf51fb3 --shortstat`). PR #8 merged the identical tree as `89efa8c`. It adds local actual-byte page counting and 12 focused page-budget scenarios. Final transport refinement `b20943e` (93 fork-only commits; 103 files changed, 15,198 insertions and 1,573 deletions) sends one PDF per preflight request; PR #9 merged its identical tree as `a7e19cf`.
 
+Verified-count metadata snapshot (2026-10-08):
+
+- Runtime source `baa71bd`: 95 fork-only commits against pinned `upstream/main`; 104 files changed, 15,549 insertions and 1,573 deletions (`git diff upstream/main...baa71bd --shortstat`). PR #10 merged the identical tree as `8374d10`.
+
 Recent fork-only commit log:
 
-- This PR: `feat: reuse verified PDF page counts through signed metadata` — generation-pinned sources, domain-separated receipts, native metadata preservation and model-readable PAGE_COUNT.
+- `baa71bd`: `feat: reuse verified PDF page counts through signed metadata` — generation-pinned sources, domain-separated receipts, native metadata preservation and model-readable PAGE_COUNT.
 
 - `b20943e`: `fix: preflight PDF page counts in separate requests` — singleton requests avoid a combined HTTP/1 body limit while retaining atomic combined-page admission.
 
@@ -289,3 +293,10 @@ Start here when modifying the fork:
 
 - `main` and `develop` contain PR #7. Cloud Run development and production revisions are `agent-chat-ui-attachments-dev-1008` and `agent-chat-ui-attachments-prod-1008`; production receives 100% canonical traffic. Pinned image digests, source/tree identity, rollback target and exact hosted validation scope are recorded in `DEPLOYMENT_GUIDE.md`.
 - All 26 local browser scenarios, standalone lint, production build and TypeScript checks passed. Hosted development rejected a three-PDF selection before upload; authenticated production displayed the new counters. No model call was made for acceptance.
+
+
+## PDF page budget and receipt release (2026-10-08)
+
+- Main and develop contain PRs #8, #9 and #10: combined 64-page admission, singleton preflight requests, actual-byte upload checks and reusable signed metadata. Receipt runtime source `baa71bd` and merge `8374d10` have identical tree `a393b7b75a5edfecd8beba9357ec4d7038e823ab`.
+- Final develop revision `agent-chat-ui-pdf-receipt-dev-1008` retains the develop tag; production `agent-chat-ui-pdf-receipt-prod-1008` receives 100% canonical traffic. Exact digests, build region, backend prerequisite and rollback are recorded in DEPLOYMENT_GUIDE.md.
+- Local build/lint/TypeScript and 41 unique checks passed, including actual PDF parsing, races/restoration, signed metadata, PAGE_COUNT without tokens, and Node-to-Python interoperability. Hosted upload acceptance remains unverified because Safari was in active use and the existing test-auth state was redirected to sign-in. No real upload/model run was made.
