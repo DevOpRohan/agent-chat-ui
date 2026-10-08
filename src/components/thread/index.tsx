@@ -824,7 +824,16 @@ export function Thread() {
           (block.metadata as { gcsUrl?: string })?.gcsUrl ||
           "";
         const url = String(preferredUrl);
-        return `${index + 1}. FILE_NAME="${name}", FILE_URL="${url}", MIME_TYPE="${block.mime_type}"`;
+        const pageCount = block.metadata?.page_count;
+        const pageInfo =
+          block.type === "file" &&
+          block.mime_type === "application/pdf" &&
+          typeof pageCount === "number" &&
+          Number.isSafeInteger(pageCount) &&
+          pageCount > 0
+            ? `, PAGE_COUNT=${pageCount}`
+            : "";
+        return `${index + 1}. FILE_NAME="${name}", FILE_URL="${url}", MIME_TYPE="${block.mime_type}"${pageInfo}`;
       })
       .join("\n");
     const metadataText =

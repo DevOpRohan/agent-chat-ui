@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MAX_UPLOAD_BYTES } from "@/lib/attachment-limits";
+import { signPdfPageCountReceipt } from "@/lib/pdf-page-receipt";
 import {
   isPdfFile,
   PdfValidationError,
@@ -147,6 +148,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       file_id: data.id,
       page_count: pageCount,
+      page_count_receipt:
+        pageCount !== undefined
+          ? await signPdfPageCountReceipt(pageCount, httpsUrl, data.id)
+          : undefined,
       filename: data.filename,
       bytes: data.bytes,
       purpose: data.purpose,

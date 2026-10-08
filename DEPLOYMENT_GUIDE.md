@@ -418,3 +418,22 @@ Local validation: production build, repository lint and TypeScript passed (exist
 Transport constraint: the deployed service uses HTTP/1, and Cloud Run limits each request to 32MiB (including multipart overhead). The existing 100MiB application file limit does not override that transport cap. The UI sends each PDF in its own count request, so two individually uploadable files do not become one oversized preflight body. It still combines both server-derived page counts before any storage/provider upload. Files above the infrastructure request cap remain an existing limitation; this release does not change transport or upload architecture. See [Cloud Run quotas](https://docs.cloud.google.com/run/quotas).
 
 Performance scope: preflight sends PDF bytes to the UI server separately from the later accepted storage upload. Local parser CPU/wall measurements exclude that network transfer and are not end-to-end upload timings. Counting is local, uses no model tokens, and rejected selections never reach storage/provider upload.
+
+
+Page-budget staging source: PR #9 refined preflight transport as `b20943e830191adfb89e87367107f4315a608db0`, merged as `a7e19cf83fec3d48c09fb047a6f900669f69c09a`; both have tree `edd6ed357879aa3ea953d8b4236ae3d4fbd8a6ef`. Cloud Build `368e5ce6-d38a-4cfb-b4b2-17b204b90ba9` (`us-east1`, project `cerebryai`) succeeded at 2026-10-08 00:00:21 UTC. Both runners reported `pdfinfo version 25.12.0`. The singleton-preflight build, lint and all 16 focused tests passed.
+
+| Environment | Revision | Image digest |
+| --- | --- | --- |
+| Development | `agent-chat-ui-pdf-pages-dev-1008` | `sha256:d97dc4c901213e5a7862e021867c688d629f25cfcf3fc24c3cb9dfb43cd93682` |
+| Production image (not deployed) | — | `sha256:db6f50e3e811ee6293bbfad41f7743780ad6e4182dd019a47b4d81ed2fb3b0da` |
+
+Image repository: `us-east1-docker.pkg.dev/cerebryai/question-crafter-user-limits/ui`. Development was Ready/ContainerHealthy at zero canonical traffic; production promotion was held for the receipt enhancement below.
+
+
+### Reusable verified PDF page counts
+
+Uploaded PDF responses and native file metadata include `page_count` and, when signing is configured and GCS generation is available, `page_count_receipt`. The source HTTPS URL is pinned to the actual immutable GCS generation returned by `save()`; no additional metadata request is needed. The receipt binds that exact URL and optional returned OpenAI file ID to the server-counted pages. The alternate OpenAI upload route issues a receipt only for canonical generation-pinned GCS input. Plain counts, mutable URLs and arbitrary client tokens are never signed as authoritative input.
+
+The existing `LANGGRAPH_AUTH_JWT_SECRET` signs HS256 receipts with fixed issuer `agent-chat-ui/pdf-page-count`, audience `questioncrafter/pdf-page-count`, purpose `pdf-page-count`, version 1 and a 30-day expiry. This audience cannot be used for normal authentication. No new key/configuration is introduced; missing keys or invalid/expired receipts preserve the backend's count-from-bytes fallback. The composer exposes PAGE_COUNT in ATTACHMENTS_INFO while keeping the JWT out of model-readable text. Receipts remain in native metadata and can be reused by backend tools for the same immutable source.
+
+The earlier page-budget development revision was staged successfully, but production promotion was held for this metadata optimization. Final receipt-aware image/revision identities and acceptance evidence follow after release.

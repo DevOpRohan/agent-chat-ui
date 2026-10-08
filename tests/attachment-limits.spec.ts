@@ -30,6 +30,7 @@ async function openChat(page: Page) {
     mime_type: name.endsWith(".pdf") ? "application/pdf" : "image/png",
     openaiFileId: `file-${name}`,
     size: 12,
+    page_count_receipt: `fixture-receipt-${name}`,
     ...(fixture.omitPageCount ? {} : { page_count: fixture.pages[name] ?? 1 }),
   });
   const pageResponse = (names: string[]) => {
@@ -415,6 +416,20 @@ test("restored PDFs cannot bypass the combined page cap", async ({ page }) => {
   fixture.holdSubmit = true;
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect.poll(() => fixture.submits.length).toBe(1);
+  const submitted = fixture.submits[0].request().postDataJSON();
+  const pdfBlock = submitted.input.messages[0].content.find(
+    (block: any) => block.type === "file",
+  );
+  expect(pdfBlock.metadata.page_count).toBe(32);
+  expect(pdfBlock.metadata.page_count_receipt).toBe(
+    "fixture-receipt-original.pdf",
+  );
+  const text = submitted.input.messages[0].content
+    .filter((block: any) => block.type === "text")
+    .map((block: any) => block.text)
+    .join("\n");
+  expect(text).toContain("PAGE_COUNT=32");
+  expect(text).not.toContain("fixture-receipt");
   await transfer(page, ["next.pdf"], "paste");
   await expect(page.getByTestId("pdf-page-count")).toHaveText(
     "33/64 PDF pages",
@@ -440,6 +455,19 @@ test("restored PDFs cannot bypass the combined page cap", async ({ page }) => {
     page.getByText(/PDF attachments contain 65 pages; maximum 64/),
   ).toBeVisible();
   expect(fixture.submits).toHaveLength(1);
+  await page
+    .getByRole("button", { name: "Remove PDF", exact: true })
+    .last()
+    .click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => fixture.submits.length).toBe(2);
+  const retried = fixture.submits[1]
+    .request()
+    .postDataJSON()
+    .input.messages[0].content.find((block: any) => block.type === "file");
+  expect(retried.metadata.page_count_receipt).toBe(
+    "fixture-receipt-original.pdf",
+  );
 });
 
 test("PDFs without verified upload metadata cannot submit", async ({
