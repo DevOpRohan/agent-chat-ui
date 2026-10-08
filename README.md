@@ -132,7 +132,7 @@ When these environment variables are set, the application will use them instead 
 > [!NOTE]
 > For image/PDF uploads, each message allows **up to 20 images and 2 PDFs, with at most 64 PDF pages combined**. The composer shows file and page counts, including reserved uploads. Picker, drag/drop and paste check each PDF separately and combine the page counts before storage or provider upload; an over-limit selection is rejected as a batch. Remove attachments or select fewer pages and try again. Encrypted, unreadable or older attachments without a verified page count must be replaced with readable PDFs. The existing 100MB per-file limit remains.
 >
-> PDF counting requires Poppler `pdfinfo` on the Next.js server (for local macOS development: `brew install poppler`; Debian/Ubuntu: `apt-get install poppler-utils`). The Docker runner installs `poppler-utils`. Counting reads metadata locally, without rendering, OCR or model calls.
+> PDF counting requires Poppler `pdfinfo` on the Next.js server (for local macOS development: `brew install poppler`; Debian/Ubuntu: `apt-get install poppler-utils`). The Docker runner installs `poppler-utils`. Counting reads metadata locally, without rendering, OCR or model calls. Uploaded PDFs retain their verified page count and a signed, generation-bound receipt in native attachment metadata. The backend can reuse that count without downloading the PDF again; missing, expired or invalid receipts fall back to actual-byte verification.
 >
 > This project:
 >

@@ -6,6 +6,38 @@ import {
   requirePdfPageBudget,
 } from "../src/lib/pdf-page-count";
 import { getUserLimitNotice } from "../src/lib/user-limit-error";
+import { jwtVerify } from "jose";
+import {
+  generationPinnedGcsUrl,
+  signPdfPageCountReceipt,
+} from "../src/lib/pdf-page-receipt";
+
+async function loadRoute(path: string, mocks: Record<string, unknown> = {}) {
+  const { build } = await import("esbuild");
+  const { createRequire } = await import("node:module");
+  const require = createRequire(import.meta.url);
+  const bundle = await build({
+    entryPoints: [path],
+    bundle: true,
+    write: false,
+    platform: "node",
+    format: "cjs",
+    packages: "external",
+    alias: { "next/server": "next/server.js" },
+  });
+  const module = {
+    exports: {} as { POST: (request: Request) => Promise<Response> },
+  };
+  new Function("require", "module", "exports", bundle.outputFiles[0].text)(
+    (name: string) => mocks[name] || require(name),
+    module,
+    module.exports,
+  );
+  return {
+    ...module.exports,
+    NextRequest: require("next/server.js").NextRequest,
+  };
+}
 
 test("Poppler counts real 64/65-page PDFs and rejects unreadable, encrypted and spoofed metadata", async () => {
   expect(await readPdfPageCount(blankPdf(64))).toBe(64);
@@ -166,28 +198,9 @@ test("reset during preflight does not block or contaminate the new draft", async
 });
 
 test("direct OpenAI upload rejects PDF bytes before an OpenAI Files request", async () => {
-  const { build } = await import("esbuild");
-  const { createRequire } = await import("node:module");
-  const require = createRequire(import.meta.url);
-  const bundle = await build({
-    entryPoints: ["src/app/api/openai/upload/route.ts"],
-    bundle: true,
-    write: false,
-    platform: "node",
-    format: "cjs",
-    packages: "external",
-    alias: { "next/server": "next/server.js" },
-  });
-  const module = {
-    exports: {} as { POST: (request: Request) => Promise<Response> },
-  };
-  new Function("require", "module", "exports", bundle.outputFiles[0].text)(
-    require,
-    module,
-    module.exports,
+  const { POST, NextRequest } = await loadRoute(
+    "src/app/api/openai/upload/route.ts",
   );
-  const { POST } = module.exports;
-  const { NextRequest } = require("next/server.js");
   const originalFetch = globalThis.fetch;
   const requests: string[] = [];
   const pdf = blankPdf(65);
@@ -220,5 +233,164 @@ test("direct OpenAI upload rejects PDF bytes before an OpenAI Files request", as
     expect(requests).toHaveLength(2);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("PDF count receipts bind immutable versions and cannot be used as auth tokens", async () => {
+  const key = new TextEncoder().encode("receipt-fixture-secret");
+  const url = generationPinnedGcsUrl(
+    "fixture-bucket",
+    "folder/é a#(!).pdf",
+    "1791416994825483",
+  )!;
+  expect(url).toBe(
+    "https://storage.googleapis.com/fixture-bucket/folder%2F%C3%A9%20a%23%28%21%29.pdf?generation=1791416994825483",
+  );
+  const receipt = (await signPdfPageCountReceipt(32, url, "file-fixture"))!;
+  const { payload } = await jwtVerify(receipt, key, {
+    algorithms: ["HS256"],
+    issuer: "agent-chat-ui/pdf-page-count",
+    audience: "questioncrafter/pdf-page-count",
+  });
+  expect(payload).toMatchObject({
+    purpose: "pdf-page-count",
+    version: 1,
+    page_count: 32,
+    url,
+    file_id: "file-fixture",
+  });
+  expect(payload.exp! - payload.iat!).toBe(30 * 24 * 60 * 60);
+  await expect(
+    jwtVerify(receipt, key, { audience: "questioncrafter-auth" }),
+  ).rejects.toThrow();
+  for (const source of [
+    url.replace("?generation=1791416994825483", ""),
+    url + "&other=1",
+    url + "#fragment",
+    url.replace("storage.googleapis.com", "fixture.invalid"),
+  ])
+    expect(await signPdfPageCountReceipt(32, source)).toBeUndefined();
+  expect(
+    generationPinnedGcsUrl("fixture", "a.pdf", 1791416994825483),
+  ).toBeUndefined();
+  delete process.env.LANGGRAPH_AUTH_JWT_SECRET;
+  try {
+    expect(await signPdfPageCountReceipt(32, url)).toBeUndefined();
+  } finally {
+    process.env.LANGGRAPH_AUTH_JWT_SECRET = "receipt-fixture-secret";
+  }
+});
+
+test("upload signs actual counted bytes and pins the source from save metadata without another GCS request", async () => {
+  const saves: Buffer[] = [];
+  let objectName = "";
+  class MockStorage {
+    bucket(name: string) {
+      expect(name).toBe("fixture-bucket");
+      return {
+        file(name: string) {
+          objectName = name;
+          const file = {
+            metadata: {} as { generation?: string },
+            async save(bytes: Buffer) {
+              saves.push(bytes);
+              file.metadata.generation = "1791416994825483";
+            },
+          };
+          return file;
+        },
+      };
+    }
+  }
+  const { POST, NextRequest } = await loadRoute("src/app/api/upload/route.ts", {
+    "@google-cloud/storage": { Storage: MockStorage },
+  });
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = async (input) => {
+    requests.push(String(input));
+    expect(String(input)).toBe("https://api.openai.com/v1/files");
+    return Response.json({ id: "file-fixture" });
+  };
+  try {
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([blankPdf(32)], { type: "application/pdf" }),
+      "é a#(!).pdf",
+    );
+    form.append("page_count", "1");
+    form.append("page_count_receipt", "untrusted-client-value");
+    const response = await POST(
+      new NextRequest("http://fixture.invalid/api/upload", {
+        method: "POST",
+        body: form,
+      }),
+    );
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.page_count).toBe(32);
+    expect(data.httpsUrl).toBe(
+      generationPinnedGcsUrl("fixture-bucket", objectName, "1791416994825483"),
+    );
+    const { payload } = await jwtVerify(
+      data.page_count_receipt,
+      new TextEncoder().encode("receipt-fixture-secret"),
+      {
+        algorithms: ["HS256"],
+        issuer: "agent-chat-ui/pdf-page-count",
+        audience: "questioncrafter/pdf-page-count",
+      },
+    );
+    expect(payload).toMatchObject({
+      page_count: 32,
+      url: data.httpsUrl,
+      file_id: data.openaiFileId,
+    });
+    expect(saves).toHaveLength(1);
+    expect(requests).toEqual(["https://api.openai.com/v1/files"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fileToContentBlock preserves the receipt for URL and OpenAI ID attachments", async () => {
+  const { fileToContentBlock } = await import("../src/lib/multimodal-utils");
+  const originalFetch = globalThis.fetch;
+  const originalProvider = process.env.NEXT_PUBLIC_MODEL_PROVIDER;
+  const httpsUrl = generationPinnedGcsUrl(
+    "fixture-bucket",
+    "source.pdf",
+    "1791416994825483",
+  )!;
+  globalThis.fetch = async () =>
+    Response.json({
+      gsUrl: "gs://fixture-bucket/source.pdf",
+      httpsUrl,
+      openaiFileId: "file-fixture",
+      mime_type: "application/pdf",
+      filename: "source.pdf",
+      size: 123,
+      page_count: 32,
+      page_count_receipt: "synthetic-receipt",
+    });
+  try {
+    for (const provider of ["OPENAI", "GEMINI"]) {
+      process.env.NEXT_PUBLIC_MODEL_PROVIDER = provider;
+      const block = await fileToContentBlock(
+        new File([blankPdf(32)], "source.pdf", { type: "application/pdf" }),
+      );
+      expect(block.source_type).toBe(provider === "OPENAI" ? "id" : "url");
+      expect(block.metadata).toMatchObject({
+        httpsUrl,
+        page_count: 32,
+        page_count_receipt: "synthetic-receipt",
+      });
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalProvider === undefined)
+      delete process.env.NEXT_PUBLIC_MODEL_PROVIDER;
+    else process.env.NEXT_PUBLIC_MODEL_PROVIDER = originalProvider;
   }
 });

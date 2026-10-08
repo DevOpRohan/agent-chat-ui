@@ -9,6 +9,7 @@ type UploadResponse = {
   filename: string;
   size: number;
   page_count?: number;
+  page_count_receipt?: string;
 };
 
 async function upload(file: File): Promise<UploadResponse> {
@@ -73,6 +74,7 @@ export async function fileToContentBlock(
     httpsUrl,
     openaiFileId,
     page_count: pageCount,
+    page_count_receipt: pageCountReceipt,
     mime_type: mimeType,
   } = await upload(file);
 
@@ -96,7 +98,13 @@ export async function fileToContentBlock(
       source_type: "id",
       mime_type: "application/pdf",
       id: openaiFileId,
-      metadata: { filename: file.name, gsUrl, httpsUrl, page_count: pageCount },
+      metadata: {
+        filename: file.name,
+        gsUrl,
+        httpsUrl,
+        page_count: pageCount,
+        page_count_receipt: pageCountReceipt,
+      },
     };
   }
 
@@ -106,7 +114,13 @@ export async function fileToContentBlock(
     source_type: "url",
     mime_type: "application/pdf",
     url: httpsUrl,
-    metadata: { filename: file.name, gsUrl, httpsUrl, page_count: pageCount },
+    metadata: {
+      filename: file.name,
+      gsUrl,
+      httpsUrl,
+      page_count: pageCount,
+      page_count_receipt: pageCountReceipt,
+    },
   };
 }
 

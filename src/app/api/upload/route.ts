@@ -3,6 +3,10 @@ import { Storage } from "@google-cloud/storage";
 import { v4 as uuidv4 } from "uuid";
 import { MAX_UPLOAD_BYTES } from "@/lib/attachment-limits";
 import {
+  generationPinnedGcsUrl,
+  signPdfPageCountReceipt,
+} from "@/lib/pdf-page-receipt";
+import {
   isPdfFile,
   PdfValidationError,
   readPdfPageCount,
@@ -81,7 +85,15 @@ export async function POST(req: NextRequest) {
     });
 
     const gsUrl = `gs://${bucketName}/${filename}`;
-    const httpsUrl = gsToHttps(gsUrl) as string;
+    // save() retains server response metadata, so no extra metadata GET is needed.
+    const pinnedUrl = isPdf
+      ? generationPinnedGcsUrl(
+          bucketName,
+          filename,
+          gcsFile.metadata.generation,
+        )
+      : undefined;
+    const httpsUrl = pinnedUrl || (gsToHttps(gsUrl) as string);
 
     // Optionally upload PDFs to OpenAI when provider is OPENAI
     let openaiFileId: string | undefined = undefined;
@@ -124,12 +136,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const pageCountReceipt =
+      pageCount !== undefined && pinnedUrl
+        ? await signPdfPageCountReceipt(pageCount, pinnedUrl, openaiFileId)
+        : undefined;
     return NextResponse.json({
       gsUrl,
       httpsUrl,
       openaiFileId,
       mime_type: mimeType,
       page_count: pageCount,
+      page_count_receipt: pageCountReceipt,
       filename: file.name,
       size: size ?? buf.length,
     });
