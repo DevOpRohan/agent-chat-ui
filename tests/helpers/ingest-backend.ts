@@ -16,17 +16,25 @@
  *   POST /threads/count
  *   POST /threads          create (metadata kept; owner_id added like auth.py)
  *   GET|PATCH|DELETE /threads/{id}           PATCH merges metadata, like the server
- *   GET  /threads/{id}/state  (+ /state/{checkpoint}, POST /state/checkpoint)
+ *   GET  /threads/{id}/state  (+ /state/{checkpoint}, POST /state/checkpoint): values, next, created_at
  *   POST /threads/{id}/history
  *   GET|POST /threads/{id}/runs, GET|DELETE /threads/{id}/runs/{run}, POST .../cancel, GET .../join
  *   POST /api/ingest/upload   (the app's own route; multipart "file")
  *   GET  /api/topic-file      (the app's own route; returns an attachment)
  *
- * Scripted ingest runs: `runs.create` on a thread takes the next queued RunScript (or a default
- * one) and walks `metadata.ingest_stage` through the script's stages, either on a timer
- * (`stageMs`, evaluated lazily whenever the page calls the API) or one step per `advance()`.
- * At the end the thread goes idle with `values.record` and the record's status in
- * `metadata.ingest_status`, or goes to status "error" with no record.
+ * Scripted ingest runs behave like the dev deployment (verified 26 Oct 2026): `runs.create` makes
+ * the thread busy at once and the run "pending"; once the worker picks it up (`pendingMs`) the run
+ * is "running" and walks the graph's steps (`next`: reset -> load -> validate -> (fix ->
+ * revalidate)? -> publish | report), each with a fresh checkpoint `created_at`, on a timer
+ * (`stageMs`, evaluated lazily whenever the page calls the API) or one step per `advance()`. The
+ * values follow the graph: the last run's `record` until `reset` has run, then `record: null`, and
+ * `topic` once `load` is done. At the end the thread goes idle with `values.record`, `next: []` and
+ * the run "success", or to status "error" (run "error", no record).
+ *
+ * By default the graph's metadata writes don't land, as on the deployed Postgres runtime: the
+ * thread's metadata keeps the UI's `ingest_stage`/`ingest_status` "queued" before, during and
+ * after the run, and seeded threads look the same. With `metadataWrites: true` the graph's writes
+ * work (stage, status, topic name and counts), for a runtime where `Threads.patch` persists.
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -518,10 +526,19 @@ export interface RunInput {
 }
 
 export interface RunScript {
-  /** Stages written to `metadata.ingest_stage`, in order. Default: reading, checking, publishing. */
+  /**
+   * The run's steps, in order: stages ("reading", "checking", ...; each runs its graph step) or
+   * graph steps ("reset", "load", "validate", "fix", "revalidate", "publish", "report").
+   * Default: reading, checking, publishing.
+   */
   stages?: readonly string[];
-  /** How long each stage lasts (ms), or "manual" to wait for `advance()`. Default 300 ms. */
+  /** How long each step lasts (ms), or "manual" to wait for `advance()`. Default 300 ms. */
   stageMs?: number | "manual";
+  /**
+   * How long the run stays "pending" before the worker picks it up (ms), or "manual" to wait for
+   * `advance()`. Meanwhile the thread is busy and its state is still the last run's. Default 0.
+   */
+  pendingMs?: number | "manual";
   /** The record the run ends with (default: a valid record for the run's file). */
   record?:
     | IngestRecord
@@ -547,14 +564,66 @@ export const FIX_STAGES = [
 /** The stages of a run that needs no fix. */
 export const PLAIN_STAGES = ["reading", "checking", "publishing"] as const;
 
+/** The topic_ingest graph's steps (topic_import/graph.py) -> the progress stage they stand for. */
+export const NODE_STAGE: Readonly<Record<string, string>> = {
+  reset: "reading",
+  load: "reading",
+  validate: "checking",
+  fix: "fixing",
+  revalidate: "rechecking",
+  publish: "publishing",
+  report: "publishing",
+};
+
+/** A progress stage -> the graph step that runs during it. */
+const STAGE_NODE: Readonly<Record<string, string>> = {
+  reading: "load",
+  checking: "validate",
+  fixing: "fix",
+  rechecking: "revalidate",
+  publishing: "publish",
+};
+
+/** Steps before the graph has read the file (no `values.topic` yet). */
+const BEFORE_READ = new Set(["reset", "load"]);
+
+interface RunStep {
+  node: string;
+  stage: string;
+}
+
+/** A script entry is a graph step ("reset", "validate", ...) or a stage ("reading", ...). */
+function toStep(entry: string): RunStep {
+  if (entry in NODE_STAGE) return { node: entry, stage: NODE_STAGE[entry]! };
+  return { node: STAGE_NODE[entry] ?? entry, stage: entry };
+}
+
 interface ActiveRun {
   run: FakeRun;
-  stages: string[];
+  steps: RunStep[];
   stageMs: number | "manual";
+  pendingMs: number | "manual";
+  /** -1 while the run is pending (not picked up yet). */
   index: number;
   enteredAt: number;
   record?: IngestRecord;
   error?: string;
+}
+
+/** The thread's latest checkpoint, as `threads.getState` reports it. */
+export interface FakeCheckpoint {
+  next: string[];
+  /** `created_at`; null when the thread has no checkpoint yet. */
+  at: string | null;
+}
+
+export interface StateRead {
+  threadId: string;
+  /** The thread was busy when the page read its state. */
+  busy: boolean;
+  next: string[];
+  /** `values.record` held a record (the last run's, while busy). */
+  hadRecord: boolean;
 }
 
 export interface SearchBody {
@@ -705,6 +774,18 @@ export class IngestBackend {
   budget = defaultBudget();
   /** When set, /api/ingest/upload answers with this error. */
   uploadFailure: { status: number; json?: unknown } | null = null;
+  /** When set, the pane's poll (`threads.search` with `ids`) answers with this error. */
+  pollFailure: { status: number; json?: unknown } | null = null;
+  /**
+   * Whether the graph's own metadata writes land (stage, status, topic name and counts). False by
+   * default, like the deployed Postgres runtime; set it before seeding or starting runs.
+   */
+  metadataWrites: boolean;
+  /**
+   * Threads created after this is set are left out of list searches (no `ids`), so a history row
+   * for them can only come from the page itself.
+   */
+  hideNewThreadsFromLists = false;
 
   /** Every call the page made, for assertions. */
   readonly calls = {
@@ -719,6 +800,10 @@ export class IngestBackend {
     }>,
     runCreates: [] as RunCreateCall[],
     stateReads: [] as string[],
+    /** Every state read, with what the state held at that moment. */
+    stateReadLog: [] as StateRead[],
+    /** Thread ids of every `runs.list` (GET /threads/{id}/runs). */
+    runLists: [] as string[],
     uploads: [] as UploadCall[],
     topicFiles: [] as Array<{ url: string | null; name: string | null }>,
     /** Requests to the chat's upload routes (/api/upload, /api/openai/*): Ingester must not make any. */
@@ -733,9 +818,12 @@ export class IngestBackend {
 
   private readonly active = new Map<string, ActiveRun>();
   private readonly queue: RunScript[] = [];
+  private readonly checkpoints = new Map<string, FakeCheckpoint>();
+  private readonly hiddenFromLists = new Set<string>();
 
-  constructor(options: { appUrl: string }) {
+  constructor(options: { appUrl: string; metadataWrites?: boolean }) {
     this.appOrigin = new URL(options.appUrl).origin;
+    this.metadataWrites = options.metadataWrites ?? false;
   }
 
   // ------------------------------------------------------------ install
@@ -808,13 +896,16 @@ export class IngestBackend {
   /** A JSON-friendly dump for test attachments. */
   snapshot() {
     return {
+      metadataWrites: this.metadataWrites,
       threads: [...this.threads.values()],
+      checkpoints: Object.fromEntries(this.checkpoints),
       runs: Object.fromEntries(this.runs),
       active: [...this.active.entries()].map(([threadId, a]) => ({
         threadId,
-        stages: a.stages,
+        steps: a.steps,
         index: a.index,
         stageMs: a.stageMs,
+        pendingMs: a.pendingMs,
       })),
       calls: this.calls,
       requests: this.requests.filter(
@@ -838,13 +929,54 @@ export class IngestBackend {
     return [...this.active.keys()];
   }
 
-  /** Moves the run one stage on (or to its end). Returns the new stage, or "done". */
+  /**
+   * Moves the run one step on: a pending run starts its first step; the last step ends the run.
+   * Returns the new step's stage, or "done".
+   */
   advance(threadId?: string): string {
     const id = this.resolveActive(threadId);
     this.step(id);
-    return this.active.has(id)
-      ? String(this.threads.get(id)!.metadata.ingest_stage)
-      : "done";
+    const run = this.active.get(id);
+    return run ? run.steps[run.index]!.stage : "done";
+  }
+
+  /** The thread's latest checkpoint (what `getState` reports as `next` and `created_at`). */
+  checkpoint(threadId: string): FakeCheckpoint {
+    return this.checkpoints.get(threadId) ?? { next: [], at: null };
+  }
+
+  /** The thread's runs, newest first (what `runs.list` answers). */
+  runsOf(threadId: string): FakeRun[] {
+    return this.runs.get(threadId) ?? [];
+  }
+
+  /**
+   * Another tab (or client) starts a run on the thread: it puts the metadata back to "queued" and
+   * creates the run, as the UI's Run again does. Not recorded in `calls.runCreates`.
+   */
+  startRunElsewhere(threadId: string, script: RunScript = {}): FakeRun {
+    const thread = this.thread(threadId);
+    thread.metadata = {
+      ...thread.metadata,
+      ingest_stage: "queued",
+      ingest_status: "queued",
+    };
+    const created = this.createRun(
+      thread,
+      {
+        assistant_id: INGEST_GRAPH_ID,
+        input: {
+          source_url: String(thread.metadata.ingest_source_url ?? ""),
+          file_name: String(thread.metadata.ingest_file_name ?? "topic.json"),
+        },
+      },
+      { script },
+    );
+    if (created.status !== 200)
+      throw new Error(
+        `fake LangGraph: run elsewhere refused (${created.status})`,
+      );
+    return created.json as FakeRun;
   }
 
   /** Ends the run now, with its record (or its error). */
@@ -898,6 +1030,7 @@ export class IngestBackend {
       interrupts: {},
     };
     this.threads.set(threadId, thread);
+    this.checkpoints.set(threadId, { next: [], at });
     this.runs.set(threadId, [
       this.newRun(threadId, CRAFTER_GRAPH_ID, "success", at, {}),
     ]);
@@ -923,9 +1056,14 @@ export class IngestBackend {
       interrupts: {},
     };
     this.threads.set(threadId, thread);
+    this.checkpoints.set(threadId, { next: [], at });
     return thread;
   }
 
+  /**
+   * An ingest thread in a given state. Its metadata is what the UI wrote at create ("queued"),
+   * plus, with `metadataWrites`, what the graph would have written for that state.
+   */
   seedIngestThread(options: SeedIngestOptions): FakeThread {
     const threadId = options.threadId ?? randomUUID();
     const fileName = options.fileName ?? TOPIC_FIXTURE;
@@ -949,6 +1087,7 @@ export class IngestBackend {
       question_sets: FIXTURE_TOPIC.questionSets,
       questions: FIXTURE_TOPIC.questions,
     };
+    const input = { source_url: sourceUrl, file_name: fileName };
     const thread: FakeThread = {
       thread_id: threadId,
       created_at: createdAt,
@@ -960,50 +1099,63 @@ export class IngestBackend {
         thread_title: options.title ?? fileName,
         ingest_file_name: fileName,
         ingest_source_url: sourceUrl,
+        ingest_stage: "queued",
+        ingest_status: "queued",
       },
       status: "idle",
-      values: { source_url: sourceUrl, file_name: fileName, record: null },
+      values: { ...input, record: null, topic: null },
       interrupts: {},
     };
     this.threads.set(threadId, thread);
     const stage = options.stage ?? "checking";
+    const node = STAGE_NODE[stage] ?? stage;
+    /** What the graph writes into the metadata, when its writes land. */
+    const graphWrites = (fields: Record<string, unknown>) => {
+      if (this.metadataWrites) Object.assign(thread.metadata, fields);
+    };
+    const topicValue = (read: boolean) =>
+      read ? this.topicValue(sourceUrl, topicName) : null;
 
     switch (options.state) {
       case "not_started":
-        Object.assign(thread.metadata, {
-          ingest_stage: "queued",
-          ingest_status: "queued",
-        });
         thread.values = null;
+        this.checkpoints.set(threadId, { next: [], at: null });
         this.runs.set(threadId, []);
         break;
       case "error":
-        Object.assign(thread.metadata, {
+        graphWrites({
           ingest_stage: stage,
           ingest_status: "processing",
           ...(stage === "reading" ? {} : topicMeta),
         });
         thread.status = "error";
+        thread.values = {
+          ...input,
+          record: null,
+          topic: topicValue(stage !== "reading"),
+        };
+        // The checkpoint stays at the step that failed.
+        this.checkpoints.set(threadId, { next: [node], at: updatedAt });
         this.runs.set(threadId, [
-          this.newRun(threadId, INGEST_GRAPH_ID, "error", updatedAt, {
-            source_url: sourceUrl,
-            file_name: fileName,
-          }),
+          this.newRun(threadId, INGEST_GRAPH_ID, "error", updatedAt, input),
         ]);
         break;
       case "stalled":
-        Object.assign(thread.metadata, {
+        graphWrites({
           ingest_stage: stage,
           ingest_status: "processing",
           ...(stage === "reading" ? {} : topicMeta),
         });
         thread.status = "busy";
-        // No active run: nothing moves, so updated_at stays old.
+        thread.values = {
+          ...input,
+          record: null,
+          topic: topicValue(stage !== "reading"),
+        };
+        // No active run: nothing moves, so neither updated_at nor the checkpoint changes.
+        this.checkpoints.set(threadId, { next: [node], at: updatedAt });
         this.runs.set(threadId, [
-          this.newRun(threadId, INGEST_GRAPH_ID, "running", createdAt, {
-            source_url: sourceUrl,
-            file_name: fileName,
-          }),
+          this.newRun(threadId, INGEST_GRAPH_ID, "running", createdAt, input),
         ]);
         break;
       case "running": {
@@ -1016,23 +1168,30 @@ export class IngestBackend {
           options.nextStages ??
           (order.includes(stage) ? order.slice(order.indexOf(stage) + 1) : []);
         thread.status = "busy";
+        thread.values = {
+          ...input,
+          record: null,
+          topic: topicValue(stage !== "reading"),
+        };
         const run = this.newRun(
           threadId,
           INGEST_GRAPH_ID,
           "running",
           createdAt,
-          { source_url: sourceUrl, file_name: fileName },
+          input,
         );
         this.runs.set(threadId, [run]);
         this.active.set(threadId, {
           run,
-          stages: [stage, ...rest],
+          steps: [stage, ...rest].map(toStep),
           stageMs: "manual",
+          pendingMs: 0,
           index: 0,
           enteredAt: Date.now(),
           record: options.record ?? buildRecord("valid", recordOptions),
         });
-        Object.assign(thread.metadata, {
+        this.checkpoints.set(threadId, { next: [node], at: updatedAt });
+        graphWrites({
           ingest_stage: stage,
           ingest_status: "processing",
           ...(stage === "reading" ? {} : topicMeta),
@@ -1043,21 +1202,42 @@ export class IngestBackend {
         const record =
           options.record ?? buildRecord(options.state, recordOptions);
         this.registerRecordFiles(record);
-        thread.values = { ...thread.values, record };
-        Object.assign(thread.metadata, {
+        thread.values = {
+          ...input,
+          record,
+          topic: topicValue(Boolean(record.topic_name)),
+        };
+        this.checkpoints.set(threadId, { next: [], at: updatedAt });
+        graphWrites({
           ingest_stage: "done",
           ingest_status: record.status,
           ...this.topicMetaOf(record),
         });
         this.runs.set(threadId, [
-          this.newRun(threadId, INGEST_GRAPH_ID, "success", updatedAt, {
-            source_url: sourceUrl,
-            file_name: fileName,
-          }),
+          this.newRun(threadId, INGEST_GRAPH_ID, "success", updatedAt, input),
         ]);
       }
     }
     return thread;
+  }
+
+  /** The topic in the uploaded file, as the graph keeps it in `values.topic` once read. */
+  private topicValue(
+    sourceUrl: string | undefined,
+    topicName?: string | null,
+  ): Record<string, unknown> | null {
+    const file = sourceUrl ? this.files.get(sourceUrl) : undefined;
+    if (!file) return null;
+    try {
+      const topic = JSON.parse(file.toString("utf8")) as unknown;
+      if (!topic || typeof topic !== "object" || Array.isArray(topic))
+        return null;
+      return topicName
+        ? { ...(topic as Record<string, unknown>), topic_name: topicName }
+        : (topic as Record<string, unknown>);
+    } catch {
+      return null;
+    }
   }
 
   // ------------------------------------------------------------ engine
@@ -1079,12 +1259,11 @@ export class IngestBackend {
   private tick(): void {
     const now = Date.now();
     for (const [threadId, run] of [...this.active]) {
-      if (run.stageMs === "manual") continue;
-      while (
-        this.active.get(threadId) === run &&
-        now - run.enteredAt >= (run.stageMs as number)
-      ) {
-        run.enteredAt += run.stageMs as number;
+      for (;;) {
+        if (this.active.get(threadId) !== run) break;
+        const wait = run.index < 0 ? run.pendingMs : run.stageMs;
+        if (wait === "manual" || now - run.enteredAt < wait) break;
+        run.enteredAt += wait;
         this.step(threadId);
       }
     }
@@ -1094,24 +1273,55 @@ export class IngestBackend {
     const run = this.active.get(threadId);
     if (!run) return;
     run.index += 1;
-    if (run.index >= run.stages.length) {
+    if (run.index >= run.steps.length) {
       this.complete(threadId);
       return;
     }
-    this.applyStage(threadId, run);
+    // The worker has picked the run up.
+    if (run.run.status === "pending") {
+      run.run.status = "running";
+      run.run.updated_at = new Date().toISOString();
+    }
+    this.enterStep(threadId, run);
   }
 
-  private applyStage(threadId: string, run: ActiveRun): void {
+  /** The run's input, as the graph has it in its state. */
+  private inputOf(run: ActiveRun): RunInput {
+    return ((run.run.kwargs.input ?? {}) as RunInput) || {};
+  }
+
+  /** A new checkpoint: `step.node` runs next. Values and (with metadataWrites) metadata follow. */
+  private enterStep(threadId: string, run: ActiveRun): void {
     const thread = this.thread(threadId);
-    const stage = run.stages[run.index]!;
-    thread.metadata = {
-      ...thread.metadata,
-      ingest_stage: stage,
-      ingest_status: "processing",
-      // The graph writes the topic summary once it has read the file.
-      ...(stage === "reading" ? {} : this.topicMetaOf(run.record)),
+    const { node, stage } = run.steps[run.index]!;
+    const input = this.inputOf(run);
+    const values: Record<string, unknown> = {
+      ...(thread.values ?? {}),
+      source_url: input.source_url,
+      file_name: input.file_name,
     };
-    this.touch(thread);
+    // Until `reset` has run, the state still holds the last run's record and topic.
+    if (node !== "reset") {
+      values.record = null;
+      values.topic = BEFORE_READ.has(node)
+        ? null
+        : this.topicValue(input.source_url, run.record?.topic_name);
+    }
+    thread.values = values;
+    this.checkpoints.set(threadId, {
+      next: [node],
+      at: new Date().toISOString(),
+    });
+    if (this.metadataWrites) {
+      thread.metadata = {
+        ...thread.metadata,
+        ingest_stage: stage,
+        ingest_status: "processing",
+        // The graph writes the topic summary once it has read the file.
+        ...(stage === "reading" ? {} : this.topicMetaOf(run.record)),
+      };
+      this.touch(thread);
+    }
   }
 
   private complete(threadId: string): void {
@@ -1121,21 +1331,32 @@ export class IngestBackend {
     const thread = this.thread(threadId);
     const now = new Date().toISOString();
     run.run.updated_at = now;
+    const input = this.inputOf(run);
     if (run.error !== undefined || !run.record) {
+      // The checkpoint stays at the step that failed; the record stays empty.
       thread.status = "error";
       run.run.status = "error";
     } else {
       this.registerRecordFiles(run.record);
-      thread.values = { ...(thread.values ?? {}), record: run.record };
-      thread.metadata = {
-        ...thread.metadata,
-        ingest_stage: "done",
-        ingest_status: run.record.status,
-        ...this.topicMetaOf(run.record),
+      thread.values = {
+        ...(thread.values ?? {}),
+        source_url: input.source_url,
+        file_name: input.file_name,
+        record: run.record,
       };
+      this.checkpoints.set(threadId, { next: [], at: now });
+      if (this.metadataWrites) {
+        thread.metadata = {
+          ...thread.metadata,
+          ingest_stage: "done",
+          ingest_status: run.record.status,
+          ...this.topicMetaOf(run.record),
+        };
+      }
       thread.status = "idle";
       run.run.status = "success";
     }
+    // The status change.
     this.touch(thread);
   }
 
@@ -1195,17 +1416,17 @@ export class IngestBackend {
   // ------------------------------------------------------------ LangGraph API
 
   private stateOf(thread: FakeThread) {
-    const values = thread.values ?? {};
+    const checkpoint = this.checkpoint(thread.thread_id);
     return {
-      values,
-      next: thread.status === "busy" ? ["validate"] : [],
+      values: thread.values ?? {},
+      next: checkpoint.next,
       tasks: [],
-      metadata: {},
-      created_at: thread.updated_at,
+      metadata: checkpoint.at ? { source: "loop" } : null,
+      created_at: checkpoint.at,
       checkpoint: {
         thread_id: thread.thread_id,
         checkpoint_ns: "",
-        checkpoint_id: `cp-${Date.parse(thread.updated_at)}`,
+        checkpoint_id: checkpoint.at ? `cp-${Date.parse(checkpoint.at)}` : null,
       },
       parent_checkpoint: null,
       interrupts: [],
@@ -1216,6 +1437,7 @@ export class IngestBackend {
     let rows = [...this.threads.values()];
     if (Array.isArray(body.ids))
       rows = rows.filter((t) => body.ids!.includes(t.thread_id));
+    else rows = rows.filter((t) => !this.hiddenFromLists.has(t.thread_id));
     if (body.metadata && typeof body.metadata === "object") {
       rows = rows.filter((t) =>
         Object.entries(body.metadata!).every(([key, value]) =>
@@ -1271,7 +1493,9 @@ export class IngestBackend {
       interrupts: {},
     };
     this.threads.set(threadId, thread);
+    this.checkpoints.set(threadId, { next: [], at: null });
     this.runs.set(threadId, []);
+    if (this.hideNewThreadsFromLists) this.hiddenFromLists.add(threadId);
     this.calls.threadCreates.push({ body, threadId });
     return { status: 200, json: thread };
   }
@@ -1279,15 +1503,20 @@ export class IngestBackend {
   private createRun(
     thread: FakeThread,
     body: RunCreateCall["body"],
+    elsewhere?: { script: RunScript },
   ): { status: number; json: unknown; headers?: Record<string, string> } {
     const threadId = thread.thread_id;
     const assistant = String(body.assistant_id ?? "");
     const graphId = isUuid(assistant)
       ? String(thread.metadata.graph_id ?? assistant)
       : assistant;
-    const script = graphId === INGEST_GRAPH_ID ? this.queue.shift() : undefined;
+    const script = elsewhere
+      ? elsewhere.script
+      : graphId === INGEST_GRAPH_ID
+        ? this.queue.shift()
+        : undefined;
     const call: RunCreateCall = { threadId, body, status: 200 };
-    this.calls.runCreates.push(call);
+    if (!elsewhere) this.calls.runCreates.push(call);
 
     if (script?.reject) {
       call.status = script.reject.status;
@@ -1323,33 +1552,29 @@ export class IngestBackend {
     };
 
     if (graphId === INGEST_GRAPH_ID) {
-      const stages = [...(script?.stages ?? PLAIN_STAGES)];
       const record = script?.error
         ? undefined
         : typeof script?.record === "function"
           ? script.record({ input, threadId })
           : (script?.record ??
             buildRecord("valid", { fileName: input.file_name, threadId }));
-      // The graph's first node clears the last run's outputs.
-      thread.values = {
-        ...(thread.values ?? {}),
-        source_url: input.source_url,
-        file_name: input.file_name,
-        record: null,
-      };
+      // Busy at once; the run waits as "pending" until the worker picks it up. Until then the
+      // state (values, next, checkpoint time) is still the last run's.
       thread.status = "busy";
+      run.status = "pending";
+      this.touch(thread);
       const active: ActiveRun = {
         run,
-        stages,
+        steps: (script?.stages ?? PLAIN_STAGES).map(toStep),
         stageMs: script?.stageMs ?? 300,
-        index: 0,
+        pendingMs: script?.pendingMs ?? 0,
+        index: -1,
         enteredAt: Date.now(),
         record,
         error: script?.error,
       };
       this.active.set(threadId, active);
-      if (stages.length === 0) this.complete(threadId);
-      else this.applyStage(threadId, active);
+      if (active.pendingMs === 0) this.step(threadId);
     } else {
       // A Crafter message: answer at once.
       const previous = Array.isArray(thread.values?.messages)
@@ -1368,6 +1593,7 @@ export class IngestBackend {
       };
       run.status = "success";
       thread.status = "idle";
+      this.checkpoints.set(threadId, { next: [], at: now });
       this.touch(thread);
     }
     return {
@@ -1435,6 +1661,11 @@ export class IngestBackend {
       return reply(200, this.budget);
     if (method === "POST" && path === "/threads/search") {
       this.calls.searches.push(body as SearchBody);
+      if (this.pollFailure && Array.isArray((body as SearchBody).ids))
+        return reply(
+          this.pollFailure.status,
+          this.pollFailure.json ?? { detail: "Poll refused (fake)" },
+        );
       return reply(200, this.search(body as SearchBody));
     }
     if (method === "POST" && path === "/threads/count") {
@@ -1469,6 +1700,7 @@ export class IngestBackend {
         if (method === "DELETE") {
           this.threads.delete(threadId);
           this.active.delete(threadId);
+          this.checkpoints.delete(threadId);
           return reply(204);
         }
       }
@@ -1479,6 +1711,13 @@ export class IngestBackend {
       ) {
         if (method === "GET" || (method === "POST" && rest !== "state")) {
           this.calls.stateReads.push(threadId);
+          const record = thread.values?.record;
+          this.calls.stateReadLog.push({
+            threadId,
+            busy: thread.status === "busy",
+            next: [...this.checkpoint(threadId).next],
+            hadRecord: !!record && typeof record === "object",
+          });
           return reply(200, this.stateOf(thread));
         }
       }
@@ -1491,6 +1730,7 @@ export class IngestBackend {
       }
       if (rest === "runs") {
         if (method === "GET") {
+          this.calls.runLists.push(threadId);
           const limit = Number(url.searchParams.get("limit") ?? 10);
           const offset = Number(url.searchParams.get("offset") ?? 0);
           return reply(

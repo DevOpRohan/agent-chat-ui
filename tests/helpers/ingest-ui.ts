@@ -19,11 +19,20 @@ import { attachReactErrorMonitor } from "./react-error-monitor";
 
 // ---------------------------------------------------------------- fixture
 
-export const test = base.extend<{ backend: IngestBackend }>({
+export const test = base.extend<{
+  backend: IngestBackend;
+  /**
+   * Whether the fake's graph metadata writes land. Default false, like the deployed Postgres
+   * runtime; `test.use({ metadataWrites: true })` for a runtime where they persist.
+   */
+  metadataWrites: boolean;
+}>({
+  metadataWrites: [false, { option: true }],
   backend: [
-    async ({ page, baseURL }, provide, testInfo) => {
+    async ({ page, baseURL, metadataWrites }, provide, testInfo) => {
       const backend = new IngestBackend({
         appUrl: baseURL ?? "http://localhost:3210",
+        metadataWrites,
       });
       await backend.install(page);
       const monitor = attachReactErrorMonitor(page);
@@ -123,6 +132,10 @@ export const COPY = {
   invalidInputBody:
     "The file is not valid JSON (line 3, column 3: Expecting ',' delimiter).",
   hintIssue: "The hint needs to end as a statement, with a full stop.",
+  /** use-ingest-thread.ts: an expired sign-in (401/403), from an action or a poll. */
+  signIn: "Your sign-in has expired. Please reload the page and sign in again.",
+  /** use-ingest-thread.ts: a poll that couldn't reach the platform. */
+  pollOffline: "We couldn't reach the platform. Trying again…",
   dailyLimitTitle: "Daily limit reached",
   dailyLimitBody:
     "You’ve reached your daily limit. It resets at midnight IST. To get more credits, please contact your reporting manager.",

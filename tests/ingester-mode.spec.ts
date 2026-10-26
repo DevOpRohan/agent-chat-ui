@@ -11,6 +11,11 @@
  *
  * Nothing leaves the browser: every LangGraph call, /api/ingest/upload and /api/topic-file are
  * answered by the fake, and any other origin is blocked.
+ *
+ * The fake behaves like the dev deployment by default: the graph's metadata writes don't land, so
+ * every scenario reads progress from the checkpoint (`getState().next`) and the end of a run from
+ * the thread status and `runs.list`. "when the runtime keeps the graph's metadata writes" runs
+ * with `metadataWrites: true`.
  */
 import { readFile } from "node:fs/promises";
 
@@ -532,6 +537,7 @@ test.describe("one ingest, start to finish", () => {
     await expect.poll(() => backend.calls.threadCreates.length).toBe(1);
     const created = backend.calls.threadCreates[0]!;
     expect(created.body.metadata).toMatchObject({
+      graph_id: "topic_ingest",
       thread_title: TOPIC_FIXTURE,
       ingest_file_name: TOPIC_FIXTURE,
       ingest_source_url: upload.url,
@@ -613,6 +619,13 @@ test.describe("one ingest, start to finish", () => {
     await expect(historyRow(page, threadId)).toContainText(TOPIC_FIXTURE, {
       timeout: 30_000,
     });
+
+    // All of it without the graph's metadata writes: they never landed, as on dev.
+    expect(backend.thread(threadId).metadata).toMatchObject({
+      ingest_stage: "queued",
+      ingest_status: "queued",
+    });
+    expect(backend.calls.runLists).toContain(threadId);
 
     // The topic never went near the chat's upload route or OpenAI.
     expect(backend.calls.chatUploads).toEqual([]);
@@ -818,7 +831,16 @@ test.describe("one result per final status", () => {
     const reads = () =>
       backend.calls.stateReads.filter((id) => id === ingest.thread_id).length;
     const before = { polls: polls(), reads: reads() };
-    expect(before.reads).toBeGreaterThanOrEqual(1);
+    expect(before.reads).toBe(1);
+    // The poll asks for the upload time too ("Uploaded <date>" on every visit).
+    expect(
+      backend.calls.searches.find((search) =>
+        search.ids?.includes(ingest.thread_id),
+      )?.select,
+    ).toContain("created_at");
+    await expect(page.getByTestId("ingest-topic-header")).toContainText(
+      "Uploaded ",
+    );
     // Longer than the 1.5 s busy cadence.
     await page.waitForTimeout(3_500);
     expect({ polls: polls(), reads: reads() }).toEqual(before);
@@ -939,6 +961,316 @@ test.describe("Run again", () => {
     await expect($.result).toHaveAttribute("data-status", "valid");
     await expect($.result).toContainText(STATUS_TITLES.valid);
     expect(backend.ingestRunCreates()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------- the fallback (no metadata writes)
+
+/** Resolves after the pane's next poll of `threadId` (its last answer has been shown by then). */
+async function nextPoll(backend: IngestBackend, threadId: string) {
+  const polls = () =>
+    backend.calls.searches.filter((search) => search.ids?.includes(threadId))
+      .length;
+  const now = polls();
+  await expect.poll(polls).toBeGreaterThan(now);
+}
+
+test.describe("progress and results without the graph's metadata writes", () => {
+  test.use({ viewport: DESKTOP });
+
+  test("a short run (invalid_input in under 2 s) shows its result at once", async ({
+    page,
+    backend,
+  }) => {
+    const $ = ui(page);
+    backend.queueRun({
+      stages: ["load"],
+      stageMs: 400,
+      record: ({ threadId, input }) =>
+        buildRecord("invalid_input", { threadId, fileName: input.file_name }),
+    });
+    await openApp(page, { mode: "ingester" });
+    await chooseFile(page, topicUpload());
+    await $.ingestButton.click();
+    await expect.poll(() => backend.ingestRunCreates().length).toBe(1);
+    const started = Date.now();
+    const threadId = backend.ingestRunCreates()[0]!.threadId;
+
+    // Not after a 15 s grace period: the run list says the run is over.
+    await expect($.result).toHaveAttribute("data-status", "invalid_input", {
+      timeout: 6_000,
+    });
+    expect(Date.now() - started).toBeLessThan(6_000);
+    await expect($.result).toContainText(STATUS_TITLES.invalid_input);
+    expect(backend.thread(threadId).metadata.ingest_status).toBe("queued");
+    expect(backend.calls.runLists).toContain(threadId);
+    expect(backend.runsOf(threadId)[0]!.status).toBe("success");
+  });
+
+  test("Run again: the last run's state is never shown while the new run waits or resets", async ({
+    page,
+    backend,
+  }) => {
+    const $ = ui(page);
+    const ingest = backend.seedIngestThread({
+      state: "validation_incomplete",
+      fileName: "numbers_matter_warmup.json",
+    });
+    const id = ingest.thread_id;
+    backend.queueRun({
+      pendingMs: "manual",
+      stages: ["reset", "load", "validate", "report"],
+      stageMs: "manual",
+      record: ({ threadId, input }) =>
+        buildRecord("needs_author_fixes", {
+          threadId,
+          fileName: input.file_name,
+        }),
+    });
+    await openIngest(page, ingest);
+    await expect($.result).toHaveAttribute(
+      "data-status",
+      "validation_incomplete",
+    );
+    await action($.result, ACTIONS.runAgain).click();
+    await expect.poll(() => backend.ingestRunCreates().length).toBe(1);
+    expect(backend.runsOf(id)[0]!.status).toBe("pending");
+
+    const busyReads = () =>
+      backend.calls.stateReadLog.filter(
+        (read) => read.threadId === id && read.busy,
+      );
+    // Pending: busy, but the state is still the last run's (its record, next []).
+    await expect
+      .poll(
+        () =>
+          busyReads().filter((read) => read.hadRecord && !read.next.length)
+            .length,
+      )
+      .toBeGreaterThan(0);
+    await nextPoll(backend, id);
+    await expect($.progress).toBeVisible();
+    await expect($.result).toBeHidden();
+    await expect(step(page, STEP_LABELS.read)).toHaveAttribute(
+      "data-step-state",
+      "active",
+    );
+    await expect(step(page, STEP_LABELS.finish)).toHaveAttribute(
+      "data-step-state",
+      "pending",
+    );
+
+    // reset: the run has started; the last record is still in the state until it is cleared.
+    expect(backend.advance(id)).toBe("reading");
+    expect(backend.checkpoint(id).next).toEqual(["reset"]);
+    await expect
+      .poll(
+        () =>
+          busyReads().filter(
+            (read) => read.hadRecord && read.next[0] === "reset",
+          ).length,
+      )
+      .toBeGreaterThan(0);
+    await nextPoll(backend, id);
+    await expect($.result).toBeHidden();
+    await expect(step(page, STEP_LABELS.read)).toHaveAttribute(
+      "data-step-state",
+      "active",
+    );
+
+    expect(backend.advance(id)).toBe("reading"); // load
+    expect(backend.advance(id)).toBe("checking"); // validate
+    await expect(step(page, STEP_LABELS.check)).toHaveAttribute(
+      "data-step-state",
+      "active",
+    );
+    expect(backend.advance(id)).toBe("publishing"); // report
+    await expect(step(page, STEP_LABELS.finish)).toHaveAttribute(
+      "data-step-state",
+      "active",
+    );
+    expect(backend.advance(id)).toBe("done");
+    await expect($.result).toHaveAttribute("data-status", "needs_author_fixes");
+    await expect($.result).toContainText(STATUS_TITLES.needs_author_fixes);
+  });
+
+  test("a new ingest is in Ingester's history at once", async ({
+    page,
+    backend,
+  }) => {
+    const $ = ui(page);
+    backend.queueRun({ stages: PLAIN_STAGES, stageMs: "manual" });
+    const older = backend.seedIngestThread({
+      state: "valid",
+      fileName: "photosynthesis_grade_8.json",
+    });
+    await openApp(page, { mode: "ingester", chatHistoryOpen: "true" });
+    await expect.poll(() => historyIds(page)).toEqual([older.thread_id]);
+
+    // From here the server leaves new threads out of the list: a row can only come from the pane.
+    backend.hideNewThreadsFromLists = true;
+    await chooseFile(page, topicUpload("fresh_topic.json"));
+    await $.ingestButton.click();
+    await expect.poll(() => backend.calls.threadCreates.length).toBe(1);
+    const threadId = backend.calls.threadCreates[0]!.threadId;
+    await expect
+      .poll(() => historyIds(page), { timeout: 3_000 })
+      .toEqual([threadId, older.thread_id]);
+    await expect(historyRow(page, threadId)).toContainText("fresh_topic.json");
+  });
+
+  test("a poll refused with 401 asks to sign in again, and recovers", async ({
+    page,
+    backend,
+  }) => {
+    const $ = ui(page);
+    const ingest = backend.seedIngestThread({
+      state: "running",
+      stage: "checking",
+    });
+    await openIngest(page, ingest);
+    await expect(step(page, STEP_LABELS.check)).toHaveAttribute(
+      "data-step-state",
+      "active",
+    );
+
+    backend.pollFailure = { status: 401, json: { detail: "Unauthorized" } };
+    await expect($.pane.getByText(COPY.signIn)).toBeVisible();
+    await expect($.pane.getByText(COPY.pollOffline)).toHaveCount(0);
+
+    backend.pollFailure = null;
+    await expect($.pane.getByText(COPY.signIn)).toHaveCount(0, {
+      timeout: 20_000,
+    });
+    backend.finish(ingest.thread_id);
+    await expect($.result).toHaveAttribute("data-status", "valid");
+  });
+
+  test("Run again follows a run another tab started, instead of starting a second one", async ({
+    page,
+    backend,
+  }) => {
+    const $ = ui(page);
+    const ingest = backend.seedIngestThread({ state: "validation_incomplete" });
+    await openIngest(page, ingest);
+    const runAgain = $.result.getByRole("button", {
+      name: ACTIONS.runAgain,
+      exact: true,
+    });
+    await expect(runAgain).toBeEnabled();
+
+    // This page has read the result and stopped polling; another tab starts a run now.
+    backend.startRunElsewhere(ingest.thread_id, {
+      stages: PLAIN_STAGES,
+      stageMs: "manual",
+    });
+    await runAgain.click();
+
+    await expect($.progress).toBeVisible();
+    await expect($.result).toBeHidden();
+    expect(backend.ingestRunCreates()).toEqual([]);
+    expect(backend.calls.threadPatches).toEqual([]);
+    expect(backend.runsOf(ingest.thread_id)).toHaveLength(2);
+
+    backend.finish(ingest.thread_id);
+    await expect($.result).toHaveAttribute("data-status", "valid");
+    expect(backend.ingestRunCreates()).toEqual([]);
+  });
+});
+
+test.describe("when the runtime keeps the graph's metadata writes", () => {
+  test.use({ viewport: DESKTOP, metadataWrites: true });
+
+  test("progress comes from the metadata, and the state is read once, at the end", async ({
+    page,
+    backend,
+  }) => {
+    const $ = ui(page);
+    backend.queueRun({
+      stages: FIX_STAGES,
+      stageMs: "manual",
+      record: ({ threadId, input }) =>
+        buildRecord("fixed", { threadId, fileName: input.file_name }),
+    });
+    await openApp(page, { mode: "ingester", chatHistoryOpen: "true" });
+    await chooseFile(page, topicUpload());
+    await $.ingestButton.click();
+    await expect.poll(() => backend.ingestRunCreates().length).toBe(1);
+    const threadId = backend.ingestRunCreates()[0]!.threadId;
+    await expectUrlParam(page, "ingestId", threadId);
+
+    await expect(step(page, STEP_LABELS.read)).toHaveAttribute(
+      "data-step-state",
+      "active",
+    );
+    for (const [stage, label] of [
+      ["checking", STEP_LABELS.check],
+      ["fixing", STEP_LABELS.fix],
+      ["rechecking", STEP_LABELS.recheck],
+      ["publishing", STEP_LABELS.finish],
+    ] as const) {
+      expect(backend.advance(threadId)).toBe(stage);
+      await expect(step(page, label)).toHaveAttribute(
+        "data-step-state",
+        "active",
+      );
+      if (stage === "checking")
+        await expect($.pane).toContainText(FIXTURE_TOPIC.name);
+    }
+    await expect($.steps).toHaveCount(5);
+    expect(backend.advance(threadId)).toBe("done");
+
+    await expect($.result).toHaveAttribute("data-status", "fixed");
+    await expect(historyRow(page, threadId)).toContainText(TOPIC_FIXTURE, {
+      timeout: 30_000,
+    });
+    expect(backend.thread(threadId).metadata).toMatchObject({
+      ingest_stage: "done",
+      ingest_status: "fixed",
+    });
+    // The metadata carried every stage, so the state wasn't read while busy; its final status
+    // ended the run, so the run list wasn't needed.
+    expect(
+      backend.calls.stateReadLog.filter(
+        (read) => read.threadId === threadId && read.busy,
+      ),
+    ).toEqual([]);
+    expect(
+      backend.calls.stateReadLog.filter((read) => read.threadId === threadId),
+    ).toHaveLength(1);
+    expect(backend.calls.runLists.filter((id) => id === threadId)).toEqual([]);
+  });
+
+  test("seeded results and Run again work the same", async ({
+    page,
+    backend,
+  }) => {
+    const $ = ui(page);
+    const ingest = backend.seedIngestThread({
+      state: "validation_incomplete",
+      fileName: "numbers_matter_warmup.json",
+    });
+    backend.queueRun({ stages: PLAIN_STAGES, stageMs: "manual" });
+    await openIngest(page, ingest);
+    await expect($.result).toHaveAttribute(
+      "data-status",
+      "validation_incomplete",
+    );
+    await expect($.result).toContainText(COPY.validationIncompleteBody);
+
+    await action($.result, ACTIONS.runAgain).click();
+    await expect.poll(() => backend.ingestRunCreates().length).toBe(1);
+    await expect($.progress).toBeVisible();
+    expect(backend.advance(ingest.thread_id)).toBe("checking");
+    await expect(step(page, STEP_LABELS.check)).toHaveAttribute(
+      "data-step-state",
+      "active",
+    );
+    backend.finish(ingest.thread_id);
+    await expect($.result).toHaveAttribute("data-status", "valid");
+    expect(backend.thread(ingest.thread_id).metadata.ingest_status).toBe(
+      "valid",
+    );
   });
 });
 

@@ -6,6 +6,9 @@
  * provider settings and no third-party calls. The chat's /api/upload is a separate route.
  *
  * Checks (the browser runs the same ones first, with the same words):
+ *   - the whole body is at most MAX_REQUEST_BYTES 413 too_large (from Content-Length when it is
+ *     declared; otherwise, as for a chunked body, bytes are counted while reading, so the body
+ *     is never buffered past the limit)
  *   - one multipart field `file`                  400 missing_file / multiple_files
  *   - the name ends in .json                      415 not_json
  *   - at most 10 MB                               413 too_large
@@ -78,6 +81,50 @@ function baseName(name: string): string {
   return Array.from(last.trim()).slice(0, MAX_FILE_NAME_LENGTH).join("");
 }
 
+/**
+ * The request body, read up to `limit` bytes: null as soon as it goes over (the rest is never
+ * read). Counts what actually arrives, so it holds for a chunked body without Content-Length and
+ * for one whose Content-Length is wrong.
+ */
+async function readBodyUpTo(
+  request: Request,
+  limit: number,
+): Promise<Uint8Array | null> {
+  const stream = request.body;
+  if (!stream) return new Uint8Array(0);
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
+/** The multipart form in `body`, parsed as the request's own Content-Type says. */
+async function parseForm(
+  request: Request,
+  body: Uint8Array,
+): Promise<FormData> {
+  const contentType = request.headers.get("content-type");
+  return new Response(body as BodyInit, {
+    headers: contentType ? { "content-type": contentType } : {},
+  }).formData();
+}
+
 function isUploadedFile(value: FormDataEntryValue | undefined): value is File {
   return (
     typeof value === "object" &&
@@ -100,9 +147,12 @@ export async function handleIngestUpload(
     if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES)
       return apiError(413, "too_large", FILE_MESSAGES.tooLarge);
 
+    const raw = await readBodyUpTo(request, MAX_REQUEST_BYTES);
+    if (!raw) return apiError(413, "too_large", FILE_MESSAGES.tooLarge);
+
     let form: FormData;
     try {
-      form = await request.formData();
+      form = await parseForm(request, raw);
     } catch {
       return apiError(400, "missing_file", UPLOAD_MESSAGES.missingFile);
     }

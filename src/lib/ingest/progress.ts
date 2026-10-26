@@ -1,6 +1,7 @@
 /**
- * Friendly progress steps from the stage in the ingest thread's metadata (`ingest_stage`: the UI
- * writes "queued" when it creates the thread, then the topic_ingest graph writes the rest):
+ * Friendly progress steps from the ingest's stage: the thread metadata's `ingest_stage` when the
+ * graph's writes land there, else the stage read from the checkpoint's `next` (record-view.ts
+ * `stageFromNext`; the deployed runtime doesn't keep the graph's metadata writes):
  * queued -> reading -> checking -> (fixing -> rechecking)? -> publishing -> done.
  * The graph goes straight from checking to done when it only needs to report.
  *
@@ -48,7 +49,7 @@ export function isFixStage(stage: string | undefined): boolean {
 }
 
 /**
- * @param stage the thread's `metadata.ingest_stage`
+ * @param stage the ingest's stage (record-view.ts `progressStage`)
  * @param fixSeen the fix stage was seen earlier (so "publishing" keeps the fix steps as done)
  */
 export function deriveProgress({

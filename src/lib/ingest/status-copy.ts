@@ -44,14 +44,15 @@ export type PrimaryAction =
   | "upload_again";
 
 /**
- * Set by this app (not the graph) when the check couldn't be started at all: the ingest thread is
- * idle with no record and no final status (for example, the run was never created).
+ * Set by this app (not the graph) when the check couldn't be started at all: the ingest thread has
+ * no run (for example, `runs.create` was refused).
  */
 export const FAILED_TO_START = "failed_to_start";
 
 /**
- * Set by this app (not the graph) when the run ended without a record: the ingest thread is in
- * error. It reads exactly like validation_incomplete (the topic isn't the problem; run it again).
+ * Set by this app (not the graph) when the run ended without a record (the thread is in error, or
+ * its last run ended some other way). It reads exactly like validation_incomplete (the topic isn't
+ * the problem; run it again).
  */
 export const RUN_ERROR = "run_error";
 
@@ -253,7 +254,8 @@ export function plainInvalidInputMessage(message: string): string {
 }
 
 /**
- * The ingest thread is still busy with no progress (no `updated_at` change) for 30 minutes.
+ * The ingest thread is still busy with no progress for 30 minutes (the later of the thread's
+ * `updated_at` and its latest checkpoint's time; record-view.ts `lastProgressAt`).
  * Nothing is written; we only say so.
  */
 export const STALL_AFTER_MS = 30 * 60 * 1000;

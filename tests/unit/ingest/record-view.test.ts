@@ -8,12 +8,19 @@ import type {
 import { deriveProgress } from "@/lib/ingest/progress";
 import {
   buildResult,
+  checkpointProgress,
   ctIndexFromRecord,
+  hasGraphStage,
+  isActiveRunStatus,
   isRunEnded,
   isThreadStalled,
+  lastProgressAt,
+  mergeCheckpointProgress,
   metadataOf,
+  needsLatestRun,
+  progressStage,
   recordOf,
-  START_GRACE_MS,
+  stageFromNext,
   threadToView,
   topicInfoOf,
 } from "@/lib/ingest/record-view";
@@ -171,18 +178,20 @@ describe("topicInfoOf: the topic line", () => {
 });
 
 describe("isRunEnded", () => {
-  const now = T0 + 5_000;
-
-  it("an error has ended and a busy thread hasn't, whatever the metadata says", () => {
+  it("an error has ended and a busy thread hasn't, whatever the metadata or the runs say", () => {
+    expect(isRunEnded(thread("error", queuedMeta))).toBe(true);
     expect(
-      isRunEnded(thread("error", queuedMeta), { startedAt: T0, now }),
+      isRunEnded(thread("error", queuedMeta), { latestRunStatus: "running" }),
     ).toBe(true);
-    expect(isRunEnded(thread("busy"), { startedAt: T0, now })).toBe(false);
+    expect(isRunEnded(thread("busy"))).toBe(false);
     expect(isRunEnded(thread("busy", queuedMeta))).toBe(false);
+    expect(
+      isRunEnded(thread("busy", queuedMeta), { latestRunStatus: "success" }),
+    ).toBe(false);
   });
 
-  it("an idle thread with a final status has ended, even right after the start", () => {
-    expect(isRunEnded(thread("idle"), { startedAt: T0, now })).toBe(true);
+  it("an idle thread with a final status in the metadata has ended, without asking the runs", () => {
+    expect(isRunEnded(thread("idle"))).toBe(true);
     expect(isRunEnded(thread("idle", { ingest_status: "valid" }))).toBe(true);
     expect(isRunEnded(thread("interrupted", { ingest_status: "fixed" }))).toBe(
       true,
@@ -190,42 +199,194 @@ describe("isRunEnded", () => {
     expect(isRunEnded(thread("idle", { ingest_status: FAILED_TO_START }))).toBe(
       true,
     );
+    expect(needsLatestRun(thread("idle"))).toBe(false);
+    expect(needsLatestRun(thread("error", queuedMeta))).toBe(false);
+    expect(needsLatestRun(thread("busy", queuedMeta))).toBe(false);
   });
 
-  it("an idle thread without a final status is still starting during the grace period", () => {
-    const idle = thread("idle", queuedMeta);
-    expect(START_GRACE_MS).toBe(15_000);
-    expect(isRunEnded(idle, { startedAt: T0, now: T0 })).toBe(false);
-    expect(
-      isRunEnded(idle, { startedAt: T0, now: T0 + START_GRACE_MS - 1 }),
-    ).toBe(false);
-    expect(isRunEnded(idle, { startedAt: T0, now: T0 + START_GRACE_MS })).toBe(
+  it("without a final status (the runtime dropped the graph's writes), the latest run decides", () => {
+    for (const metadata of [queuedMeta, { ingest_status: "processing" }]) {
+      const idle = thread("idle", metadata);
+      expect(needsLatestRun(idle)).toBe(true);
+      expect(needsLatestRun(thread("interrupted", metadata))).toBe(true);
+      // Not asked yet: not ended (the pane asks runs.list before it reads the state).
+      expect(isRunEnded(idle)).toBe(false);
+      expect(isRunEnded(idle, { latestRunStatus: "pending" })).toBe(false);
+      expect(isRunEnded(idle, { latestRunStatus: "running" })).toBe(false);
+      for (const status of ["success", "error", "timeout", "interrupted"])
+        expect(isRunEnded(idle, { latestRunStatus: status })).toBe(true);
+      // No run at all: it never started.
+      expect(isRunEnded(idle, { latestRunStatus: null })).toBe(true);
+    }
+  });
+
+  it("only pending and running are runs that haven't finished", () => {
+    expect(isActiveRunStatus("pending")).toBe(true);
+    expect(isActiveRunStatus("running")).toBe(true);
+    for (const status of [
+      "success",
+      "error",
+      "timeout",
+      "interrupted",
+      null,
+      undefined,
+      "",
+    ])
+      expect(isActiveRunStatus(status)).toBe(false);
+  });
+});
+
+describe("fallback progress: the checkpoint's next step", () => {
+  it("maps each graph step to its stage, and an empty next to done", () => {
+    expect(stageFromNext(["reset"])).toBe("reading");
+    expect(stageFromNext(["load"])).toBe("reading");
+    expect(stageFromNext(["validate"])).toBe("checking");
+    expect(stageFromNext(["fix"])).toBe("fixing");
+    expect(stageFromNext(["revalidate"])).toBe("rechecking");
+    expect(stageFromNext(["publish"])).toBe("publishing");
+    expect(stageFromNext(["report"])).toBe("publishing");
+    expect(stageFromNext([])).toBe("done");
+  });
+
+  it("says nothing about steps it doesn't know, or a next that isn't a list", () => {
+    expect(stageFromNext(["__start__"])).toBeUndefined();
+    expect(stageFromNext(["something_new"])).toBeUndefined();
+    expect(stageFromNext(["something_new", "validate"])).toBe("checking");
+    expect(stageFromNext([42])).toBeUndefined();
+    expect(stageFromNext(undefined)).toBeUndefined();
+    expect(stageFromNext(null)).toBeUndefined();
+    expect(stageFromNext("validate")).toBeUndefined();
+  });
+
+  it("prefers the metadata's stage when the graph wrote one, else the checkpoint's, else queued", () => {
+    expect(progressStage("fixing", "checking")).toBe("fixing");
+    expect(progressStage("reading", undefined)).toBe("reading");
+    expect(progressStage("queued", "checking")).toBe("checking");
+    expect(progressStage(undefined, "rechecking")).toBe("rechecking");
+    expect(progressStage("", "publishing")).toBe("publishing");
+    expect(progressStage("queued", undefined)).toBe("queued");
+    expect(progressStage(undefined, undefined)).toBe("queued");
+    expect(hasGraphStage(thread("busy", { ingest_stage: "checking" }))).toBe(
       true,
     );
+    expect(hasGraphStage(thread("busy", queuedMeta))).toBe(false);
+    expect(hasGraphStage(thread("busy", { ingest_stage: undefined }))).toBe(
+      false,
+    );
+    expect(hasGraphStage(null)).toBe(false);
+  });
+
+  it("reads the stage, the checkpoint time and the topic line, never the record", () => {
+    const topic = {
+      topic_name: "Photosynthesis (Grade 8)",
+      cts: [
+        { variations: [{}, {}] },
+        { variations: [{}] },
+        { variations: [{}, {}, {}] },
+      ],
+    };
+    const progress = checkpointProgress({
+      next: ["fix"],
+      created_at: iso(T0 + MIN),
+      values: { topic, record: finished({ status: "valid" }) },
+    });
+    expect(progress).toEqual({
+      stage: "fixing",
+      at: iso(T0 + MIN),
+      topic: {
+        name: "Photosynthesis (Grade 8)",
+        questionSets: 3,
+        questions: 6,
+      },
+    });
+    // Before the graph has read the file: no topic line; an unnamed topic gives only counts.
     expect(
-      isRunEnded(thread("idle", { ingest_status: "processing" }), {
-        startedAt: T0,
-        now,
+      checkpointProgress({
+        next: ["load"],
+        created_at: iso(T0),
+        values: { topic: null },
       }),
-    ).toBe(false);
+    ).toEqual({ stage: "reading", at: iso(T0) });
+    expect(
+      checkpointProgress({
+        next: ["validate"],
+        created_at: iso(T0),
+        values: { topic: { cts: [{ variations: [{}] }] } },
+      })?.topic,
+    ).toEqual({ questionSets: 1, questions: 1 });
+    // A step it can't name: the time only.
+    expect(
+      checkpointProgress({ next: ["__start__"], created_at: iso(T0) }),
+    ).toEqual({ at: iso(T0) });
   });
 
-  it("without a start time (opened from history), an idle thread has ended", () => {
-    expect(isRunEnded(thread("idle", queuedMeta))).toBe(true);
-    expect(isRunEnded(thread("idle", { ingest_status: "processing" }))).toBe(
-      true,
-    );
+  it("ignores a thread with no checkpoint yet, and the last run's checkpoint", () => {
+    // A new thread: getState answers an empty state (next [] would otherwise read as done).
     expect(
-      isRunEnded(thread("idle", queuedMeta), { startedAt: Number.NaN, now }),
-    ).toBe(true);
+      checkpointProgress({ next: [], created_at: null, values: {} }),
+    ).toBeNull();
+    expect(checkpointProgress({ next: [], values: {} })).toBeNull();
+    expect(
+      checkpointProgress({ next: [], created_at: "not a date" }),
+    ).toBeNull();
+    expect(checkpointProgress(null)).toBeNull();
+    // Run again, before the new run starts: the state is still the last run's.
+    const lastRun = { next: [], created_at: iso(T0), values: {} };
+    expect(
+      checkpointProgress(lastRun, { runCreatedAt: iso(T0 + MIN) }),
+    ).toBeNull();
+    expect(
+      checkpointProgress(
+        { next: ["validate"], created_at: iso(T0) },
+        { runCreatedAt: iso(T0 + MIN) },
+      ),
+    ).toBeNull();
+    // This run's checkpoints (at or after the run was created) count.
+    expect(
+      checkpointProgress(
+        { next: ["reset"], created_at: iso(T0 + MIN) },
+        { runCreatedAt: iso(T0 + MIN) },
+      ),
+    ).toEqual({ stage: "reading", at: iso(T0 + MIN) });
+    // Without the run's time (opened from history), any checkpoint counts.
+    expect(checkpointProgress(lastRun, { runCreatedAt: undefined })).toEqual({
+      stage: "done",
+      at: iso(T0),
+    });
+  });
+
+  it("keeps the last stage and topic line when a later reading lacks them", () => {
+    const first = {
+      stage: "checking" as const,
+      at: iso(T0),
+      topic: { name: "Photosynthesis (Grade 8)", questionSets: 2 },
+    };
+    expect(mergeCheckpointProgress(null, first)).toEqual(first);
+    expect(mergeCheckpointProgress(first, null)).toEqual(first);
+    expect(mergeCheckpointProgress(null, null)).toBeNull();
+    expect(mergeCheckpointProgress(first, { at: iso(T0 + MIN) })).toEqual({
+      ...first,
+      at: iso(T0 + MIN),
+    });
+    expect(
+      mergeCheckpointProgress(first, {
+        stage: "fixing",
+        at: iso(T0 + MIN),
+        topic: { name: "Renamed" },
+      }),
+    ).toEqual({
+      stage: "fixing",
+      at: iso(T0 + MIN),
+      topic: { name: "Renamed" },
+    });
   });
 });
 
 describe("threadToView: running", () => {
-  it("is running right after the UI created the thread, before the run is busy", () => {
+  it("is running right after the UI created the run, while it is pending and the thread not yet busy", () => {
     const view = threadToView({
       thread: thread("idle", queuedMeta),
-      startedAt: T0,
+      latestRunStatus: "pending",
       now: T0 + 2_000,
     });
     expect(view).toMatchObject({
@@ -242,6 +403,10 @@ describe("threadToView: running", () => {
       progress: { stage: "queued", queued: true, fixSeen: false },
     });
     expect(view.result).toBeUndefined();
+    // Not asked yet: still running, never "didn't start".
+    expect(threadToView({ thread: thread("idle", queuedMeta) }).phase).toBe(
+      "running",
+    );
   });
 
   it("is running while busy, with the stage for the steps", () => {
@@ -275,7 +440,7 @@ describe("threadToView: running", () => {
     });
   });
 
-  it("is queued until the graph writes its first stage", () => {
+  it("is queued until a stage is known, from the metadata or the checkpoint", () => {
     expect(
       threadToView({
         thread: thread("busy", {
@@ -287,13 +452,88 @@ describe("threadToView: running", () => {
     ).toEqual({ stage: "queued", queued: true, fixSeen: false });
     expect(
       threadToView({
+        thread: thread("busy", queuedMeta),
+        checkpoint: { at: iso(T0) },
+        now: T0 + MIN,
+      }).progress,
+    ).toEqual({ stage: "queued", queued: true, fixSeen: false });
+    // A stage means the run has started, whatever ingest_status still says.
+    expect(
+      threadToView({
         thread: thread("busy", {
           ingest_stage: "reading",
           ingest_status: "queued",
         }),
         now: T0 + MIN,
       }).progress,
-    ).toEqual({ stage: "reading", queued: true, fixSeen: false });
+    ).toEqual({ stage: "reading", queued: false, fixSeen: false });
+  });
+
+  it("takes the stage and topic line from the checkpoint while the metadata stays queued", () => {
+    const view = threadToView({
+      thread: thread("busy", queuedMeta),
+      checkpoint: {
+        stage: "fixing",
+        at: iso(T0 + MIN),
+        topic: {
+          name: "Photosynthesis (Grade 8)",
+          questionSets: 2,
+          questions: 3,
+        },
+      },
+      now: T0 + 2 * MIN,
+    });
+    expect(view).toMatchObject({
+      phase: "running",
+      busy: true,
+      topic: {
+        name: "Photosynthesis (Grade 8)",
+        fileName: "photosynthesis_grade_8.json",
+        questionSets: 2,
+        questions: 3,
+      },
+      progress: { stage: "fixing", queued: false, fixSeen: true },
+    });
+    // The metadata wins when the graph's writes reach it.
+    expect(
+      threadToView({
+        thread: thread("busy", {
+          ingest_stage: "rechecking",
+          ingest_status: "processing",
+          topic_name: "From the metadata",
+        }),
+        checkpoint: {
+          stage: "fixing",
+          at: iso(T0 + MIN),
+          topic: { name: "From the checkpoint" },
+        },
+        now: T0 + 2 * MIN,
+      }),
+    ).toMatchObject({
+      topic: { name: "From the metadata" },
+      progress: { stage: "rechecking" },
+    });
+  });
+
+  it("never shows a record while the run goes (it is the last run's)", () => {
+    const view = threadToView({
+      thread: thread("busy", queuedMeta),
+      values: { record: finished({ status: "valid" }), source_url: SOURCE },
+      checkpoint: { stage: "reading", at: iso(T0) },
+      now: T0 + MIN,
+    });
+    expect(view.phase).toBe("running");
+    expect(view.result).toBeUndefined();
+    // Its topic line doesn't leak in either.
+    expect(view.topic.name).toBe("photosynthesis_grade_8.json");
+    expect(view.topic.questions).toBeUndefined();
+    const pending = threadToView({
+      thread: thread("idle", queuedMeta),
+      values: { record: finished({ status: "valid" }) },
+      latestRunStatus: "running",
+    });
+    expect(pending.phase).toBe("running");
+    expect(pending.result).toBeUndefined();
   });
 
   it("keeps the fix steps at publishing once the fix stage was seen", () => {
@@ -349,6 +589,32 @@ describe("threadToView: stalled", () => {
     });
     expect(stalled.result).toBeUndefined();
     expect(isThreadStalled(busy, T0 + 31 * MIN)).toBe(true);
+  });
+
+  it("counts the checkpoint's time as progress (the run's metadata may never change)", () => {
+    expect(lastProgressAt(busy)).toBe(T0);
+    expect(lastProgressAt(busy, iso(T0 + 20 * MIN))).toBe(T0 + 20 * MIN);
+    expect(lastProgressAt(busy, iso(T0 - 20 * MIN))).toBe(T0);
+    expect(lastProgressAt({ updated_at: undefined }, iso(T0))).toBe(T0);
+    expect(lastProgressAt({ updated_at: undefined })).toBeUndefined();
+    expect(isThreadStalled(busy, T0 + 31 * MIN, iso(T0 + 20 * MIN))).toBe(
+      false,
+    );
+    expect(isThreadStalled(busy, T0 + 51 * MIN, iso(T0 + 20 * MIN))).toBe(true);
+    expect(
+      threadToView({
+        thread: busy,
+        checkpoint: { stage: "fixing", at: iso(T0 + 20 * MIN) },
+        now: T0 + 31 * MIN,
+      }).phase,
+    ).toBe("running");
+    expect(
+      threadToView({
+        thread: busy,
+        checkpoint: { stage: "fixing", at: iso(T0 + 20 * MIN) },
+        now: T0 + 51 * MIN,
+      }).phase,
+    ).toBe("stalled");
   });
 
   it("is never stalled when not busy, or without an update time", () => {
@@ -474,6 +740,7 @@ describe("threadToView: done, with the record", () => {
     const view = threadToView({
       thread: thread("idle", { ingest_status: "processing" }),
       values: { record: finished({ status: "something_new" }) },
+      latestRunStatus: "success",
     });
     expect(view).toMatchObject({
       phase: "done",
@@ -510,10 +777,26 @@ describe("threadToView: done, without a record", () => {
     expect(
       threadToView({
         thread: thread("error", queuedMeta),
-        startedAt: T0,
         now: T0 + 1_000,
       }).result?.status,
     ).toBe(RUN_ERROR);
+  });
+
+  it("run_error when the latest run ended without leaving a record", () => {
+    for (const latestRunStatus of [
+      "success",
+      "error",
+      "timeout",
+      "interrupted",
+    ]) {
+      const view = threadToView({
+        thread: thread("idle", queuedMeta),
+        values: { record: null },
+        latestRunStatus,
+      });
+      expect(view.phase).toBe("done");
+      expect(view.result?.status).toBe(RUN_ERROR);
+    }
   });
 
   it("the metadata's final status when the state has no record", () => {
@@ -533,8 +816,11 @@ describe("threadToView: done, without a record", () => {
     }
   });
 
-  it("failed_to_start when an idle thread has neither a record nor a final status", () => {
-    const view = threadToView({ thread: thread("idle", queuedMeta) });
+  it("failed_to_start when an idle thread has no run, no record and no final status", () => {
+    const view = threadToView({
+      thread: thread("idle", queuedMeta),
+      latestRunStatus: null,
+    });
     expect(view.phase).toBe("done");
     expect(view.result).toEqual({
       status: FAILED_TO_START,
@@ -543,21 +829,46 @@ describe("threadToView: done, without a record", () => {
       warnings: [],
       technical: { findings: [], threadId: "thread-1" },
     });
-    // After the grace period, a run the UI started that never got busy didn't start.
-    expect(
-      threadToView({
-        thread: thread("idle", queuedMeta),
-        startedAt: T0,
-        now: T0 + START_GRACE_MS + 1,
-      }).result?.status,
-    ).toBe(FAILED_TO_START);
     // Something in values that isn't a record is ignored.
     expect(
       threadToView({
         thread: thread("idle", queuedMeta),
         values: { record: "oops" } as never,
+        latestRunStatus: null,
       }).result?.status,
     ).toBe(FAILED_TO_START);
+  });
+
+  it("reads the record once the latest run has ended, with the metadata still queued", () => {
+    const view = threadToView({
+      thread: thread("idle", queuedMeta),
+      values: { record: finished({ status: "valid" }) },
+      latestRunStatus: "success",
+      checkpoint: { stage: "publishing", at: iso(T0) },
+    });
+    expect(view).toMatchObject({
+      phase: "done",
+      topic: {
+        name: "Photosynthesis (Grade 8)",
+        questionSets: 2,
+        questions: 3,
+      },
+      result: { status: "valid" },
+    });
+    expect(view.progress).toBeUndefined();
+    // invalid_input: no topic in the record, so the file name stays.
+    expect(
+      threadToView({
+        thread: thread("idle", queuedMeta),
+        values: {
+          record: { status: "invalid_input", message: "Could not read" },
+        },
+        latestRunStatus: "success",
+      }),
+    ).toMatchObject({
+      topic: { name: "photosynthesis_grade_8.json" },
+      result: { status: "invalid_input" },
+    });
   });
 });
 

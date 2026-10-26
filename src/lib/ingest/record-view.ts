@@ -2,22 +2,29 @@
  * Ingest thread -> what the ingest pane shows.
  *
  * Each ingest is one LangGraph thread on the topic_ingest graph. While the run goes, the pane
- * polls `threads.search({ ids: [id], select: INGEST_POLL_SELECT })` (status, metadata and
- * updated_at, never the state values). Once the run has ended (`isRunEnded`) it reads
- * `values.record` once with `threads.getState`, and `threadToView` turns both into an IngestView.
+ * polls `threads.search({ ids: [id], select: INGEST_POLL_SELECT })` (status, metadata and times,
+ * never the state values). Progress comes from the metadata's `ingest_stage` when the graph's
+ * writes reached it, else from the checkpoint's `next` (`checkpointProgress`: one `getState` at
+ * most every 3 s while busy, the design doc's fallback). The run has ended (`isRunEnded`) when the
+ * thread is no longer busy and either the metadata holds a final status or the latest run
+ * (`runs.list`) is no longer pending or running. Then the pane reads `values.record` once with
+ * `threads.getState`, and `threadToView` turns all of it into an IngestView.
  *
  * The record -> result mapping is ported from topic-ingester's src/server/imports.ts (topicInfo,
  * buildResult, toFindings, summarizeValidation, costOf, ctIndexFromRecord, safeHttpUrl and the
  * stall rule), adapted to threads: the record comes from the thread state instead of Firestore,
- * progress and the topic summary from the thread metadata, and the topic files are offered as
- * allow-listed links (downloaded through /api/topic-file) instead of server-side flags.
+ * progress and the topic summary from the thread metadata or the checkpoint, and the topic files
+ * are offered as allow-listed links (downloaded through /api/topic-file) instead of server-side
+ * flags.
  */
 import { isTopicFileUrl } from "./file-links";
 import type {
   Finding,
+  IngestCheckpointProgress,
   IngestCost,
   IngestRecord,
   IngestResult,
+  IngestStage,
   IngestStateValues,
   IngestThreadMetadata,
   IngestThreadSnapshot,
@@ -37,13 +44,8 @@ import {
   RUN_ERROR,
   STALL_AFTER_MS,
 } from "./status-copy";
-import { downloadBaseName, isRecord } from "./topic-file";
+import { downloadBaseName, isRecord, summarizeTopic } from "./topic-file";
 
-/**
- * A run created this recently may not show as busy yet: while the thread is idle without a final
- * status, it still counts as running for this long after the UI started it.
- */
-export const START_GRACE_MS = 15_000;
 const MAX_FINDINGS = 300;
 
 function str(value: unknown): string | undefined {
@@ -124,28 +126,147 @@ export function recordOf(
 }
 
 /**
- * The topic line: name, file, counts and the base name for downloads. The graph writes the topic's
- * name and counts into the metadata once it has read the file; before that (or when it couldn't
- * read it) the file name stands in.
+ * The topic line: name, file, counts and the base name for downloads. Once the graph has read the
+ * file, the name and counts come from the metadata (when its writes reached it), else from the
+ * final record, else from the topic in the checkpoint (`checkpointProgress`); before that (or when
+ * the file couldn't be read) the file name stands in.
  */
 export function topicInfoOf(
   metadata: IngestThreadSnapshot["metadata"],
   record?: IngestRecord | null,
+  checkpointTopic?: IngestCheckpointProgress["topic"],
 ): IngestTopicInfo {
   const meta = metadataOf({ metadata });
   const fileName = meta.ingest_file_name;
   const name =
     meta.topic_name ??
     str(record?.topic_name) ??
+    str(checkpointTopic?.name) ??
     fileName ??
     meta.thread_title ??
     "Untitled topic";
   return {
     name,
     fileName,
-    questionSets: meta.question_sets ?? num(record?.cts),
-    questions: meta.questions ?? num(record?.questions),
+    questionSets:
+      meta.question_sets ??
+      num(record?.cts) ??
+      num(checkpointTopic?.questionSets),
+    questions:
+      meta.questions ??
+      num(record?.questions) ??
+      num(checkpointTopic?.questions),
     downloadName: downloadBaseName({ fileName, topicName: name }),
+  };
+}
+
+// ---------------------------------------------------------------- progress (fallback)
+
+/**
+ * The topic_ingest graph's steps (topic_import/graph.py `build_graph`) -> progress stage. A node in
+ * the checkpoint's `next` is the step running now: reset -> load -> validate -> (fix ->
+ * revalidate)? -> publish | report.
+ */
+const NODE_STAGE: Readonly<Record<string, IngestStage>> = {
+  reset: "reading",
+  load: "reading",
+  validate: "checking",
+  fix: "fixing",
+  revalidate: "rechecking",
+  publish: "publishing",
+  report: "publishing",
+};
+
+/**
+ * The stage a checkpoint's `next` points at: an empty list means the graph has finished ("done");
+ * a list that names no known step (or isn't a list) says nothing (undefined).
+ */
+export function stageFromNext(next: unknown): IngestStage | undefined {
+  if (!Array.isArray(next)) return undefined;
+  if (next.length === 0) return "done";
+  for (const node of next) {
+    const stage = typeof node === "string" ? NODE_STAGE[node] : undefined;
+    if (stage) return stage;
+  }
+  return undefined;
+}
+
+/** True when the metadata carries a stage the graph wrote (anything other than "queued"). */
+export function hasGraphStage(
+  thread: Pick<IngestThreadSnapshot, "metadata"> | null | undefined,
+): boolean {
+  const stage = metadataOf(thread).ingest_stage;
+  return stage !== undefined && stage !== "queued";
+}
+
+/**
+ * The stage to show: the metadata's when the graph's write reached it (anything other than
+ * "queued"), else the checkpoint's (`stageFromNext`), else "queued".
+ */
+export function progressStage(
+  metadataStage: unknown,
+  checkpointStage?: string,
+): string {
+  const meta = str(metadataStage);
+  if (meta && meta !== "queued") return meta;
+  return str(checkpointStage) ?? "queued";
+}
+
+/**
+ * Reads one `threads.getState` taken while the thread is busy: the stage from `next`, the
+ * checkpoint's time, and the topic line from `values.topic`. `values.record` is never read: the
+ * graph's first step clears it, so while busy it can only be the last run's.
+ *
+ * Returns null when the checkpoint says nothing about this run: there is no checkpoint yet (no
+ * `created_at`), or it is older than the run (`runCreatedAt`, the server's `created_at` of the run,
+ * when known): the run is still waiting to start, and the state is the last run's.
+ */
+export function checkpointProgress(
+  state:
+    | { next?: unknown; created_at?: unknown; values?: unknown }
+    | null
+    | undefined,
+  opts: { runCreatedAt?: string | null } = {},
+): IngestCheckpointProgress | null {
+  if (!state) return null;
+  const at = str(state.created_at);
+  const time = Date.parse(at ?? "");
+  if (!at || !Number.isFinite(time)) return null;
+  const runCreated = Date.parse(opts.runCreatedAt ?? "");
+  if (Number.isFinite(runCreated) && time < runCreated) return null;
+  const progress: IngestCheckpointProgress = { at };
+  const stage = stageFromNext(state.next);
+  if (stage) progress.stage = stage;
+  const values = isRecord(state.values) ? state.values : {};
+  const topic = isRecord(values.topic) ? values.topic : undefined;
+  if (topic) {
+    const summary = summarizeTopic(topic);
+    const name = str(topic.topic_name);
+    progress.topic = {
+      ...(name ? { name: summary.topicName } : {}),
+      ...(Array.isArray(topic.cts)
+        ? { questionSets: summary.questionSets, questions: summary.questions }
+        : {}),
+    };
+  }
+  return progress;
+}
+
+/**
+ * The next checkpoint reading on top of the last one: a step it can't name keeps the last stage,
+ * and a missing topic keeps the last topic line.
+ */
+export function mergeCheckpointProgress(
+  previous: IngestCheckpointProgress | null | undefined,
+  next: IngestCheckpointProgress | null | undefined,
+): IngestCheckpointProgress | null {
+  if (!next) return previous ?? null;
+  if (!previous) return next;
+  return {
+    ...previous,
+    ...next,
+    ...(next.stage ? {} : previous.stage ? { stage: previous.stage } : {}),
+    ...(next.topic ? {} : previous.topic ? { topic: previous.topic } : {}),
   };
 }
 
@@ -250,80 +371,121 @@ function bareResult(status: string, threadId: string): IngestResult {
 
 // ---------------------------------------------------------------- thread -> view
 
-/** Still busy with no progress (no `updated_at` change) for 30 minutes. */
+/**
+ * When the run last showed progress (ms): the later of the thread's `updated_at` and the last
+ * checkpoint's time (`checkpointAt`, from `checkpointProgress`). Undefined when neither is known.
+ */
+export function lastProgressAt(
+  thread: Pick<IngestThreadSnapshot, "updated_at">,
+  checkpointAt?: string | null,
+): number | undefined {
+  const times = [thread.updated_at, checkpointAt]
+    .map((value) => Date.parse(value ?? ""))
+    .filter((value) => Number.isFinite(value));
+  return times.length ? Math.max(...times) : undefined;
+}
+
+/** Still busy with no progress (`lastProgressAt`) for 30 minutes. */
 export function isThreadStalled(
   thread: Pick<IngestThreadSnapshot, "status" | "updated_at">,
   now = Date.now(),
+  checkpointAt?: string | null,
 ): boolean {
   if (thread.status !== "busy") return false;
-  const updated = Date.parse(thread.updated_at ?? "");
-  return Number.isFinite(updated) && now - updated > STALL_AFTER_MS;
+  const at = lastProgressAt(thread, checkpointAt);
+  return at !== undefined && now - at > STALL_AFTER_MS;
+}
+
+/** A LangGraph run status that means the run hasn't finished ("pending" or "running"). */
+export function isActiveRunStatus(status: unknown): boolean {
+  return status === "pending" || status === "running";
+}
+
+/**
+ * Whether `isRunEnded` needs the thread's latest run to decide: the thread isn't busy or in error,
+ * and the metadata holds no final status. The pane then asks `runs.list(id, { limit: 1 })`.
+ */
+export function needsLatestRun(thread: IngestThreadSnapshot): boolean {
+  return (
+    thread.status !== "busy" &&
+    thread.status !== "error" &&
+    !isFinalStatus(metadataOf(thread).ingest_status)
+  );
 }
 
 /**
  * Whether the thread's run has ended, so its state can be read once.
  *
  * error: ended; busy: not ended. Otherwise (idle or interrupted) it has ended when the metadata
- * holds a final status. Without one, a run the UI started less than START_GRACE_MS ago
- * (`startedAt`) may simply not be busy yet, so it hasn't ended; any other idle thread has (the run
- * ended without a final status, or never started).
+ * holds a final status (the graph's write reached it). Without one, the latest run decides
+ * (`latestRunStatus`, from `runs.list(id, { limit: 1 })`): ended unless it is still pending or
+ * running; `null` (the thread has no run: it never started) is ended. Not asked yet (undefined):
+ * not ended, so the pane asks before it reads the state.
  *
  * "Run again" must reset `ingest_status` and `ingest_stage` to "queued" in the metadata before it
- * creates the new run, or the last run's final status still reads as ended here.
+ * creates the new run, or a final status the graph wrote for the last run still reads as ended.
  */
 export function isRunEnded(
   thread: IngestThreadSnapshot,
-  opts: { startedAt?: number; now?: number } = {},
+  opts: { latestRunStatus?: string | null } = {},
 ): boolean {
   if (thread.status === "error") return true;
   if (thread.status === "busy") return false;
   if (isFinalStatus(metadataOf(thread).ingest_status)) return true;
-  const { startedAt } = opts;
-  if (startedAt !== undefined && Number.isFinite(startedAt)) {
-    const now = opts.now ?? Date.now();
-    if (now - startedAt < START_GRACE_MS) return false;
-  }
-  return true;
+  if (opts.latestRunStatus === undefined) return false;
+  return !isActiveRunStatus(opts.latestRunStatus);
 }
 
 /**
  * What the ingest pane shows for one thread.
  *
  * @param thread one poll (`threads.search` with INGEST_POLL_SELECT)
- * @param values `threads.getState(id).values`, read once after the run ended (`isRunEnded`)
+ * @param values `threads.getState(id).values`, read once after the run ended (`isRunEnded`);
+ *   ignored while the run goes (a record seen then is the last run's)
  * @param fixSeen the fix stage was seen earlier in this run (keeps the fix steps at "publishing")
- * @param startedAt when this UI started the run (Date.now()), for START_GRACE_MS
+ * @param latestRunStatus the latest run's status (`runs.list`), null when the thread has none;
+ *   undefined when not asked
+ * @param checkpoint what the last `getState` taken while busy said (`checkpointProgress`)
  */
 export function threadToView(input: {
   thread: IngestThreadSnapshot;
   values?: IngestStateValues | null;
   fixSeen?: boolean;
-  startedAt?: number;
+  latestRunStatus?: string | null;
+  checkpoint?: IngestCheckpointProgress | null;
   now?: number;
 }): IngestView {
-  const { thread, values } = input;
+  const { thread, checkpoint } = input;
   const now = input.now ?? Date.now();
   const metadata = metadataOf(thread);
-  const record = recordOf(values);
   const busy = thread.status === "busy";
+  const running =
+    busy || !isRunEnded(thread, { latestRunStatus: input.latestRunStatus });
+  // While the run goes, the state's record (if any) is the last run's: never shown.
+  const values = running ? undefined : input.values;
+  const record = recordOf(values);
   const base = {
     threadId: thread.thread_id,
     createdAt: str(thread.created_at),
     updatedAt: str(thread.updated_at),
-    topic: topicInfoOf(metadata, record),
+    topic: topicInfoOf(metadata, record, checkpoint?.topic),
     sourceUrl:
-      httpsUrl(metadata.ingest_source_url) ?? httpsUrl(values?.source_url),
+      httpsUrl(metadata.ingest_source_url) ??
+      httpsUrl(input.values?.source_url),
     busy,
   };
 
-  if (busy || !isRunEnded(thread, { startedAt: input.startedAt, now })) {
-    const stage = metadata.ingest_stage ?? "queued";
+  if (running) {
+    const stage = progressStage(metadata.ingest_stage, checkpoint?.stage);
     return {
       ...base,
-      phase: busy && isThreadStalled(thread, now) ? "stalled" : "running",
+      phase:
+        busy && isThreadStalled(thread, now, checkpoint?.at)
+          ? "stalled"
+          : "running",
       progress: {
         stage,
-        queued: metadata.ingest_status === "queued" || stage === "queued",
+        queued: stage === "queued",
         fixSeen: input.fixSeen === true || isFixStage(stage),
       },
     };
@@ -354,6 +516,10 @@ export function threadToView(input: {
       phase: "done",
       result: buildResult(record, { threadId }),
     };
+  }
+  if (typeof input.latestRunStatus === "string") {
+    // A run ran and ended (cancelled, timed out, or crashed) without leaving a record.
+    return { ...base, phase: "done", result: bareResult(RUN_ERROR, threadId) };
   }
   return {
     ...base,

@@ -3,15 +3,29 @@
 /**
  * One ingest = one LangGraph thread on the `topic_ingest` graph.
  *
- * start:    upload the .json (/api/ingest/upload) -> threads.create -> runs.create -> ingestId.
- * poll:     threads.search({ ids: [id], select }) every 1.5 s while the run is going, paused while
- *           the tab is hidden. Thread values are never read in the loop.
- * ended:    one threads.getState(id) for `values.record`, then the result view; polling stops.
- * runAgain: a new run on the same thread with the same uploaded file.
+ * start:    upload the .json (/api/ingest/upload) -> threads.create (the thread goes into
+ *           Ingester's history at once) -> runs.create -> ingestId.
+ * poll:     every 1.5 s, paused while the tab is hidden, one `threads.search({ ids: [id], select })`
+ *           (status, metadata, times; never the values). Then, depending on the thread:
+ *           - busy: the run goes. Unless the metadata already carries a stage the graph wrote, one
+ *             `threads.getState(id)` at most every 3 s gives the stage (`next`), the checkpoint's
+ *             time and the topic line (`values.topic`): the design doc's fallback, because the
+ *             graph's metadata writes don't persist on the deployed Postgres runtime. A record seen
+ *             there is the last run's (the graph's first step clears it) and is never read.
+ *           - error, or a final status in the metadata: the run has ended.
+ *           - otherwise (idle, no final status): one `runs.list(id, { limit: 1 })`; the run has
+ *             ended unless the latest run is still pending or running (no run at all: it never
+ *             started).
+ * ended:    exactly one threads.getState(id) for `values.record`, then the result view; polling
+ *           stops.
+ * runAgain: re-checks the thread (one threads.search) and refuses while it is busy (another tab
+ *           may have started a run; the runtime would queue a second one), else a new run on the
+ *           same thread with the same uploaded file.
  *
  * Talks to LangGraph only through `createClient` (the existing IAP-minted JWT flow).
  */
 
+import type { Thread } from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -21,16 +35,24 @@ import {
   INGEST_GRAPH_ID,
   INGEST_POLL_SELECT,
   type ApiError,
+  type IngestCheckpointProgress,
   type IngestStateValues,
   type IngestThreadSnapshot,
   type IngestUploadResponse,
   type IngestView,
 } from "@/lib/ingest/ingest-types";
-import { isFixStage } from "@/lib/ingest/progress";
-import { isRunEnded, threadToView } from "@/lib/ingest/record-view";
+import {
+  checkpointProgress,
+  hasGraphStage,
+  isRunEnded,
+  mergeCheckpointProgress,
+  needsLatestRun,
+  threadToView,
+} from "@/lib/ingest/record-view";
 import { FILE_MESSAGES } from "@/lib/ingest/topic-file";
 import { getUserLimitNotice } from "@/lib/user-limit-error";
 import { createClient } from "@/providers/client";
+import { useThreads } from "@/providers/Thread";
 
 export type IngestLimitNotice = NonNullable<
   ReturnType<typeof getUserLimitNotice>
@@ -57,6 +79,8 @@ export interface IngestThreadApi {
 
 /** The chat runtime's busy cadence. */
 const POLL_MS = 1500;
+/** The fallback progress read (`threads.getState`) while busy: at most this often. */
+const STATE_POLL_MS = 3000;
 /** Once it looks stalled, keep an eye on it, gently. */
 const STALLED_POLL_MS = 15_000;
 const BACKOFF_MS = [3000, 5000, 10_000];
@@ -72,12 +96,22 @@ const CONFIG =
 
 class UploadError extends Error {}
 
+interface RunStart {
+  /** Date.now() when this tab started the run: the elapsed timer. */
+  at: number;
+  /**
+   * The run's `created_at` as the server stamped it (runs.create). A checkpoint older than this
+   * is the last run's: the new run is still waiting to start (`checkpointProgress`).
+   */
+  createdAt?: string;
+}
+
 /**
- * When this page started a run, by thread id. Module-level, so the "just started" grace rule
- * (record-view's START_GRACE_MS) and the elapsed timer survive the pane unmounting when the
- * creator switches to Crafter and back.
+ * The run this page started, by thread id. Module-level, so the elapsed timer and the "is this
+ * checkpoint the last run's?" check survive the pane unmounting when the creator switches to
+ * Crafter and back.
  */
-const RUN_STARTS = new Map<string, number>();
+const RUN_STARTS = new Map<string, RunStart>();
 
 function httpStatusOf(error: unknown): number | undefined {
   if (error && typeof error === "object" && "status" in error) {
@@ -85,6 +119,11 @@ function httpStatusOf(error: unknown): number | undefined {
     if (typeof status === "number") return status;
   }
   return undefined;
+}
+
+function isSignInError(error: unknown): boolean {
+  const status = httpStatusOf(error);
+  return status === 401 || status === 403;
 }
 
 /** A thread id the server can't look up (unknown, malformed, or someone else's). */
@@ -97,8 +136,13 @@ function actionMessage(error: unknown): string {
   if (error instanceof UploadError) return error.message;
   const status = httpStatusOf(error);
   if (status === undefined) return OFFLINE;
-  if (status === 401 || status === 403) return SIGN_IN;
+  if (isSignInError(error)) return SIGN_IN;
   return GENERIC;
+}
+
+/** The message a failed poll shows while it keeps trying. */
+function pollMessage(error: unknown): string {
+  return isSignInError(error) ? SIGN_IN : POLL_OFFLINE;
 }
 
 function showLimitToast(notice: IngestLimitNotice) {
@@ -168,13 +212,18 @@ async function uploadTopicFile(
   };
 }
 
-function metadataOf(
-  snapshot: IngestThreadSnapshot | null,
+/** The snapshot's metadata as it is (record-view's `metadataOf` type-checks it for display). */
+function rawMetadataOf(
+  snapshot: IngestThreadSnapshot | null | undefined,
 ): Record<string, unknown> {
   const metadata = snapshot?.metadata;
   return metadata && typeof metadata === "object"
     ? (metadata as Record<string, unknown>)
     : {};
+}
+
+function nonEmpty(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 export function useIngestThread(
@@ -185,6 +234,8 @@ export function useIngestThread(
   const [apiUrl] = useQueryState("apiUrl", {
     defaultValue: envApiUrl || "",
   });
+  // Inside the pane this is Ingester's history list (the shell wraps the pane in its mode's scope).
+  const { setThreads } = useThreads();
 
   const [view, setViewState] = useState<IngestView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -202,6 +253,8 @@ export function useIngestThread(
   ingestIdRef.current = ingestId;
   const setIngestIdRef = useRef(setIngestId);
   setIngestIdRef.current = setIngestId;
+  const setThreadsRef = useRef(setThreads);
+  setThreadsRef.current = setThreads;
 
   /** Bumped on every id change, run restart and unmount: older async answers are dropped. */
   const sessionRef = useRef(0);
@@ -216,6 +269,12 @@ export function useIngestThread(
   const stoppedRef = useRef(false);
   const failuresRef = useRef(0);
   const fixSeenRef = useRef(false);
+  /** The fallback progress of this run (checkpointProgress, merged across reads). */
+  const checkpointRef = useRef<IngestCheckpointProgress | null>(null);
+  /** When this session last asked threads.getState while busy (ms; 0: not yet). */
+  const stateReadAtRef = useRef(0);
+  /** The latest run's status from runs.list (null: no run; undefined: not asked). */
+  const latestRunRef = useRef<string | null | undefined>(undefined);
   const snapshotRef = useRef<IngestThreadSnapshot | null>(null);
   const viewRef = useRef<IngestView | null>(null);
   /** The thread start() just created, so the pane shows progress before the first poll. */
@@ -227,6 +286,7 @@ export function useIngestThread(
 
   const commitView = useCallback((next: IngestView | null) => {
     viewRef.current = next;
+    if (next?.progress?.fixSeen) fixSeenRef.current = true;
     setViewState(next);
   }, []);
 
@@ -236,11 +296,40 @@ export function useIngestThread(
     return createClient(url, getApiKey() ?? undefined);
   }, []);
 
+  /** Puts a thread into Ingester's history list: newest first, no duplicate. */
+  const addToHistory = useCallback((thread: Thread) => {
+    setThreadsRef.current((previous) => [
+      thread,
+      ...previous.filter((item) => item.thread_id !== thread.thread_id),
+    ]);
+  }, []);
+
+  /** Shows the history row as busy (its spinner) until the list's own poll catches up. */
+  const markBusyInHistory = useCallback((threadId: string) => {
+    setThreadsRef.current((previous) =>
+      previous.some((item) => item.thread_id === threadId)
+        ? previous.map((item) =>
+            item.thread_id === threadId ? { ...item, status: "busy" } : item,
+          )
+        : previous,
+    );
+  }, []);
+
   // The poll machine. Refs only, so the functions below never go stale.
   const schedule = useCallback((session: number, ms: number) => {
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void tickRef.current(session), ms);
   }, []);
+
+  const markNotFound = useCallback(
+    (id: string) => {
+      stoppedRef.current = true;
+      setError(null);
+      setNotFoundId(id);
+      commitView(null);
+    },
+    [commitView],
+  );
 
   const tickRef = useRef<(session: number) => Promise<void>>(async () => {});
   tickRef.current = async (session: number) => {
@@ -258,6 +347,7 @@ export function useIngestThread(
       setError(CONFIG);
       return;
     }
+    const current = () => session === sessionRef.current;
     inFlightRef.current = session;
     try {
       if (!endedRef.current) {
@@ -266,28 +356,47 @@ export function useIngestThread(
           limit: 1,
           select: [...INGEST_POLL_SELECT],
         });
-        if (session !== sessionRef.current) return;
+        if (!current()) return;
         if (seedRef.current?.threadId === id) seedRef.current = null;
         const thread = rows[0] as unknown as IngestThreadSnapshot | undefined;
         if (!thread) {
-          stoppedRef.current = true;
-          setError(null);
-          setNotFoundId(id);
-          commitView(null);
+          markNotFound(id);
           return;
         }
         snapshotRef.current = thread;
         failuresRef.current = 0;
         setError(null);
-        const stage = metadataOf(thread).ingest_stage;
-        if (typeof stage === "string" && isFixStage(stage))
-          fixSeenRef.current = true;
-        const started = RUN_STARTS.get(id);
-        if (!isRunEnded(thread, { startedAt: started })) {
+
+        let latestRunStatus: string | null | undefined;
+        if (thread.status === "busy") {
+          // Fallback progress (the metadata carries no stage the graph wrote): the checkpoint.
+          if (
+            !hasGraphStage(thread) &&
+            Date.now() - stateReadAtRef.current >= STATE_POLL_MS
+          ) {
+            stateReadAtRef.current = Date.now();
+            const state = await client.threads.getState<IngestStateValues>(id);
+            if (!current()) return;
+            checkpointRef.current = mergeCheckpointProgress(
+              checkpointRef.current,
+              checkpointProgress(state, {
+                runCreatedAt: RUN_STARTS.get(id)?.createdAt,
+              }),
+            );
+          }
+        } else if (needsLatestRun(thread)) {
+          // Idle without a final status: the latest run says whether it has ended.
+          const runs = await client.runs.list(id, { limit: 1 });
+          if (!current()) return;
+          latestRunStatus = runs[0]?.status ?? null;
+        }
+
+        if (!isRunEnded(thread, { latestRunStatus })) {
           const next = threadToView({
             thread,
             fixSeen: fixSeenRef.current,
-            startedAt: started,
+            latestRunStatus,
+            checkpoint: checkpointRef.current,
           });
           commitView(next);
           schedule(
@@ -297,11 +406,12 @@ export function useIngestThread(
           return;
         }
         endedRef.current = true;
+        latestRunRef.current = latestRunStatus;
       }
 
       // The run has ended: read the record once.
       const state = await client.threads.getState<IngestStateValues>(id);
-      if (session !== sessionRef.current) return;
+      if (!current()) return;
       const thread = snapshotRef.current ?? { thread_id: id, status: "idle" };
       const values = (state?.values ?? undefined) as
         | IngestStateValues
@@ -314,20 +424,18 @@ export function useIngestThread(
           thread,
           values,
           fixSeen: fixSeenRef.current,
-          startedAt: RUN_STARTS.get(id),
+          latestRunStatus: latestRunRef.current,
+          checkpoint: checkpointRef.current,
         }),
       );
     } catch (caught) {
-      if (session !== sessionRef.current) return;
+      if (!current()) return;
       if (isMissingThread(caught)) {
-        stoppedRef.current = true;
-        setError(null);
-        setNotFoundId(id);
-        commitView(null);
+        markNotFound(id);
         return;
       }
       failuresRef.current += 1;
-      setError(POLL_OFFLINE);
+      setError(pollMessage(caught));
       schedule(
         session,
         BACKOFF_MS[Math.min(failuresRef.current - 1, BACKOFF_MS.length - 1)]!,
@@ -346,6 +454,10 @@ export function useIngestThread(
       endedRef.current = false;
       stoppedRef.current = false;
       failuresRef.current = 0;
+      fixSeenRef.current = false;
+      checkpointRef.current = null;
+      stateReadAtRef.current = 0;
+      latestRunRef.current = undefined;
       schedule(sessionRef.current, 0);
     },
     [schedule],
@@ -382,7 +494,6 @@ export function useIngestThread(
 
   // A new id (a new ingest, or one opened from history): start over.
   useEffect(() => {
-    fixSeenRef.current = false;
     snapshotRef.current = null;
     setError(null);
     setNotFoundId(null);
@@ -394,24 +505,18 @@ export function useIngestThread(
       commitView(null);
       return;
     }
-    setStartedAt(RUN_STARTS.get(ingestId) ?? null);
+    setStartedAt(RUN_STARTS.get(ingestId)?.at ?? null);
     // Kept until the first poll answers (a dev-mode effect re-run must still find it).
     const seed =
       seedRef.current?.threadId === ingestId ? seedRef.current : null;
     if (!seed) seedRef.current = null;
+    restartPolling(ingestId);
     if (seed) {
       snapshotRef.current = seed.snapshot;
-      commitView(
-        threadToView({
-          thread: seed.snapshot,
-          fixSeen: false,
-          startedAt: RUN_STARTS.get(ingestId),
-        }),
-      );
+      commitView(threadToView({ thread: seed.snapshot, fixSeen: false }));
     } else {
       commitView(null);
     }
-    restartPolling(ingestId);
     return stopPolling;
   }, [ingestId, commitView, restartPolling, stopPolling]);
 
@@ -442,8 +547,10 @@ export function useIngestThread(
           upload = await uploadTopicFile(file, text);
           const fileName = upload.fileName;
           const thread = await client.threads.create({
+            // The SDK writes metadata.graph_id from `graphId` (and drops one set in `metadata`),
+            // so an ingest whose run never starts is still in Ingester's history.
+            graphId: INGEST_GRAPH_ID,
             metadata: {
-              graph_id: INGEST_GRAPH_ID,
               thread_title: fileName,
               ingest_file_name: fileName,
               ingest_source_url: upload.url,
@@ -453,17 +560,21 @@ export function useIngestThread(
           });
           threadId = thread.thread_id;
           created = thread as unknown as IngestThreadSnapshot;
+          // In Ingester's history right away, not at the list's next refresh.
+          addToHistory(thread as Thread);
         } catch (caught) {
           fail(caught);
           return;
         }
 
         const at = Date.now();
+        let runCreatedAt: string | undefined;
         try {
-          await client.runs.create(threadId, INGEST_GRAPH_ID, {
+          const run = await client.runs.create(threadId, INGEST_GRAPH_ID, {
             input: { source_url: upload.url, file_name: upload.fileName },
             onDisconnect: "continue",
           });
+          runCreatedAt = nonEmpty(run?.created_at);
         } catch (caught) {
           const notice = getUserLimitNotice(caught);
           if (notice) {
@@ -477,7 +588,8 @@ export function useIngestThread(
           setIngestIdRef.current(threadId);
           return;
         }
-        RUN_STARTS.set(threadId, at);
+        RUN_STARTS.set(threadId, { at, createdAt: runCreatedAt });
+        markBusyInHistory(threadId);
         seedRef.current = {
           threadId,
           snapshot: {
@@ -485,7 +597,7 @@ export function useIngestThread(
             status: "busy",
             updated_at: new Date(at).toISOString(),
             metadata: {
-              ...metadataOf(created),
+              ...rawMetadataOf(created),
               ingest_stage: "queued",
               ingest_status: "queued",
             },
@@ -497,17 +609,17 @@ export function useIngestThread(
         if (mountedRef.current) setStarting(false);
       }
     },
-    [getClient],
+    [addToHistory, getClient, markBusyInHistory],
   );
 
   const runAgain = useCallback(async () => {
     const id = ingestIdRef.current;
-    const current = viewRef.current;
-    if (!id || !current || current.threadId !== id || actionRef.current) return;
-    if (current.busy || current.phase === "running") return;
-    const sourceUrl = current.sourceUrl;
+    const shown = viewRef.current;
+    if (!id || !shown || shown.threadId !== id || actionRef.current) return;
+    if (shown.busy || shown.phase === "running") return;
+    const sourceUrl = shown.sourceUrl;
     if (!sourceUrl) return;
-    const fileName = current.topic.fileName || "topic.json";
+    const fileName = shown.topic.fileName || "topic.json";
     const client = getClient();
     if (!client) {
       setError(CONFIG);
@@ -517,15 +629,46 @@ export function useIngestThread(
     setStarting(true);
     setError(null);
     setLimitNotice(null);
+    const stillHere = () => mountedRef.current && ingestIdRef.current === id;
     const fail = (caught: unknown) => {
       const notice = getUserLimitNotice(caught);
       if (notice) showLimitToast(notice);
-      if (!mountedRef.current || ingestIdRef.current !== id) return;
+      if (!stillHere()) return;
       if (notice) setLimitNotice(notice);
       else setError(actionMessage(caught));
     };
-    const previous = metadataOf(snapshotRef.current);
     try {
+      // Look again first: another tab may have started a run since this one last polled, and
+      // the runtime would queue a second run instead of rejecting it.
+      let latest: IngestThreadSnapshot | undefined;
+      try {
+        const rows = await client.threads.search({
+          ids: [id],
+          limit: 1,
+          select: [...INGEST_POLL_SELECT],
+        });
+        latest = rows[0] as unknown as IngestThreadSnapshot | undefined;
+      } catch (caught) {
+        fail(caught);
+        return;
+      }
+      if (!stillHere()) return;
+      if (!latest) {
+        stopPolling();
+        markNotFound(id);
+        return;
+      }
+      if (latest.status === "busy") {
+        // Busy already: follow that run instead of starting a second one.
+        RUN_STARTS.delete(id);
+        snapshotRef.current = latest;
+        setStartedAt(null);
+        restartPolling(id);
+        commitView(threadToView({ thread: latest }));
+        return;
+      }
+
+      const previous = rawMetadataOf(latest);
       const queued = { ingest_stage: "queued", ingest_status: "queued" };
       try {
         await client.threads.update(id, { metadata: queued });
@@ -534,11 +677,13 @@ export function useIngestThread(
         return;
       }
       const at = Date.now();
+      let runCreatedAt: string | undefined;
       try {
-        await client.runs.create(id, INGEST_GRAPH_ID, {
+        const run = await client.runs.create(id, INGEST_GRAPH_ID, {
           input: { source_url: sourceUrl, file_name: fileName },
           onDisconnect: "continue",
         });
+        runCreatedAt = nonEmpty(run?.created_at);
       } catch (caught) {
         // The run didn't start: put the last result's metadata back (best effort), so the
         // thread keeps showing that result.
@@ -554,27 +699,32 @@ export function useIngestThread(
         fail(caught);
         return;
       }
-      RUN_STARTS.set(id, at);
-      if (!mountedRef.current || ingestIdRef.current !== id) return;
-      fixSeenRef.current = false;
+      RUN_STARTS.set(id, { at, createdAt: runCreatedAt });
+      markBusyInHistory(id);
+      if (!stillHere()) return;
       // Fresh `updated_at`: the last run's would read as stalled (isThreadStalled).
       const snapshot: IngestThreadSnapshot = {
-        ...(snapshotRef.current ?? { thread_id: id }),
+        ...latest,
         status: "busy",
         updated_at: new Date(at).toISOString(),
         metadata: { ...previous, ...queued },
       };
       snapshotRef.current = snapshot;
       setStartedAt(at);
-      commitView(
-        threadToView({ thread: snapshot, fixSeen: false, startedAt: at }),
-      );
       restartPolling(id);
+      commitView(threadToView({ thread: snapshot, fixSeen: false }));
     } finally {
       actionRef.current = false;
       if (mountedRef.current) setStarting(false);
     }
-  }, [commitView, getClient, restartPolling]);
+  }, [
+    commitView,
+    getClient,
+    markBusyInHistory,
+    markNotFound,
+    restartPolling,
+    stopPolling,
+  ]);
 
   const currentView =
     view && ingestId && view.threadId === ingestId ? view : null;

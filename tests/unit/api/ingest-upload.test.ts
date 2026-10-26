@@ -189,6 +189,108 @@ describe("POST /api/ingest/upload", () => {
     const response = await handleIngestUpload(request, { save, env });
     expect(response.status).toBe(413);
     expect(formData).not.toHaveBeenCalled();
+    expect(request.bodyUsed).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A multipart upload sent as a chunked stream: no Content-Length, like a client that streams its
+   * body. `pulled` counts the bytes the route asked for.
+   */
+  function chunkedUpload(parts: { name: string; size: number }) {
+    const boundary = "----e2e-chunked-boundary";
+    const head = new TextEncoder().encode(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${parts.name}"\r\n` +
+        "Content-Type: application/json\r\n\r\n",
+    );
+    const tail = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
+    const chunk = 64 * 1024;
+    const state = { pulled: 0, cancelled: false };
+    let sent = 0;
+    let stage: "head" | "file" | "tail" | "done" = "head";
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        let piece: Uint8Array;
+        if (stage === "head") {
+          piece = head;
+          stage = "file";
+        } else if (stage === "file") {
+          const size = Math.min(chunk, parts.size - sent);
+          piece = new Uint8Array(size).fill(0x20);
+          if (sent === 0) piece[0] = 0x7b; // "{"
+          sent += size;
+          if (sent >= parts.size) {
+            piece[size - 1] = 0x7d; // "}"
+            stage = "tail";
+          }
+        } else if (stage === "tail") {
+          piece = tail;
+          stage = "done";
+        } else {
+          controller.close();
+          return;
+        }
+        state.pulled += piece.byteLength;
+        controller.enqueue(piece);
+      },
+      cancel() {
+        state.cancelled = true;
+      },
+    });
+    const request = new Request("http://app.test/api/ingest/upload", {
+      method: "POST",
+      body: stream,
+      headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    return { request, state };
+  }
+
+  it("refuses a chunked body without Content-Length once it passes the limit, without reading on", async () => {
+    const { save } = fakeSave();
+    const { request, state } = chunkedUpload({
+      name: "huge.json",
+      size: 50 * 1024 * 1024,
+    });
+    expect(request.headers.get("content-length")).toBeNull();
+    const response = await handleIngestUpload(request, { save, env });
+    expect(response.status).toBe(413);
+    expect(await errorOf(response)).toEqual({
+      code: "too_large",
+      message: FILE_MESSAGES.tooLarge,
+    });
+    // It stopped right after the limit (one chunk over at most), instead of buffering 50 MB.
+    expect(state.pulled).toBeGreaterThan(MAX_REQUEST_BYTES);
+    expect(state.pulled).toBeLessThanOrEqual(MAX_REQUEST_BYTES + 128 * 1024);
+    expect(state.cancelled).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("takes a chunked body without Content-Length within the limit", async () => {
+    const { saved, save } = fakeSave();
+    const { request } = chunkedUpload({ name: "streamed.json", size: 300_000 });
+    expect(request.headers.get("content-length")).toBeNull();
+    const response = await handleIngestUpload(request, { save, env });
+    expect(response.status).toBe(200);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.body.byteLength).toBe(300_000);
+  });
+
+  it("counts the bytes even when Content-Length understates them", async () => {
+    const { save } = fakeSave();
+    const { request: streamed } = chunkedUpload({
+      name: "huge.json",
+      size: MAX_REQUEST_BYTES + 1,
+    });
+    const request = new Request(streamed, {
+      headers: {
+        "content-type": streamed.headers.get("content-type")!,
+        "content-length": "1000",
+      },
+    });
+    expect(request.headers.get("content-length")).toBe("1000");
+    const response = await handleIngestUpload(request, { save, env });
+    expect(response.status).toBe(413);
     expect(save).not.toHaveBeenCalled();
   });
 
