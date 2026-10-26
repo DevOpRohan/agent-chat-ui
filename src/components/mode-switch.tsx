@@ -1,23 +1,38 @@
 "use client";
 
-import { type KeyboardEvent, useRef } from "react";
+import { type KeyboardEvent, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { APP_MODES, useAppMode } from "@/lib/app-mode";
+import { APP_MODES, type AppModeId, useAppMode } from "@/lib/app-mode";
 import { cn } from "@/lib/utils";
 
 const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown"]);
 const PREVIOUS_KEYS = new Set(["ArrowLeft", "ArrowUp"]);
+
+/**
+ * The mode chosen from the keyboard, until its radio has focus. Each mode's top bar renders its own
+ * switch, so the switch that receives the focus may be a new one, mounted after the change.
+ */
+let focusAfterSwitch: AppModeId | null = null;
 
 /** Crafter | Ingester switch: a radio group with a roving tab stop. */
 export function ModeSwitch(props?: { className?: string }) {
   const { mode, setMode } = useAppMode();
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
+  useEffect(() => {
+    if (focusAfterSwitch !== mode.id) return;
+    focusAfterSwitch = null;
+    optionRefs.current[APP_MODES.findIndex((m) => m.id === mode.id)]?.focus();
+  }, [mode.id]);
+
   const selectAt = (index: number) => {
     const count = APP_MODES.length;
     const nextIndex = ((index % count) + count) % count;
     const next = APP_MODES[nextIndex];
-    if (next.id !== mode.id) setMode(next.id);
+    if (next.id !== mode.id) {
+      focusAfterSwitch = next.id;
+      setMode(next.id);
+    }
     optionRefs.current[nextIndex]?.focus();
   };
 
