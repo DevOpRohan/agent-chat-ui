@@ -47,6 +47,8 @@ export type IngestThreadStatus = "idle" | "busy" | "interrupted" | "error";
  * `ingest_file_name`, `ingest_source_url`, and `ingest_stage`/`ingest_status` = "queued".
  * The graph writes `ingest_stage`, `ingest_status`, `topic_name`, `question_sets`, `questions`.
  * The server and auth.py write `graph_id`, `assistant_id`, `owner_id`.
+ * "Run again" first sets `ingest_stage`/`ingest_status` back to "queued" (`threads.update`), then
+ * starts the run: a final status left by the last run would otherwise read as "already finished".
  */
 export interface IngestThreadMetadata {
   graph_id?: string;
