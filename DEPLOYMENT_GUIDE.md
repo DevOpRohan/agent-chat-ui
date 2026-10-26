@@ -48,6 +48,7 @@ These are baked into the Docker image at build time. **`NEXT_PUBLIC_*` variables
 | `NEXT_PUBLIC_AUTH_MODE` | Optional auth mode. Set to `iap` to enable IAP-backed JWT flow and hide the API key UI. | `iap` |
 | `NEXT_PUBLIC_MODEL_PROVIDER` | `OPENAI` or `GOOGLE` — controls client-side behavior. | `OPENAI` |
 | `NEXT_PUBLIC_AGENT_RECURSION_LIMIT` | Max agent recursion depth (defaults to 50). | `50` |
+| `NEXT_PUBLIC_TOPICCRAFTER_SKILL_URL` | Optional. An external http(s) link for the TopicCrafter skill in Ingester's "New here?" panel. Unset means the bundled `public/skill/TopicCrafter-v0.1.0.zip`. The Dockerfile has no `ARG` for it yet, so images built from it always use the bundled zip. | _(unset)_ |
 
 The Dockerfile accepts these as build args and sets them during the build.
 
@@ -65,7 +66,9 @@ In Cloud Run Console: **Service → Edit & Deploy New Revision → Variables & S
 | `LANGGRAPH_AUTH_JWT_ISSUER` | Issuer claim for LangGraph JWTs minted by `/api/auth/token`. | **Yes** (if using IAP) | - |
 | `LANGGRAPH_AUTH_JWT_AUDIENCE` | Audience claim for LangGraph JWTs minted by `/api/auth/token`. | **Yes** (if using IAP) | - |
 | `MODEL_PROVIDER` | Server-side provider (`OPENAI` or `GOOGLE`). Controls PDF handling behavior. | **Yes** | - |
-| `GCS_BUCKET_NAME` | GCS bucket name for file storage/uploads. | **Yes** | - |
+| `GCS_BUCKET_NAME` | GCS bucket name for file storage/uploads. Ingester's `/api/ingest/upload` also saves topic `.json` files here as `topic-ingest/<uuid>.json`. | **Yes** | - |
+| `TOPIC_JSON_ALLOWED_HOSTS` | Ingester: hosts `/api/topic-file` may download topic `.json`/`.md` files from (exact host, or `.suffix`). | No | `storage.googleapis.com,.amazonaws.com` |
+| `TOPIC_JSON_ALLOWED_BUCKETS` | Ingester: buckets `/api/topic-file` may download from; `GCS_BUCKET_NAME` is always added. | No | `transferredv2-cerebry-ai-topic-jsons` |
 | `NEXT_PUBLIC_MODEL_PROVIDER` | Duplicated at runtime for server-side access. | No | - |
 | `OPENAI_FILES_PURPOSE` | OpenAI Files API purpose parameter. | No | `assistants` |
 | `OPENAI_FILES_EXPIRES_AFTER_ANCHOR` | Expiry anchor for OpenAI files. | No | `created_at` |
@@ -353,6 +356,18 @@ gcloud run logs read --service agent-chat-ui --region asia-south1 --limit 50
 | `gcloud crashed (AttributeError)` | Conflicting gcloud installations | Remove old `~/google-cloud-sdk` and use Homebrew version |
 
 ---
+
+## Ingester mode (Crafter | Ingester)
+
+Ingester needs no new secrets and no new required variables. Before deploying a UI revision with it:
+
+- **Backend first.** The LangGraph deployment the image points at must serve the `topic_ingest` graph (QuestionCrafterAgent `topic_import/ingest_graph.py`). Dev follows the backend `develop` branch; prod follows `main`, so prod needs the backend release first.
+- **Bucket.** Topic files are saved to `GCS_BUCKET_NAME` under `topic-ingest/` and read by the backend over plain https, so the bucket's public read (below) must cover them, as it does for chat uploads. The service account needs the same write access it already has for `/api/upload`.
+- **Downloads.** Fixed topics are saved by the backend's artifacts lane (S3 `transferredv2-cerebry-ai-topic-jsons` by default), so the defaults of `TOPIC_JSON_ALLOWED_HOSTS`/`TOPIC_JSON_ALLOWED_BUCKETS` allow that bucket and `GCS_BUCKET_NAME`. Change them only if the backend's storage changes.
+- **No OpenAI.** `/api/ingest/upload` never calls OpenAI; `OPENAI_*` settings are not used by Ingester.
+- **Progress without metadata.** The graph's thread-metadata writes don't persist on the deployed LangGraph (Postgres) runtime, so the UI reads progress from `threads.getState().next` and the end of a run from `runs.list`. Nothing to configure; if those writes start working, the UI uses them.
+- **CORS.** The browser calls LangGraph directly, as for chats: the UI's origin must be in the backend's `http.cors.allow_origins` (the develop tag and production origins already are).
+- **Rollback.** Crafter depends on the new code only through the per-mode history filter. Promote the previous revision to roll back; `topic_ingest` can stay registered on the backend.
 
 ## GCS Bucket Access
 
