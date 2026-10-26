@@ -304,16 +304,25 @@ export function useIngestThread(
     ]);
   }, []);
 
-  /** Shows the history row as busy (its spinner) until the list's own poll catches up. */
-  const markBusyInHistory = useCallback((threadId: string) => {
-    setThreadsRef.current((previous) =>
-      previous.some((item) => item.thread_id === threadId)
-        ? previous.map((item) =>
-            item.thread_id === threadId ? { ...item, status: "busy" } : item,
-          )
-        : previous,
-    );
-  }, []);
+  /** Sets the history row's status (its spinner) until the list's own poll catches up. */
+  const setHistoryStatus = useCallback(
+    (threadId: string, status: Thread["status"]) => {
+      setThreadsRef.current((previous) =>
+        previous.some(
+          (item) => item.thread_id === threadId && item.status !== status,
+        )
+          ? previous.map((item) =>
+              item.thread_id === threadId ? { ...item, status } : item,
+            )
+          : previous,
+      );
+    },
+    [],
+  );
+  const markBusyInHistory = useCallback(
+    (threadId: string) => setHistoryStatus(threadId, "busy"),
+    [setHistoryStatus],
+  );
 
   // The poll machine. Refs only, so the functions below never go stale.
   const schedule = useCallback((session: number, ms: number) => {
@@ -419,6 +428,9 @@ export function useIngestThread(
       stoppedRef.current = true;
       failuresRef.current = 0;
       setError(null);
+      // The run has ended, so the row's spinner stops now, not at the list's next poll.
+      if (thread.status !== "busy")
+        setHistoryStatus(id, thread.status as Thread["status"]);
       commitView(
         threadToView({
           thread,
