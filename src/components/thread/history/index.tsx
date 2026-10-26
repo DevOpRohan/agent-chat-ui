@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { THREAD_HISTORY_PAGE_SIZE, useThreads } from "@/providers/Thread";
+import { THREAD_HISTORY_PAGE_SIZE, useModeThreads } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
 import {
   UIEvent,
@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { type AppModeId, useAppMode, useModeThreadId } from "@/lib/app-mode";
 import { THREAD_HISTORY_ENABLED } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +39,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
+const NO_SEEN_ATTENTION_STATUS: Record<string, string> = {};
 const POLL_INTERVAL_IDLE_MS = 15000;
 const POLL_INTERVAL_ACTIVE_MS = 5000;
 const LOAD_MORE_THRESHOLD_PX = 120;
@@ -375,8 +377,11 @@ function ThreadHistoryLoading() {
 
 export default function ThreadHistory() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-  const [threadId, setThreadId] = useQueryState("threadId");
-  const currentThreadId = threadId ?? null;
+  // One component draws every mode's list; the list, the active item and the
+  // New action all come from the current mode, so the lists never mix.
+  const { mode } = useAppMode();
+  const modeId = mode.id;
+  const [currentThreadId, setCurrentThreadId] = useModeThreadId(mode);
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
@@ -389,7 +394,7 @@ export default function ThreadHistory() {
     setThreads,
     threadsLoading,
     setThreadsLoading,
-  } = useThreads();
+  } = useModeThreads(modeId);
   const { lastSeenByThreadId, baselineMs, markSeen } = useThreadLastSeen();
   const historyDisabled = !THREAD_HISTORY_ENABLED;
   const [isPageVisible, setIsPageVisible] = useState(() =>
@@ -397,7 +402,11 @@ export default function ThreadHistory() {
   );
   const isHistoryVisible = !historyDisabled && !!chatHistoryOpen;
 
-  const hasLoadedRef = useRef(false);
+  const loadedModeIdsRef = useRef(new Set<AppModeId>());
+  const pagingModeIdRef = useRef(modeId);
+  // Bumped on every mode change; replies to requests from before it leave the
+  // paging state alone.
+  const pagingGenerationRef = useRef(0);
   const threadFetchLimitRef = useRef(THREAD_HISTORY_PAGE_SIZE);
   const loadMoreInFlightRef = useRef(false);
   const [threadsHasMore, setThreadsHasMore] = useState(true);
@@ -405,8 +414,11 @@ export default function ThreadHistory() {
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
-  const [seenAttentionStatusByThreadId, setSeenAttentionStatusByThreadId] =
-    useState<Record<string, string>>({});
+  const [seenAttentionStatusByMode, setSeenAttentionStatusByMode] = useState<
+    Partial<Record<AppModeId, Record<string, string>>>
+  >({});
+  const seenAttentionStatusByThreadId =
+    seenAttentionStatusByMode[modeId] ?? NO_SEEN_ATTENTION_STATUS;
 
   const resetRename = useCallback(() => {
     setEditingThreadId(null);
@@ -416,19 +428,32 @@ export default function ThreadHistory() {
   const markAttentionStatusSeen = useCallback(
     (targetThreadId: string, statusKey: string | null) => {
       if (!statusKey) return;
-      setSeenAttentionStatusByThreadId((previous) =>
-        previous[targetThreadId] === statusKey
+      setSeenAttentionStatusByMode((previous) => {
+        const seen = previous[modeId] ?? NO_SEEN_ATTENTION_STATUS;
+        return seen[targetThreadId] === statusKey
           ? previous
-          : { ...previous, [targetThreadId]: statusKey },
-      );
+          : { ...previous, [modeId]: { ...seen, [targetThreadId]: statusKey } };
+      });
     },
-    [],
+    [modeId],
   );
 
   const handleNewThread = useCallback(() => {
-    setThreadId(null);
+    setCurrentThreadId(null);
     resetRename();
-  }, [resetRename, setThreadId]);
+  }, [resetRename, setCurrentThreadId]);
+
+  // Declared before the fetch effects so a mode change resets paging first.
+  useEffect(() => {
+    if (pagingModeIdRef.current === modeId) return;
+    pagingModeIdRef.current = modeId;
+    pagingGenerationRef.current += 1;
+    threadFetchLimitRef.current = THREAD_HISTORY_PAGE_SIZE;
+    loadMoreInFlightRef.current = false;
+    setThreadsHasMore(true);
+    setThreadsLoadingMore(false);
+    resetRename();
+  }, [modeId, resetRename]);
 
   const startRenameThread = useCallback((thread: Thread) => {
     setEditingThreadId(thread.thread_id);
@@ -529,6 +554,7 @@ export default function ThreadHistory() {
         limit ?? threadFetchLimitRef.current,
         THREAD_HISTORY_PAGE_SIZE,
       );
+      const generation = pagingGenerationRef.current;
       if (withLoading) setThreadsLoading(true);
       try {
         const nextThreads = await getThreads({ limit: fetchLimit, offset: 0 });
@@ -537,7 +563,9 @@ export default function ThreadHistory() {
             ? prevThreads
             : nextThreads,
         );
-        setThreadsHasMore(nextThreads.length >= fetchLimit);
+        if (generation === pagingGenerationRef.current) {
+          setThreadsHasMore(nextThreads.length >= fetchLimit);
+        }
         return true;
       } catch (error) {
         console.error(error);
@@ -555,6 +583,7 @@ export default function ThreadHistory() {
     if (!threadsHasMore) return;
     if (loadMoreInFlightRef.current) return;
 
+    const generation = pagingGenerationRef.current;
     const previousLimit = threadFetchLimitRef.current;
     const nextLimit = previousLimit + THREAD_HISTORY_PAGE_SIZE;
     threadFetchLimitRef.current = nextLimit;
@@ -566,6 +595,7 @@ export default function ThreadHistory() {
       limit: nextLimit,
     });
 
+    if (generation !== pagingGenerationRef.current) return;
     if (!loaded) {
       threadFetchLimitRef.current = previousLimit;
     }
@@ -614,9 +644,9 @@ export default function ThreadHistory() {
 
   useEffect(() => {
     if (!isHistoryVisible || !isPageVisible) return;
-    refreshThreads({ withLoading: !hasLoadedRef.current });
-    hasLoadedRef.current = true;
-  }, [isHistoryVisible, isPageVisible, refreshThreads]);
+    refreshThreads({ withLoading: !loadedModeIdsRef.current.has(modeId) });
+    loadedModeIdsRef.current.add(modeId);
+  }, [isHistoryVisible, isPageVisible, modeId, refreshThreads]);
 
   useEffect(() => {
     if (!isHistoryVisible) return;
@@ -674,7 +704,9 @@ export default function ThreadHistory() {
   ]);
 
   useEffect(() => {
-    setSeenAttentionStatusByThreadId((previous) => {
+    setSeenAttentionStatusByMode((previousByMode) => {
+      const previous = previousByMode[modeId];
+      if (!previous) return previousByMode;
       const threadIds = new Set(threads.map((thread) => thread.thread_id));
       let changed = false;
       const next: Record<string, string> = {};
@@ -685,9 +717,9 @@ export default function ThreadHistory() {
         }
         changed = true;
       }
-      return changed ? next : previous;
+      return changed ? { ...previousByMode, [modeId]: next } : previousByMode;
     });
-  }, [threads]);
+  }, [modeId, threads]);
 
   useEffect(() => {
     if (!editingThreadId) return;
@@ -704,7 +736,7 @@ export default function ThreadHistory() {
       <div className="shadow-inner-right border-border hidden h-screen w-full shrink-0 flex-col items-start justify-start gap-6 border-r-[1px] lg:flex">
         <div className="flex w-full items-center justify-between px-4 pt-1.5">
           <h1 className="text-left text-xl font-semibold tracking-tight">
-            Chat History
+            History
           </h1>
           <div className="flex items-center gap-1">
             <Button
@@ -739,7 +771,7 @@ export default function ThreadHistory() {
           <ThreadList
             threads={threads}
             currentThreadId={currentThreadId}
-            setThreadId={setThreadId}
+            setThreadId={setCurrentThreadId}
             lastSeenByThreadId={lastSeenByThreadId}
             baselineMs={baselineMs}
             seenAttentionStatusByThreadId={seenAttentionStatusByThreadId}
@@ -772,7 +804,7 @@ export default function ThreadHistory() {
           >
             <SheetHeader className="space-y-0">
               <div className="flex items-center justify-between">
-                <SheetTitle>Chat History</SheetTitle>
+                <SheetTitle>History</SheetTitle>
                 <Button
                   className="text-muted-foreground hover:text-accent-foreground hover:bg-accent h-8 gap-1.5 px-2"
                   variant="ghost"
@@ -792,7 +824,7 @@ export default function ThreadHistory() {
               <ThreadList
                 threads={threads}
                 currentThreadId={currentThreadId}
-                setThreadId={setThreadId}
+                setThreadId={setCurrentThreadId}
                 lastSeenByThreadId={lastSeenByThreadId}
                 baselineMs={baselineMs}
                 seenAttentionStatusByThreadId={seenAttentionStatusByThreadId}

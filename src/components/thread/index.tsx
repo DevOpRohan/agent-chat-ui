@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
 import {
   Component,
+  type ComponentType,
+  type DragEvent,
   type ErrorInfo,
   FormEvent,
   KeyboardEvent,
@@ -63,6 +65,10 @@ import {
 import { useTheme } from "next-themes";
 import { ThreadSettings } from "./thread-settings";
 import { getContentString } from "./utils";
+import { ModeSwitch } from "../mode-switch";
+import { IngestPane } from "../ingester/ingest-pane";
+import { type AppPane, useAppMode, useModeThreadId } from "@/lib/app-mode";
+import { ThreadModeScope } from "@/providers/Thread";
 
 function showThreadRunningToast() {
   toast("Thread is still running", {
@@ -362,10 +368,7 @@ class MessageRenderBoundary extends Component<
   }
 
   componentDidUpdate(previousProps: MessageRenderBoundaryProps) {
-    if (
-      previousProps.resetKey !== this.props.resetKey &&
-      this.state.hasError
-    ) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.hasError) {
       this.setState({ hasError: false });
     }
   }
@@ -421,6 +424,30 @@ function ScrollToBottom(props: { className?: string }) {
 
 const ENTER_TO_SEND_STORAGE_KEY = "lg:chat:enterToSend";
 
+/**
+ * Panes other than the chat, keyed by `AppMode.pane`. The chat pane is drawn
+ * inline in `Thread` because it shares the shell's state. Each pane fills the
+ * main column below the shared top bar.
+ */
+const MODE_PANES: Record<
+  Exclude<AppPane, "chat">,
+  { Pane: ComponentType; testId: string }
+> = {
+  ingest: { Pane: IngestPane, testId: "pane-ingest" },
+};
+
+// The chat composer's upload hook listens for file drops on `window`. Outside
+// the chat, the shell stops file drags at its root so a dropped file never
+// lands in the hidden chat draft; panes handle drops on their own elements.
+function containFileDrag(event: DragEvent<HTMLDivElement>) {
+  event.stopPropagation();
+}
+
+function containFileDrop(event: DragEvent<HTMLDivElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 export function Thread() {
   const runtime = useThreadRuntime();
   const { resolvedTheme } = useTheme();
@@ -430,6 +457,10 @@ export function Thread() {
   const [manualArtifactOpen, setManualArtifactOpen] = useState(false);
 
   const [threadId, _setThreadId] = useQueryState("threadId");
+  const { mode } = useAppMode();
+  const [, setModeItemId] = useModeThreadId(mode);
+  const modePane = mode.pane === "chat" ? null : MODE_PANES[mode.pane];
+  const isChatPane = modePane === null;
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
@@ -537,7 +568,8 @@ export function Thread() {
     }
     return ids;
   }, [runtime.values.ui]);
-  const artifactPaneOpen = artifactOpen || manualArtifactOpen;
+  // The artifact pane belongs to the chat; other panes lay out without it.
+  const artifactPaneOpen = isChatPane && (artifactOpen || manualArtifactOpen);
   const isIframeArtifactSurface = artifactSurfaceMode === "iframe";
   const isArtifactExpandedMode =
     isLargeScreen && artifactPaneOpen && artifactExpanded;
@@ -549,7 +581,10 @@ export function Thread() {
   const isPaneDragActive = paneDragState.type !== "none";
 
   useEffect(() => {
-    if (threadId && displayMessages.length !== previousMessageLengthRef.current) {
+    if (
+      threadId &&
+      displayMessages.length !== previousMessageLengthRef.current
+    ) {
       markThreadSeen(threadId, Date.now());
     }
 
@@ -788,11 +823,15 @@ export function Thread() {
     event.preventDefault();
     if (isUploading) return;
     if (unverifiedPdfPages) {
-      toast.error("Remove and reattach the PDFs so their page count can be verified before sending.");
+      toast.error(
+        "Remove and reattach the PDFs so their page count can be verified before sending.",
+      );
       return;
     }
     if (pdfPages > MAX_PDF_PAGES) {
-      toast.error(`PDF attachments contain ${pdfPages} pages; maximum ${MAX_PDF_PAGES} combined. Remove extra pages or attachments before sending.`);
+      toast.error(
+        `PDF attachments contain ${pdfPages} pages; maximum ${MAX_PDF_PAGES} combined. Remove extra pages or attachments before sending.`,
+      );
       return;
     }
     if (
@@ -900,7 +939,7 @@ export function Thread() {
             <code>
               {String(
                 typeof error === "object" && error && "message" in error
-                  ? (error as { message?: unknown }).message ?? error
+                  ? ((error as { message?: unknown }).message ?? error)
                   : error,
               )}
             </code>
@@ -1073,7 +1112,9 @@ export function Thread() {
         return (
           <div
             key={String(message.id ?? `${message.type}-${index}`)}
-            data-conversation-turn={message.type === "human" ? index : undefined}
+            data-conversation-turn={
+              message.type === "human" ? index : undefined
+            }
             className={cn(
               "max-w-[min(100%,72ch)] rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap",
               message.type === "human"
@@ -1092,19 +1133,82 @@ export function Thread() {
       ) : null}
     </div>
   );
-  const showWorkingBadge = effectiveIsLoading || isThreadActiveStatus(runtime.threadStatus);
+  const showWorkingBadge =
+    effectiveIsLoading || isThreadActiveStatus(runtime.threadStatus);
   const logoVariant = resolvedTheme === "dark" ? "dark" : "light";
   const desktopHistoryWidth = showDesktopHistoryPane ? historyWidthPx : 0;
   const desktopMainGridTemplate = isLargeScreen
-    ? isArtifactExpandedMode
-      ? "0px 0px minmax(0,1fr)"
-      : artifactPaneOpen
-        ? `minmax(0,1fr) ${RESIZE_HANDLE_WIDTH_PX}px ${artifactWidthPx}px`
-        : "minmax(0,1fr) 0px 0px"
+    ? !isChatPane
+      ? "minmax(0,1fr)"
+      : isArtifactExpandedMode
+        ? "0px 0px minmax(0,1fr)"
+        : artifactPaneOpen
+          ? `minmax(0,1fr) ${RESIZE_HANDLE_WIDTH_PX}px ${artifactWidthPx}px`
+          : "minmax(0,1fr) 0px 0px"
     : undefined;
   const mobileMainGridClasses = cn(
     "grid-cols-[1fr_0fr] transition-all duration-500",
     artifactPaneOpen && "grid-cols-[3fr_2fr]",
+  );
+  const historyToggle = (!chatHistoryOpen || !isLargeScreen) && (
+    <Button
+      data-testid="chat-history-toggle"
+      className="hover:bg-accent"
+      variant="ghost"
+      onClick={() => setChatHistoryOpen((previous) => !previous)}
+    >
+      {chatHistoryOpen ? (
+        <PanelRightOpen className="size-5" />
+      ) : (
+        <PanelRightClose className="size-5" />
+      )}
+    </Button>
+  );
+  // The bar of a started chat; other panes always show it. The logo starts
+  // a new item in the current mode.
+  const topBar = (
+    <div className="relative z-10 flex items-center gap-3 p-2">
+      <div className="relative flex min-w-0 items-center justify-start gap-2">
+        <div className="absolute left-0 z-10">{historyToggle}</div>
+        <motion.button
+          className="flex min-w-0 cursor-pointer items-center gap-2"
+          onClick={() => (isChatPane ? setThreadId(null) : setModeItemId(null))}
+          animate={{
+            marginLeft: !chatHistoryOpen ? 48 : 0,
+          }}
+          transition={{
+            damping: 30,
+            stiffness: 300,
+            type: "spring",
+          }}
+        >
+          <QuestionCrafterLogoSVG
+            width={40}
+            height={40}
+            variant={logoVariant}
+          />
+          <span className="truncate text-xl font-semibold tracking-tight">
+            Question Crafter
+          </span>
+        </motion.button>
+      </div>
+      <ModeSwitch />
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {isChatPane ? (
+          <>
+            <div ref={setNavigatorTriggerContainer} />
+            <ThreadSettings
+              enterToSend={enterToSend}
+              onEnterToSendChange={setEnterToSend}
+            />
+          </>
+        ) : (
+          <ThreadSettings />
+        )}
+      </div>
+
+      <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
+    </div>
   );
 
   return (
@@ -1113,7 +1217,19 @@ export function Thread() {
         "flex h-screen w-full overflow-hidden",
         isPaneDragActive && "cursor-col-resize",
       )}
+      onDragEnter={isChatPane ? undefined : containFileDrag}
+      onDragLeave={isChatPane ? undefined : containFileDrag}
+      onDrop={isChatPane ? undefined : containFileDrop}
     >
+      {!isChatPane ? (
+        // use-file-upload binds its window listeners once, on mount, and only
+        // when its drop target exists; this keeps the chat's drag and drop
+        // working when the page opens in another mode.
+        <div
+          ref={dropRef}
+          hidden
+        />
+      ) : null}
       <div
         data-testid="pane-history"
         className="relative hidden shrink-0 overflow-hidden border-r lg:flex"
@@ -1135,7 +1251,9 @@ export function Thread() {
             ? "cursor-col-resize"
             : "pointer-events-none opacity-0",
         )}
-        style={{ width: showDesktopHistoryHandle ? RESIZE_HANDLE_WIDTH_PX : 0 }}
+        style={{
+          width: showDesktopHistoryHandle ? RESIZE_HANDLE_WIDTH_PX : 0,
+        }}
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize history and chat panes"
@@ -1170,7 +1288,8 @@ export function Thread() {
         <div
           className={cn(
             "grid h-full w-full",
-            !isLargeScreen && mobileMainGridClasses,
+            !isLargeScreen &&
+              (isChatPane ? mobileMainGridClasses : "grid-cols-1"),
           )}
           style={
             isLargeScreen
@@ -1178,405 +1297,381 @@ export function Thread() {
               : undefined
           }
         >
-          <div
-            data-testid="pane-chat"
-            className={cn(
-              "relative flex min-w-0 flex-col overflow-hidden",
-              !chatStarted && "grid-rows-[1fr]",
-              isArtifactExpandedMode && "pointer-events-none opacity-0",
-            )}
-            aria-hidden={isArtifactExpandedMode ? "true" : undefined}
-          >
-            {!chatStarted && (
-              <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
-                <div>
-                  {(!chatHistoryOpen || !isLargeScreen) && (
-                    <Button
-                      data-testid="chat-history-toggle"
-                      className="hover:bg-accent"
-                      variant="ghost"
-                      onClick={() => setChatHistoryOpen((previous) => !previous)}
-                    >
-                      {chatHistoryOpen ? (
-                        <PanelRightOpen className="size-5" />
-                      ) : (
-                        <PanelRightClose className="size-5" />
-                      )}
-                    </Button>
-                  )}
-                </div>
-                <ThreadSettings
-                  enterToSend={enterToSend}
-                  onEnterToSendChange={setEnterToSend}
-                />
+          {modePane ? (
+            <div
+              data-testid={modePane.testId}
+              className="relative flex min-w-0 flex-col overflow-hidden"
+            >
+              {topBar}
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                <ThreadModeScope modeId={mode.id}>
+                  <modePane.Pane />
+                </ThreadModeScope>
               </div>
-            )}
-            {chatStarted && (
-              <div className="relative z-10 flex items-center gap-3 p-2">
-                <div className="relative flex min-w-0 items-center justify-start gap-2">
-                  <div className="absolute left-0 z-10">
-                    {(!chatHistoryOpen || !isLargeScreen) && (
-                      <Button
-                        data-testid="chat-history-toggle"
-                        className="hover:bg-accent"
-                        variant="ghost"
-                        onClick={() => setChatHistoryOpen((previous) => !previous)}
-                      >
-                        {chatHistoryOpen ? (
-                          <PanelRightOpen className="size-5" />
-                        ) : (
-                          <PanelRightClose className="size-5" />
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                  <motion.button
-                    className="flex min-w-0 cursor-pointer items-center gap-2"
-                    onClick={() => setThreadId(null)}
-                    animate={{
-                      marginLeft: !chatHistoryOpen ? 48 : 0,
-                    }}
-                    transition={{
-                      damping: 30,
-                      stiffness: 300,
-                      type: "spring",
-                    }}
-                  >
-                    <QuestionCrafterLogoSVG
-                      width={40}
-                      height={40}
-                      variant={logoVariant}
+            </div>
+          ) : (
+            <>
+              <div
+                data-testid="pane-chat"
+                className={cn(
+                  "relative flex min-w-0 flex-col overflow-hidden",
+                  !chatStarted && "grid-rows-[1fr]",
+                  isArtifactExpandedMode && "pointer-events-none opacity-0",
+                )}
+                aria-hidden={isArtifactExpandedMode ? "true" : undefined}
+              >
+                {!chatStarted && (
+                  <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
+                    <div className="flex items-center gap-2">
+                      {historyToggle}
+                      <ModeSwitch />
+                    </div>
+                    <ThreadSettings
+                      enterToSend={enterToSend}
+                      onEnterToSendChange={setEnterToSend}
                     />
-                    <span className="truncate text-xl font-semibold tracking-tight">
-                      Question Crafter
-                    </span>
-                  </motion.button>
-                </div>
-                <div className="ml-auto flex shrink-0 items-center gap-1">
-                  <div ref={setNavigatorTriggerContainer} />
-                  <ThreadSettings
-                    enterToSend={enterToSend}
-                    onEnterToSendChange={setEnterToSend}
+                  </div>
+                )}
+                {chatStarted && topBar}
+
+                <StickToBottom className="relative flex-1 overflow-hidden">
+                  <StickyToBottomContent
+                    className={cn(
+                      "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 absolute inset-0 overflow-x-hidden overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
+                      !chatStarted &&
+                        "mt-[clamp(4rem,20vh,25vh)] flex flex-col items-stretch",
+                      chatStarted && "grid grid-rows-[1fr_auto]",
+                      conversationRailVisible && "pl-16",
+                    )}
+                    contentClassName="pt-8 pb-16 max-w-3xl min-w-0 mx-auto flex w-full flex-col gap-4"
+                    content={
+                      <MessageRenderBoundary
+                        resetKey={messageRenderResetKey}
+                        fallback={messageRenderFallback}
+                      >
+                        <>
+                          {visibleMessages.map((message, index) =>
+                            message.type === "human" ? (
+                              <div
+                                key={message.id || `${message.type}-${index}`}
+                                data-conversation-turn={index}
+                                className="min-w-0"
+                              >
+                                <HumanMessage
+                                  message={message}
+                                  isLoading={effectiveIsLoading}
+                                />
+                              </div>
+                            ) : (
+                              <AssistantMessage
+                                key={message.id || `${message.type}-${index}`}
+                                message={message}
+                                allMessages={displayMessages}
+                                isLoading={effectiveIsLoading}
+                                handleRegenerate={handleRegenerate}
+                                interrupt={runtime.interrupt}
+                                getMessagesMetadata={
+                                  runtime.getMessagesMetadata
+                                }
+                                onSelectBranch={runtime.setBranch}
+                                hasCustomComponentsForMessage={
+                                  !!message.id &&
+                                  uiMessageIdsByMessageId.has(message.id)
+                                }
+                              />
+                            ),
+                          )}
+                          {hasNoAIOrToolMessages && !!runtime.interrupt && (
+                            <AssistantMessage
+                              key="interrupt-msg"
+                              message={undefined}
+                              allMessages={displayMessages}
+                              isLoading={effectiveIsLoading}
+                              handleRegenerate={handleRegenerate}
+                              interrupt={runtime.interrupt}
+                              getMessagesMetadata={runtime.getMessagesMetadata}
+                              onSelectBranch={runtime.setBranch}
+                              hasCustomComponentsForMessage={false}
+                            />
+                          )}
+                          {showWorkingBadge && hasNoAIOrToolMessages ? (
+                            <AssistantMessageLoading />
+                          ) : null}
+                        </>
+                      </MessageRenderBoundary>
+                    }
+                    footer={
+                      <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 flex flex-col items-center gap-8 backdrop-blur">
+                        {!chatStarted && (
+                          <div className="flex items-center gap-3">
+                            <QuestionCrafterLogoSVG
+                              className="h-10 flex-shrink-0"
+                              variant={logoVariant}
+                            />
+                            <h1 className="text-2xl font-semibold tracking-tight">
+                              Question Crafter
+                            </h1>
+                          </div>
+                        )}
+
+                        <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
+
+                        {showWorkingBadge ? (
+                          <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
+                            <p
+                              data-testid="thread-working-status"
+                              className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
+                              aria-live="polite"
+                            >
+                              <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
+                              Working on your query...
+                            </p>
+                          </div>
+                        ) : null}
+                        {visibleStatusWarning ? (
+                          <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
+                            <p
+                              data-testid="thread-status-warning"
+                              className="inline-flex max-w-full items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-100"
+                              aria-live="polite"
+                            >
+                              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                              <span className="whitespace-normal">
+                                <strong>{visibleStatusWarning.title}:</strong>{" "}
+                                {visibleStatusWarning.description}
+                              </span>
+                            </p>
+                          </div>
+                        ) : null}
+                        <div
+                          ref={dropRef}
+                          className={cn(
+                            "bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
+                            dragOver
+                              ? "border-primary border-2 border-dotted"
+                              : "border border-solid",
+                          )}
+                        >
+                          <form
+                            onSubmit={handleSubmit}
+                            className="mx-auto flex max-h-[min(55vh,34rem)] max-w-3xl flex-col gap-2 overflow-hidden"
+                          >
+                            <div className="min-h-0 overflow-y-auto">
+                              <ContentBlocksPreview
+                                blocks={contentBlocks}
+                                onRemove={removeBlock}
+                              />
+                              <textarea
+                                value={input}
+                                onChange={(event) =>
+                                  setInput(event.target.value)
+                                }
+                                onPaste={handlePaste}
+                                onKeyDown={(event) => {
+                                  if (
+                                    event.key === "Enter" &&
+                                    !event.nativeEvent.isComposing &&
+                                    ((!event.shiftKey && enterToSend) ||
+                                      ((event.metaKey || event.ctrlKey) &&
+                                        !enterToSend))
+                                  ) {
+                                    event.preventDefault();
+                                    const element = event.target as
+                                      | HTMLElement
+                                      | undefined;
+                                    const form = element?.closest("form");
+                                    form?.requestSubmit();
+                                  }
+                                }}
+                                placeholder="Type your message..."
+                                className="field-sizing-content max-h-[40vh] min-h-[3.5rem] w-full resize-none overflow-y-auto border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="flex shrink-0 items-center gap-6 p-2 pt-4">
+                              <Label
+                                htmlFor="file-input"
+                                className={cn(
+                                  "flex items-center gap-2",
+                                  isUploading
+                                    ? "cursor-wait"
+                                    : "cursor-pointer",
+                                )}
+                                aria-disabled={isUploading}
+                              >
+                                <Plus className="text-muted-foreground size-5" />
+                                <span className="text-muted-foreground flex flex-col text-sm">
+                                  <span>Upload PDF or Image</span>
+                                  <span
+                                    className="text-xs"
+                                    aria-live="polite"
+                                    data-testid="attachment-counts"
+                                  >
+                                    {attachmentCounts.images}/
+                                    {MAX_IMAGE_ATTACHMENTS} images ·{" "}
+                                    {attachmentCounts.pdfs}/
+                                    {MAX_PDF_ATTACHMENTS} PDFs
+                                  </span>
+                                  <span
+                                    className="text-xs"
+                                    aria-live="polite"
+                                    data-testid="pdf-page-count"
+                                  >
+                                    {unverifiedPdfPages
+                                      ? "Reattach PDFs to verify pages"
+                                      : checkingPdfPages
+                                        ? "Checking PDF pages…"
+                                        : `${pdfPages}/${MAX_PDF_PAGES} PDF pages`}
+                                  </span>
+                                </span>
+                                {isUploading && (
+                                  <span className="text-muted-foreground ml-2 flex items-center gap-2 text-sm">
+                                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                                    <span className="sr-only sm:not-sr-only">
+                                      Uploading...
+                                    </span>
+                                  </span>
+                                )}
+                              </Label>
+                              <input
+                                id="file-input"
+                                type="file"
+                                onChange={handleFileUpload}
+                                multiple
+                                aria-label={`Upload up to ${MAX_IMAGE_ATTACHMENTS} images and ${MAX_PDF_ATTACHMENTS} PDFs, ${MAX_PDF_PAGES} PDF pages combined`}
+                                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                                className="hidden"
+                                disabled={isUploading}
+                              />
+                              <div className="ml-auto flex items-center gap-1">
+                                <DailyBudget />
+                                {showWorkingBadge ? (
+                                  <Button
+                                    type="button"
+                                    key="stop"
+                                    onClick={() => void handleCancel()}
+                                    className="ml-auto"
+                                  >
+                                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                                    Cancel
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    type="submit"
+                                    className="ml-auto shadow-md transition-all"
+                                    disabled={
+                                      showWorkingBadge ||
+                                      isUploading ||
+                                      (!input.trim() &&
+                                        contentBlocks.length === 0)
+                                    }
+                                  >
+                                    Send
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </form>
+                        </div>
+                      </div>
+                    }
+                  />
+                  {showConversationNavigator && !isArtifactExpandedMode && (
+                    <ConversationNavigator
+                      key={threadId ?? "new"}
+                      messages={visibleMessages}
+                      triggerContainer={navigatorTriggerContainer}
+                      isWorking={showWorkingBadge}
+                      onRailVisibilityChange={setConversationRailVisible}
+                    />
+                  )}
+                </StickToBottom>
+              </div>
+
+              {isLargeScreen ? (
+                <div
+                  data-testid="resize-handle-chat-artifact"
+                  className={cn(
+                    "group relative hidden touch-none items-stretch justify-center select-none lg:flex",
+                    showDesktopArtifactHandle
+                      ? "cursor-col-resize"
+                      : "pointer-events-none opacity-0",
+                  )}
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize chat and artifact panes"
+                  title="Drag to resize chat and artifact panes"
+                  aria-hidden={showDesktopArtifactHandle ? undefined : "true"}
+                  tabIndex={showDesktopArtifactHandle ? 0 : -1}
+                  onPointerDown={handleArtifactResizePointerDown}
+                  onKeyDown={handleArtifactResizeKeyDown}
+                >
+                  <span
+                    className={cn(
+                      "bg-foreground/30 pointer-events-none my-auto h-12 w-px rounded-full opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none",
+                      paneDragState.type === "artifact"
+                        ? "bg-primary opacity-100"
+                        : "group-hover:bg-foreground/40",
+                    )}
                   />
                 </div>
-
-                <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
-              </div>
-            )}
-
-            <StickToBottom className="relative flex-1 overflow-hidden">
-              <StickyToBottomContent
-                className={cn(
-                  "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 absolute inset-0 overflow-x-hidden overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
-                  !chatStarted &&
-                    "mt-[clamp(4rem,20vh,25vh)] flex flex-col items-stretch",
-                  chatStarted && "grid grid-rows-[1fr_auto]",
-                  conversationRailVisible && "pl-16",
-                )}
-                contentClassName="pt-8 pb-16 max-w-3xl min-w-0 mx-auto flex w-full flex-col gap-4"
-                content={
-                  <MessageRenderBoundary
-                    resetKey={messageRenderResetKey}
-                    fallback={messageRenderFallback}
-                  >
-                    <>
-                      {visibleMessages.map((message, index) =>
-                        message.type === "human" ? (
-                          <div
-                            key={message.id || `${message.type}-${index}`}
-                            data-conversation-turn={index}
-                            className="min-w-0"
-                          >
-                            <HumanMessage
-                              message={message}
-                              isLoading={effectiveIsLoading}
-                            />
-                          </div>
-                        ) : (
-                          <AssistantMessage
-                            key={message.id || `${message.type}-${index}`}
-                            message={message}
-                            allMessages={displayMessages}
-                            isLoading={effectiveIsLoading}
-                            handleRegenerate={handleRegenerate}
-                            interrupt={runtime.interrupt}
-                            getMessagesMetadata={runtime.getMessagesMetadata}
-                            onSelectBranch={runtime.setBranch}
-                            hasCustomComponentsForMessage={
-                              !!message.id && uiMessageIdsByMessageId.has(message.id)
-                            }
-                          />
-                        ),
-                      )}
-                      {hasNoAIOrToolMessages && !!runtime.interrupt && (
-                        <AssistantMessage
-                          key="interrupt-msg"
-                          message={undefined}
-                          allMessages={displayMessages}
-                          isLoading={effectiveIsLoading}
-                          handleRegenerate={handleRegenerate}
-                          interrupt={runtime.interrupt}
-                          getMessagesMetadata={runtime.getMessagesMetadata}
-                          onSelectBranch={runtime.setBranch}
-                          hasCustomComponentsForMessage={false}
-                        />
-                      )}
-                      {showWorkingBadge && hasNoAIOrToolMessages ? (
-                        <AssistantMessageLoading />
-                      ) : null}
-                    </>
-                  </MessageRenderBoundary>
-                }
-                footer={
-                  <div className="bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky bottom-0 flex flex-col items-center gap-8 backdrop-blur">
-                    {!chatStarted && (
-                      <div className="flex items-center gap-3">
-                        <QuestionCrafterLogoSVG
-                          className="h-10 flex-shrink-0"
-                          variant={logoVariant}
-                        />
-                        <h1 className="text-2xl font-semibold tracking-tight">
-                          Question Crafter
-                        </h1>
-                      </div>
-                    )}
-
-                    <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
-
-                    {showWorkingBadge ? (
-                      <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
-                        <p
-                          data-testid="thread-working-status"
-                          className="bg-muted/70 text-muted-foreground inline-flex items-center rounded-full border px-3 py-1 text-xs"
-                          aria-live="polite"
-                        >
-                          <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
-                          Working on your query...
-                        </p>
-                      </div>
-                    ) : null}
-                    {visibleStatusWarning ? (
-                      <div className="mx-auto mb-2 flex w-full max-w-3xl justify-end px-1">
-                        <p
-                          data-testid="thread-status-warning"
-                          className="inline-flex max-w-full items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-100"
-                          aria-live="polite"
-                        >
-                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                          <span className="whitespace-normal">
-                            <strong>{visibleStatusWarning.title}:</strong>{" "}
-                            {visibleStatusWarning.description}
-                          </span>
-                        </p>
-                      </div>
-                    ) : null}
-                    <div
-                      ref={dropRef}
-                      className={cn(
-                        "bg-muted relative z-10 mx-auto mb-8 w-full max-w-3xl rounded-2xl shadow-xs transition-all",
-                        dragOver
-                          ? "border-primary border-2 border-dotted"
-                          : "border border-solid",
-                      )}
-                    >
-                      <form
-                        onSubmit={handleSubmit}
-                        className="mx-auto flex max-h-[min(55vh,34rem)] max-w-3xl flex-col gap-2 overflow-hidden"
-                      >
-                        <div className="min-h-0 overflow-y-auto">
-                          <ContentBlocksPreview
-                            blocks={contentBlocks}
-                            onRemove={removeBlock}
-                          />
-                          <textarea
-                            value={input}
-                            onChange={(event) => setInput(event.target.value)}
-                            onPaste={handlePaste}
-                            onKeyDown={(event) => {
-                              if (
-                                event.key === "Enter" &&
-                                !event.nativeEvent.isComposing &&
-                                ((!event.shiftKey && enterToSend) ||
-                                  ((event.metaKey || event.ctrlKey) &&
-                                    !enterToSend))
-                              ) {
-                                event.preventDefault();
-                                const element = event.target as HTMLElement | undefined;
-                                const form = element?.closest("form");
-                                form?.requestSubmit();
-                              }
-                            }}
-                            placeholder="Type your message..."
-                            className="field-sizing-content max-h-[40vh] min-h-[3.5rem] w-full resize-none overflow-y-auto border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
-                          />
-                        </div>
-
-                        <div className="flex shrink-0 items-center gap-6 p-2 pt-4">
-                          <Label
-                            htmlFor="file-input"
-                            className={cn(
-                              "flex items-center gap-2",
-                              isUploading ? "cursor-wait" : "cursor-pointer",
-                            )}
-                            aria-disabled={isUploading}
-                          >
-                            <Plus className="text-muted-foreground size-5" />
-                            <span className="text-muted-foreground flex flex-col text-sm">
-                              <span>Upload PDF or Image</span>
-                              <span
-                                className="text-xs"
-                                aria-live="polite"
-                                data-testid="attachment-counts"
-                              >
-                                {attachmentCounts.images}/{MAX_IMAGE_ATTACHMENTS} images · {attachmentCounts.pdfs}/{MAX_PDF_ATTACHMENTS} PDFs
-                              </span>
-                              <span className="text-xs" aria-live="polite" data-testid="pdf-page-count">
-                                {unverifiedPdfPages ? "Reattach PDFs to verify pages" : checkingPdfPages ? "Checking PDF pages…" : `${pdfPages}/${MAX_PDF_PAGES} PDF pages`}
-                              </span>
-                            </span>
-                            {isUploading && (
-                              <span className="text-muted-foreground ml-2 flex items-center gap-2 text-sm">
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                                <span className="sr-only sm:not-sr-only">Uploading...</span>
-                              </span>
-                            )}
-                          </Label>
-                          <input
-                            id="file-input"
-                            type="file"
-                            onChange={handleFileUpload}
-                            multiple
-                            aria-label={`Upload up to ${MAX_IMAGE_ATTACHMENTS} images and ${MAX_PDF_ATTACHMENTS} PDFs, ${MAX_PDF_PAGES} PDF pages combined`}
-                            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                            className="hidden"
-                            disabled={isUploading}
-                          />
-                          <div className="ml-auto flex items-center gap-1">
-                            <DailyBudget />
-                            {showWorkingBadge ? (
-                              <Button
-                                type="button"
-                                key="stop"
-                                onClick={() => void handleCancel()}
-                                className="ml-auto"
-                              >
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                                Cancel
-                              </Button>
-                            ) : (
-                              <Button
-                                type="submit"
-                                className="ml-auto shadow-md transition-all"
-                                disabled={
-                                  showWorkingBadge ||
-                                  isUploading ||
-                                  (!input.trim() && contentBlocks.length === 0)
-                                }
-                              >
-                                Send
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </form>
-                    </div>
-                  </div>
-                }
-              />
-              {showConversationNavigator && !isArtifactExpandedMode && (
-                <ConversationNavigator
-                  key={threadId ?? "new"}
-                  messages={visibleMessages}
-                  triggerContainer={navigatorTriggerContainer}
-                  isWorking={showWorkingBadge}
-                  onRailVisibilityChange={setConversationRailVisible}
-                />
-              )}
-            </StickToBottom>
-          </div>
-
-          {isLargeScreen ? (
-            <div
-              data-testid="resize-handle-chat-artifact"
-              className={cn(
-                "group relative hidden touch-none items-stretch justify-center select-none lg:flex",
-                showDesktopArtifactHandle
-                  ? "cursor-col-resize"
-                  : "pointer-events-none opacity-0",
-              )}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize chat and artifact panes"
-              title="Drag to resize chat and artifact panes"
-              aria-hidden={showDesktopArtifactHandle ? undefined : "true"}
-              tabIndex={showDesktopArtifactHandle ? 0 : -1}
-              onPointerDown={handleArtifactResizePointerDown}
-              onKeyDown={handleArtifactResizeKeyDown}
-            >
-              <span
-                className={cn(
-                  "bg-foreground/30 pointer-events-none my-auto h-12 w-px rounded-full opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none",
-                  paneDragState.type === "artifact"
-                    ? "bg-primary opacity-100"
-                    : "group-hover:bg-foreground/40",
-                )}
-              />
-            </div>
-          ) : null}
-
-          <div
-            data-testid="pane-artifact"
-            className={cn(
-              "relative flex min-w-0 flex-col border-l",
-              !artifactPaneOpen && "pointer-events-none",
-            )}
-          >
-            <div className="absolute inset-0 flex min-w-0 flex-col overflow-hidden">
-              <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b p-4">
-                <ArtifactTitle className="min-w-0 overflow-hidden" />
-                {isLargeScreen ? (
-                  <button
-                    type="button"
-                    data-testid="artifact-expand-toggle"
-                    aria-label={
-                      isArtifactExpandedMode
-                        ? "Restore pane layout"
-                        : "Expand artifact panel"
-                    }
-                    onClick={toggleArtifactExpanded}
-                    className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-                  >
-                    {isArtifactExpandedMode ? (
-                      <Minimize2 className="size-5" />
-                    ) : (
-                      <Maximize2 className="size-5" />
-                    )}
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={handleArtifactClose}
-                  className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-                >
-                  <XIcon className="size-5" />
-                </button>
-              </div>
-              <ArtifactContent
-                data-testid="artifact-content"
-                className={cn(
-                  "relative min-h-0 flex-grow",
-                  isIframeArtifactSurface
-                    ? "overflow-hidden pr-0 [scrollbar-gutter:auto]"
-                    : "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 overflow-y-scroll pr-1 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
-                )}
-              />
-              {manualArtifactOpen && !artifactOpen ? (
-                <div className="text-muted-foreground p-4 text-sm">
-                  Artifact panel
-                </div>
               ) : null}
-            </div>
-          </div>
+
+              <div
+                data-testid="pane-artifact"
+                className={cn(
+                  "relative flex min-w-0 flex-col border-l",
+                  !artifactPaneOpen && "pointer-events-none",
+                )}
+              >
+                <div className="absolute inset-0 flex min-w-0 flex-col overflow-hidden">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b p-4">
+                    <ArtifactTitle className="min-w-0 overflow-hidden" />
+                    {isLargeScreen ? (
+                      <button
+                        type="button"
+                        data-testid="artifact-expand-toggle"
+                        aria-label={
+                          isArtifactExpandedMode
+                            ? "Restore pane layout"
+                            : "Expand artifact panel"
+                        }
+                        onClick={toggleArtifactExpanded}
+                        className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                      >
+                        {isArtifactExpandedMode ? (
+                          <Minimize2 className="size-5" />
+                        ) : (
+                          <Maximize2 className="size-5" />
+                        )}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={handleArtifactClose}
+                      className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                    >
+                      <XIcon className="size-5" />
+                    </button>
+                  </div>
+                  <ArtifactContent
+                    data-testid="artifact-content"
+                    className={cn(
+                      "relative min-h-0 flex-grow",
+                      isIframeArtifactSurface
+                        ? "overflow-hidden pr-0 [scrollbar-gutter:auto]"
+                        : "[&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/50 overflow-y-scroll pr-1 [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
+                    )}
+                  />
+                  {manualArtifactOpen && !artifactOpen ? (
+                    <div className="text-muted-foreground p-4 text-sm">
+                      Artifact panel
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
