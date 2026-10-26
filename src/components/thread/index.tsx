@@ -73,11 +73,7 @@ import {
   useModeThreadId,
   usePinModeParam,
 } from "@/lib/app-mode";
-import {
-  CHAT_RUNTIME_MODE_ID,
-  ThreadModeScope,
-  useModeListMetadata,
-} from "@/providers/Thread";
+import { ThreadModeScope } from "@/providers/Thread";
 
 function showThreadRunningToast() {
   toast("Thread is still running", {
@@ -475,9 +471,6 @@ export function Thread() {
   const [, setModeItemId] = useModeThreadId(mode);
   const modePane = mode.pane === "chat" ? null : MODE_PANES[mode.pane];
   const isChatPane = modePane === null;
-  // A new chat thread carries what Crafter's history filters on, so it is
-  // listed even when its first run never starts.
-  const chatListMetadata = useModeListMetadata(CHAT_RUNTIME_MODE_ID);
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
@@ -911,7 +904,7 @@ export function Thread() {
     const context =
       Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
     const submitMetadata = !threadId
-      ? { ...chatListMetadata, thread_preview: threadPreview }
+      ? { thread_preview: threadPreview }
       : undefined;
     const previousInput = input;
     const previousContentBlocks = [...contentBlocks];

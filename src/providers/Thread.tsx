@@ -70,7 +70,7 @@ const THREAD_HISTORY_SELECT = [
  * thread in `?threadId=`, which is a Crafter thread. Its `useThreads()` is
  * therefore always bound to Crafter's list, whatever mode is on screen.
  */
-export const CHAT_RUNTIME_MODE_ID: AppModeId = "crafter";
+const CHAT_RUNTIME_MODE_ID: AppModeId = "crafter";
 
 function byMode<T>(value: (mode: AppMode) => T): ByMode<T> {
   return Object.fromEntries(
@@ -248,15 +248,6 @@ export function useModeThreads(modeId: AppModeId): ThreadContextType {
       updateThread,
     ],
   );
-}
-
-/**
- * The metadata a new thread of `modeId` needs to appear in that mode's history:
- * exactly what the list filters on. Written at `threads.create`, so a thread
- * whose first run never started (a 429, say) is still listed.
- */
-export function useModeListMetadata(modeId: AppModeId): Record<string, string> {
-  return useThreadStore().listMetadataByMode[modeId];
 }
 
 /**

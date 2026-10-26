@@ -2,7 +2,7 @@
  * The shell around the Crafter | Ingester switch, against the fake LangGraph backend
  * (tests/helpers/ingest-backend.ts): the chat stays mounted (hidden) while Ingester is on screen,
  * links that open Ingester through `ingestId` alone stay in Ingester, focus follows the switch,
- * file drops never reach the hidden chat, and a new chat is created with Crafter's graph_id.
+ * and file drops never reach the hidden chat.
  *
  * Run it against a local dev server whose LangGraph URL is the fake's origin:
  *
@@ -14,19 +14,13 @@
  */
 import type { JSHandle, Locator, Page } from "@playwright/test";
 
-import {
-  CRAFTER_GRAPH_ID,
-  FAKE_API_URL,
-  isLocalBaseUrl,
-  type IngestBackend,
-} from "./helpers/ingest-backend";
+import { isLocalBaseUrl, type IngestBackend } from "./helpers/ingest-backend";
 import {
   ACTIONS,
   action,
   expect,
   expectUrlParam,
   historyNewButton,
-  historyRow,
   openApp,
   test,
   ui,
@@ -253,7 +247,10 @@ test.describe("the chat stays mounted, hidden, while Ingester is on screen", () 
       "aria-label",
       "Restore pane layout",
     );
-    await expect(history).toBeHidden();
+    // The history column collapses to its 1px border (as on main), so check its width.
+    await expect
+      .poll(async () => (await history.boundingBox())?.width ?? 0)
+      .toBeLessThanOrEqual(1);
     await page
       .getByTestId("mode-switch")
       .locator('[data-mode="crafter"]')
@@ -424,56 +421,4 @@ test.describe("focus follows the mode switch", () => {
     await $.crafter.click();
     await expect($.crafter).toBeFocused();
   });
-});
-
-// ---------------------------------------------------------------- Crafter's thread metadata
-
-test("a new chat carries Crafter's graph_id, so it stays in History when its first run is refused", async ({
-  page,
-  backend,
-}) => {
-  const $ = ui(page);
-  const apiOrigin = new URL(FAKE_API_URL).origin;
-  // Refuse every run like the real backend at the daily limit (the fake would answer it).
-  await page.route(
-    (url) =>
-      url.origin === apiOrigin &&
-      /^\/threads\/[^/]+\/runs\/?$/.test(url.pathname),
-    async (route) => {
-      const request = route.request();
-      if (request.method() !== "POST") return route.fallback();
-      await route.fulfill({
-        status: 429,
-        headers: {
-          "access-control-allow-origin":
-            (await request.headerValue("origin")) ?? "*",
-          "access-control-allow-credentials": "true",
-          "access-control-expose-headers": "x-user-limit-code,content-type",
-          "content-type": "application/json",
-          "x-user-limit-code": "DAILY_COST_LIMIT_EXCEEDED",
-        },
-        body: JSON.stringify({ detail: "DAILY_COST_LIMIT_EXCEEDED" }),
-      });
-    },
-  );
-
-  const message = "Make a fractions lesson for grade 5.";
-  await openApp(page);
-  await waitForHydration($.composer);
-  await $.composer.fill(message);
-  await page.getByRole("button", { name: "Send", exact: true }).click();
-
-  await expect.poll(() => backend.calls.threadCreates.length).toBe(1);
-  const created = backend.calls.threadCreates[0]!;
-  expect(created.body.metadata).toMatchObject({
-    graph_id: CRAFTER_GRAPH_ID,
-    thread_preview: message,
-  });
-  await expect(
-    page.getByText("Daily limit reached", { exact: true }).first(),
-  ).toBeVisible();
-
-  // Crafter's history filters on graph_id: the thread is listed after a reload.
-  await openApp(page, { chatHistoryOpen: "true" });
-  await expect(historyRow(page, created.threadId)).toBeVisible();
 });
