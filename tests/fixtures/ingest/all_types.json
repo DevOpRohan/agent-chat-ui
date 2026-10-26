@@ -1,0 +1,906 @@
+{
+  "topic_id": "8f0c2b1e-4a7d-4c55-9f3e-2d6b1a9c7e10",
+  "topic_name": "Mixed Math and Science Practice (all 18 question types)",
+  "cts": [
+    {
+      "key": "quadratic_x_intercepts_ct_001",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "MCQ",
+          "question": [
+            {
+              "type": "text",
+              "text": "The graph of \\(y = x^2 - 4\\) is shown below.\n"
+            },
+            {
+              "type": "media",
+              "media_type": "image",
+              "url": "https://example.com/assets/parabola_x2_minus_4.png",
+              "description": "Upward parabola with vertex at (0, -4) crossing the x-axis at -2 and 2"
+            },
+            {
+              "type": "text",
+              "text": "\nSelect all values of \\(x\\) at which the graph crosses the \\(x\\)-axis."
+            }
+          ],
+          "difficulty_level": "MEDIUM",
+          "options": [
+            "\\(x = -2\\)",
+            "\\(x = 2\\)",
+            "\\(x = 4\\)",
+            "\\(x = -4\\)"
+          ],
+          "correct_options": ["\\(x = -2\\)", "\\(x = 2\\)"],
+          "solution": "The graph crosses the \\(x\\)-axis where \\(y = 0\\):\n\\[\nx^2 - 4 = 0 \\implies (x - 2)(x + 2) = 0\n\\]\nSo \\(x = 2\\) or \\(x = -2\\). The value \\(-4\\) is the \\(y\\)-intercept, and \\(x = 4\\) gives \\(y = 12\\), so neither is an \\(x\\)-intercept.",
+          "hint": "Set \\(y = 0\\) and factor the difference of squares.",
+          "language": "English",
+          "ct_key": "quadratic_x_intercepts_ct_001",
+          "question_no": 1
+        },
+        {
+          "question_type": "MCQ",
+          "question": [
+            {
+              "type": "text",
+              "text": "The graph of \\(y = x^2 - 9\\) is shown below.\n"
+            },
+            {
+              "type": "media",
+              "media_type": "image",
+              "url": "https://example.com/assets/parabola_x2_minus_9.png",
+              "description": "Upward parabola with vertex at (0, -9) crossing the x-axis at -3 and 3"
+            },
+            {
+              "type": "text",
+              "text": "\nSelect all values of \\(x\\) at which the graph crosses the \\(x\\)-axis."
+            }
+          ],
+          "difficulty_level": "MEDIUM",
+          "options": [
+            "\\(x = 3\\)",
+            "\\(x = -9\\)",
+            "\\(x = -3\\)",
+            "\\(x = 9\\)"
+          ],
+          "correct_options": ["\\(x = 3\\)", "\\(x = -3\\)"],
+          "solution": "The graph crosses the \\(x\\)-axis where \\(y = 0\\):\n\\[\nx^2 - 9 = 0 \\implies (x - 3)(x + 3) = 0\n\\]\nSo \\(x = 3\\) or \\(x = -3\\). The value \\(-9\\) is the \\(y\\)-intercept, and \\(x = 9\\) gives \\(y = 72\\), so neither is an \\(x\\)-intercept.",
+          "hint": "Set \\(y = 0\\) and factor the difference of squares.",
+          "language": "English",
+          "ct_key": "quadratic_x_intercepts_ct_001",
+          "question_no": 2
+        }
+      ]
+    },
+    {
+      "key": "odd_even_proofs_ct_002",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "OPEN_ENDED",
+          "question": "Explain why the sum of two odd integers is always even.",
+          "difficulty_level": "MEDIUM",
+          "solution": "Write the odd integers as \\(2m + 1\\) and \\(2n + 1\\) for integers \\(m\\) and \\(n\\). Their sum is \\(2m + 2n + 2 = 2(m + n + 1)\\), which is a multiple of \\(2\\), so it is even.",
+          "hint": "Write each odd integer in the form \\(2k + 1\\).",
+          "language": "English",
+          "ct_key": "odd_even_proofs_ct_002",
+          "question_no": 1
+        },
+        {
+          "question_type": "OPEN_ENDED",
+          "question": "Explain why the product of two odd integers is always odd.",
+          "difficulty_level": "MEDIUM",
+          "solution": "Write the odd integers as \\(2m + 1\\) and \\(2n + 1\\). Their product is \\(4mn + 2m + 2n + 1 = 2(2mn + m + n) + 1\\), which is one more than a multiple of \\(2\\), so it is odd.",
+          "hint": "Write each odd integer in the form \\(2k + 1\\) and expand.",
+          "language": "English",
+          "ct_key": "odd_even_proofs_ct_002",
+          "question_no": 2
+        }
+      ]
+    },
+    {
+      "key": "polygon_angle_sums_ct_003",
+      "difficulty_level": "EASY",
+      "variations": [
+        {
+          "question_type": "TRUE_FALSE",
+          "question": "The interior angles of every triangle add up to \\(180^\\circ\\).",
+          "difficulty_level": "EASY",
+          "correct_answer": true,
+          "solution": "Drawing a line through one vertex parallel to the opposite side creates alternate angles that together form a straight line, so the three angles sum to \\(180^\\circ\\).",
+          "hint": "Think about a straight line drawn through one vertex.",
+          "language": "English",
+          "ct_key": "polygon_angle_sums_ct_003",
+          "question_no": 1
+        },
+        {
+          "question_type": "TRUE_FALSE",
+          "question": "The interior angles of every quadrilateral add up to \\(360^\\circ\\).",
+          "difficulty_level": "EASY",
+          "correct_answer": true,
+          "solution": "A diagonal splits a quadrilateral into two triangles, each with angle sum \\(180^\\circ\\), so the total is \\(2 \\times 180^\\circ = 360^\\circ\\).",
+          "hint": "Split the shape into triangles with a diagonal.",
+          "language": "English",
+          "ct_key": "polygon_angle_sums_ct_003",
+          "question_no": 2
+        }
+      ]
+    },
+    {
+      "key": "water_phase_changes_ct_004",
+      "difficulty_level": "EASY",
+      "variations": [
+        {
+          "question_type": "FIB",
+          "question": "At sea level, pure water boils at {placeholder1} degrees Celsius.",
+          "difficulty_level": "EASY",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "correct_keyword": "100",
+              "incorrect_keywords": ["90", "110", "120"]
+            }
+          ],
+          "solution": "At standard atmospheric pressure, pure water boils at \\(100^\\circ\\text{C}\\).",
+          "hint": "Think about the boiling point at standard atmospheric pressure.",
+          "language": "English",
+          "ct_key": "water_phase_changes_ct_004",
+          "question_no": 1
+        },
+        {
+          "question_type": "FIB",
+          "question": "At sea level, pure water freezes at {placeholder1} degrees Celsius.",
+          "difficulty_level": "EASY",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "correct_keyword": "0",
+              "incorrect_keywords": ["4", "-10", "100"]
+            }
+          ],
+          "solution": "At standard atmospheric pressure, pure water freezes at \\(0^\\circ\\text{C}\\).",
+          "hint": "Think about the freezing point at standard atmospheric pressure.",
+          "language": "English",
+          "ct_key": "water_phase_changes_ct_004",
+          "question_no": 2
+        }
+      ]
+    },
+    {
+      "key": "common_compound_formulas_ct_005",
+      "difficulty_level": "EASY",
+      "variations": [
+        {
+          "question_type": "DROP_DOWN",
+          "question": "The chemical formula of table salt is {placeholder1}.",
+          "difficulty_level": "EASY",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "correct_keyword": "NaCl",
+              "incorrect_keywords": ["KCl", "NaOH", "CaCl2"]
+            }
+          ],
+          "solution": "Table salt is sodium chloride, \\(\\text{NaCl}\\), formed from \\(\\text{Na}^+\\) and \\(\\text{Cl}^-\\) ions.",
+          "hint": "Table salt contains sodium and chlorine.",
+          "language": "English",
+          "ct_key": "common_compound_formulas_ct_005",
+          "question_no": 1
+        },
+        {
+          "question_type": "DROP_DOWN",
+          "question": "The chemical formula of baking soda is {placeholder1}.",
+          "difficulty_level": "EASY",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "correct_keyword": "NaHCO3",
+              "incorrect_keywords": ["Na2CO3", "NaOH", "CaCO3"]
+            }
+          ],
+          "solution": "Baking soda is sodium hydrogen carbonate, \\(\\text{NaHCO}_3\\).",
+          "hint": "Baking soda contains sodium, hydrogen, carbon and oxygen.",
+          "language": "English",
+          "ct_key": "common_compound_formulas_ct_005",
+          "question_no": 2
+        }
+      ]
+    },
+    {
+      "key": "organelle_functions_ct_006",
+      "difficulty_level": "EASY",
+      "variations": [
+        {
+          "question_type": "MTC",
+          "question": "Match each organelle with its function.",
+          "difficulty_level": "EASY",
+          "matches": [
+            {
+              "left": "Mitochondrion",
+              "right": "Aerobic respiration",
+              "hint": "Think about where energy is released.",
+              "explanation": "Mitochondria release energy from glucose by aerobic respiration."
+            },
+            {
+              "left": "Ribosome",
+              "right": "Protein synthesis",
+              "hint": "Think about where amino acids are joined.",
+              "explanation": "Ribosomes join amino acids into proteins."
+            }
+          ],
+          "language": "English",
+          "ct_key": "organelle_functions_ct_006",
+          "question_no": 1
+        },
+        {
+          "question_type": "MTC",
+          "question": "Match each organelle with its function.",
+          "difficulty_level": "EASY",
+          "matches": [
+            {
+              "left": "Chloroplast",
+              "right": "Photosynthesis",
+              "hint": "Think about where light energy is captured.",
+              "explanation": "Chloroplasts capture light energy to make glucose by photosynthesis."
+            },
+            {
+              "left": "Nucleus",
+              "right": "Stores genetic material",
+              "hint": "Think about where DNA is kept.",
+              "explanation": "The nucleus holds the cell's DNA."
+            }
+          ],
+          "language": "English",
+          "ct_key": "organelle_functions_ct_006",
+          "question_no": 2
+        }
+      ]
+    },
+    {
+      "key": "linear_equations_ct_007",
+      "difficulty_level": "EASY",
+      "variations": [
+        {
+          "question_type": "DECIMAL",
+          "question": "Solve \\(2x + 5 = 15\\) for \\(x\\).",
+          "difficulty_level": "EASY",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "value": 5,
+              "min_decimal_places": 0
+            }
+          ],
+          "acceptance_tolerance": {
+            "lower": 0,
+            "upper": 0
+          },
+          "answers_interchangeable": false,
+          "answer_box": "\\(x =\\) {placeholder1}",
+          "solution": "Subtract \\(5\\) from both sides to get \\(2x = 10\\), then divide by \\(2\\) to get \\(x = 5\\).",
+          "hint": "Undo the operations in reverse order.",
+          "language": "English",
+          "ct_key": "linear_equations_ct_007",
+          "question_no": 1
+        },
+        {
+          "question_type": "DECIMAL",
+          "question": "Solve \\(3x + 7 = 25\\) for \\(x\\).",
+          "difficulty_level": "EASY",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "value": 6,
+              "min_decimal_places": 0
+            }
+          ],
+          "acceptance_tolerance": {
+            "lower": 0,
+            "upper": 0
+          },
+          "answers_interchangeable": false,
+          "answer_box": "\\(x =\\) {placeholder1}",
+          "solution": "Subtract \\(7\\) from both sides to get \\(3x = 18\\), then divide by \\(3\\) to get \\(x = 6\\).",
+          "hint": "Undo the operations in reverse order.",
+          "language": "English",
+          "ct_key": "linear_equations_ct_007",
+          "question_no": 2
+        }
+      ]
+    },
+    {
+      "key": "perfect_square_factoring_ct_008",
+      "difficulty_level": "EASY",
+      "variations": [
+        {
+          "question_type": "MATH_EXPRESSION",
+          "question": "Factor \\(x^2 + 2x + 1\\) completely.",
+          "difficulty_level": "EASY",
+          "matching": "EQUIVALENT",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "value": "\\((x+1)^2\\)",
+              "variables": ["x"],
+              "valid_alternatives": []
+            }
+          ],
+          "answers_interchangeable": false,
+          "answer_box": "{placeholder1}",
+          "solution": "The trinomial is a perfect square: \\(x^2 + 2x + 1 = (x+1)^2\\).",
+          "hint": "Look for a perfect-square trinomial.",
+          "language": "English",
+          "ct_key": "perfect_square_factoring_ct_008",
+          "question_no": 1
+        },
+        {
+          "question_type": "MATH_EXPRESSION",
+          "question": "Factor \\(x^2 - 6x + 9\\) completely.",
+          "difficulty_level": "EASY",
+          "matching": "EQUIVALENT",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "value": "\\((x-3)^2\\)",
+              "variables": ["x"],
+              "valid_alternatives": ["\\((3-x)^2\\)"]
+            }
+          ],
+          "answers_interchangeable": false,
+          "answer_box": "{placeholder1}",
+          "solution": "The trinomial is a perfect square: \\(x^2 - 6x + 9 = (x-3)^2\\).",
+          "hint": "Look for a perfect-square trinomial.",
+          "language": "English",
+          "ct_key": "perfect_square_factoring_ct_008",
+          "question_no": 2
+        }
+      ]
+    },
+    {
+      "key": "element_symbols_ct_009",
+      "difficulty_level": "EASY",
+      "variations": [
+        {
+          "question_type": "PATTERN_MATCH",
+          "question": "Write the chemical symbol for sodium.",
+          "difficulty_level": "EASY",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "value": "Na",
+              "valid_examples": ["Na"]
+            }
+          ],
+          "answer_box": "Symbol: {placeholder1}",
+          "solution": "The symbol for sodium is \\(\\text{Na}\\), from its Latin name natrium.",
+          "hint": "The symbol comes from the Latin name of the element.",
+          "language": "English",
+          "ct_key": "element_symbols_ct_009",
+          "question_no": 1
+        },
+        {
+          "question_type": "PATTERN_MATCH",
+          "question": "Write the chemical symbol for iron.",
+          "difficulty_level": "EASY",
+          "placeholders": [
+            {
+              "placeholder_id": 1,
+              "value": "Fe",
+              "valid_examples": ["Fe"]
+            }
+          ],
+          "answer_box": "Symbol: {placeholder1}",
+          "solution": "The symbol for iron is \\(\\text{Fe}\\), from its Latin name ferrum.",
+          "hint": "The symbol comes from the Latin name of the element.",
+          "language": "English",
+          "ct_key": "element_symbols_ct_009",
+          "question_no": 2
+        }
+      ]
+    },
+    {
+      "key": "rectangle_measurements_ct_010",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "OPEN_ENDED_SUBPART",
+          "question": [
+            {
+              "type": "text",
+              "text": "The rectangle \\(ABCD\\) shown below measures \\(6\\) cm by \\(4\\) cm.\n"
+            },
+            {
+              "type": "media",
+              "media_type": "image",
+              "url": "https://example.com/assets/rectangle_6_by_4.png",
+              "description": "Rectangle ABCD, 6 cm long and 4 cm wide, with diagonal AC drawn"
+            }
+          ],
+          "difficulty_level": "MEDIUM",
+          "subparts": [
+            {
+              "question_type": "OPEN_ENDED",
+              "question": "Find the area of the rectangle.",
+              "solution": "Area \\(= 6 \\times 4 = 24\\,\\text{cm}^2\\).",
+              "hint": "Multiply the length by the width."
+            },
+            {
+              "question_type": "OPEN_ENDED",
+              "question": "Find the length of a diagonal of the rectangle.",
+              "solution": "By Pythagoras, the diagonal is \\(\\sqrt{6^2 + 4^2} = \\sqrt{52} = 2\\sqrt{13}\\,\\text{cm}\\).",
+              "hint": "The diagonal is the hypotenuse of a right triangle."
+            },
+            {
+              "question_type": "OPEN_ENDED",
+              "question": "Explain why the diagonal is longer than either side.",
+              "solution": "The diagonal is the hypotenuse of right triangle \\(ABC\\).\n\\[\nAC^2 = AB^2 + BC^2 > AB^2\n\\]\nSince \\(BC^2 > 0\\), \\(AC\\) is longer than \\(AB\\), and similarly longer than \\(BC\\).",
+              "hint": "Compare the hypotenuse with each leg using Pythagoras."
+            }
+          ],
+          "language": "English",
+          "ct_key": "rectangle_measurements_ct_010",
+          "question_no": 1
+        }
+      ]
+    },
+    {
+      "key": "data_set_statistics_ct_011",
+      "difficulty_level": "EASY",
+      "variations": [
+        {
+          "question_type": "MCQ_SUBPART",
+          "question": "Consider the data set \\(4, 6, 6, 8\\).",
+          "difficulty_level": "EASY",
+          "subparts": [
+            {
+              "question_type": "MCQ",
+              "question": "What is the mean of the data set?",
+              "options": ["\\(6\\)", "\\(5\\)", "\\(7\\)", "\\(8\\)"],
+              "correct_options": ["\\(6\\)"],
+              "solution": "The sum is \\(4 + 6 + 6 + 8 = 24\\), and \\(24 \\div 4 = 6\\).",
+              "hint": "Add the values and divide by how many there are."
+            },
+            {
+              "question_type": "MCQ",
+              "question": "What is the mode of the data set?",
+              "options": ["\\(6\\)", "\\(4\\)", "\\(8\\)", "\\(5\\)"],
+              "correct_options": ["\\(6\\)"],
+              "solution": "The value \\(6\\) appears twice, more often than any other value.",
+              "hint": "Look for the value that appears most often."
+            },
+            {
+              "question_type": "MCQ",
+              "question": "Select all statements that are true for this data set.",
+              "options": [
+                "The median is \\(6\\)",
+                "The range is \\(4\\)",
+                "The mean is \\(7\\)",
+                "The mode is \\(4\\)"
+              ],
+              "correct_options": [
+                "The median is \\(6\\)",
+                "The range is \\(4\\)"
+              ],
+              "solution": "The median is the mean of the middle values \\(6\\) and \\(6\\), which is \\(6\\). The range is \\(8 - 4 = 4\\). The mean is \\(6\\), not \\(7\\), and the mode is \\(6\\), not \\(4\\).",
+              "hint": "Compute each statistic before judging the statements."
+            }
+          ],
+          "language": "English",
+          "ct_key": "data_set_statistics_ct_011",
+          "question_no": 1
+        }
+      ]
+    },
+    {
+      "key": "photosynthesis_terms_ct_012",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "FIB_SUBPART",
+          "question": [
+            {
+              "type": "text",
+              "text": "The diagram below shows a leaf in sunlight.\n"
+            },
+            {
+              "type": "media",
+              "media_type": "image",
+              "url": "https://example.com/assets/leaf_photosynthesis.png",
+              "description": "Leaf taking in carbon dioxide and water and releasing oxygen in sunlight"
+            }
+          ],
+          "difficulty_level": "MEDIUM",
+          "subparts": [
+            {
+              "question_type": "FIB",
+              "question": "The process by which plants make glucose using light energy is called {placeholder1}.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "correct_keyword": "photosynthesis",
+                  "incorrect_keywords": [
+                    "respiration",
+                    "transpiration",
+                    "digestion"
+                  ]
+                }
+              ],
+              "solution": "Plants use light energy to convert carbon dioxide and water into glucose; this process is photosynthesis.",
+              "hint": "The name of the process refers to light."
+            },
+            {
+              "question_type": "FIB",
+              "question": "The gas released as a by-product of this process is {placeholder1}, and the green pigment that absorbs light is {placeholder2}.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "correct_keyword": "oxygen",
+                  "incorrect_keywords": [
+                    "carbon dioxide",
+                    "nitrogen",
+                    "hydrogen"
+                  ]
+                },
+                {
+                  "placeholder_id": 2,
+                  "correct_keyword": "chlorophyll",
+                  "incorrect_keywords": ["carotene", "haemoglobin", "melanin"]
+                }
+              ],
+              "solution": "Splitting water releases oxygen gas, and chlorophyll in the chloroplasts absorbs the light energy.",
+              "hint": "Think about what is released into the air and what makes leaves green."
+            }
+          ],
+          "language": "English",
+          "ct_key": "photosynthesis_terms_ct_012",
+          "question_no": 1
+        }
+      ]
+    },
+    {
+      "key": "heated_gas_behaviour_ct_013",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "DROP_DOWN_SUBPART",
+          "question": "A sealed rigid container holds a gas at \\(300\\) K, which is then heated to \\(400\\) K.",
+          "difficulty_level": "MEDIUM",
+          "subparts": [
+            {
+              "question_type": "DROP_DOWN",
+              "question": "As the temperature of a gas increases, the average speed of its particles {placeholder1}.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "correct_keyword": "increases",
+                  "incorrect_keywords": [
+                    "decreases",
+                    "stays the same",
+                    "becomes zero"
+                  ]
+                }
+              ],
+              "solution": "Temperature measures the average kinetic energy of the particles, so a higher temperature means faster particles.",
+              "hint": "Relate temperature to kinetic energy."
+            },
+            {
+              "question_type": "DROP_DOWN",
+              "question": "In a sealed rigid container, this change makes the gas pressure {placeholder1}.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "correct_keyword": "increase",
+                  "incorrect_keywords": [
+                    "decrease",
+                    "stay the same",
+                    "drop to zero"
+                  ]
+                }
+              ],
+              "solution": "Faster particles hit the walls more often and with more force, so the pressure increases.",
+              "hint": "Think about collisions with the container walls."
+            }
+          ],
+          "language": "English",
+          "ct_key": "heated_gas_behaviour_ct_013",
+          "question_no": 1
+        }
+      ]
+    },
+    {
+      "key": "prime_number_statements_ct_014",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "TRUE_FALSE_SUBPART",
+          "question": "Decide whether each statement about prime numbers is true or false.",
+          "difficulty_level": "MEDIUM",
+          "subparts": [
+            {
+              "question_type": "TRUE_FALSE",
+              "question": "The number \\(91\\) is a prime number.",
+              "correct_answer": false,
+              "solution": "\\(91 = 7 \\times 13\\), so it has factors other than \\(1\\) and itself.",
+              "hint": "Try dividing by small primes."
+            },
+            {
+              "question_type": "TRUE_FALSE",
+              "question": "The number \\(97\\) is a prime number.",
+              "correct_answer": true,
+              "solution": "\\(97\\) is not divisible by \\(2\\), \\(3\\), \\(5\\), or \\(7\\), and \\(11^2 > 97\\), so it is prime.",
+              "hint": "You only need to test primes up to the square root."
+            },
+            {
+              "question_type": "TRUE_FALSE",
+              "question": "Every even number greater than \\(2\\) is composite.",
+              "correct_answer": true,
+              "solution": "An even number greater than \\(2\\) is divisible by \\(2\\) and by itself, so it has at least three factors.",
+              "hint": "Consider the factor 2."
+            }
+          ],
+          "language": "English",
+          "ct_key": "prime_number_statements_ct_014",
+          "question_no": 1
+        }
+      ]
+    },
+    {
+      "key": "average_speed_ct_015",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "DECIMAL_SUBPART",
+          "question": "A car travels \\(150\\) km in \\(2.5\\) hours at a constant speed.",
+          "difficulty_level": "MEDIUM",
+          "subparts": [
+            {
+              "question_type": "DECIMAL",
+              "question": "A car travels \\(150\\) km in \\(2.5\\) hours. Find its average speed.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "value": 60,
+                  "min_decimal_places": 0
+                }
+              ],
+              "acceptance_tolerance": {
+                "lower": 0,
+                "upper": 0
+              },
+              "answers_interchangeable": false,
+              "answer_box": "Speed: {placeholder1} \\(\\text{km/h}\\)",
+              "solution": "Average speed \\(= \\dfrac{150}{2.5} = 60\\,\\text{km/h}\\).",
+              "hint": "Divide distance by time.",
+              "language": "English"
+            },
+            {
+              "question_type": "DECIMAL",
+              "question": "At the same average speed, how long does the car take to travel \\(95\\) km? Give your answer in hours to two decimal places.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "value": 1.58,
+                  "min_decimal_places": 2
+                }
+              ],
+              "acceptance_tolerance": {
+                "lower": 0.005,
+                "upper": 0.005
+              },
+              "answers_interchangeable": false,
+              "answer_box": "Time: {placeholder1} \\(\\text{h}\\)",
+              "solution": "Time \\(= \\dfrac{95}{60} = 1.5833\\ldots \\approx 1.58\\,\\text{h}\\).",
+              "hint": "Divide the distance by the speed.",
+              "language": "English"
+            }
+          ],
+          "language": "English",
+          "ct_key": "average_speed_ct_015",
+          "question_no": 1
+        }
+      ]
+    },
+    {
+      "key": "expanding_and_simplifying_ct_016",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "MATH_EXPRESSION_SUBPART",
+          "question": "Let \\(P = 3(x + 4)\\) and \\(Q = 2x\\).",
+          "difficulty_level": "MEDIUM",
+          "subparts": [
+            {
+              "question_type": "MATH_EXPRESSION",
+              "question": "Expand \\(3(x + 4)\\).",
+              "matching": "EQUIVALENT",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "value": "\\(3x+12\\)",
+                  "variables": ["x"],
+                  "valid_alternatives": []
+                }
+              ],
+              "answers_interchangeable": false,
+              "answer_box": "{placeholder1}",
+              "solution": "Multiply each term inside the bracket by \\(3\\): \\(3x + 12\\).",
+              "hint": "Distribute the factor over each term.",
+              "language": "English"
+            },
+            {
+              "question_type": "MATH_EXPRESSION",
+              "question": "Write \\(3x + 12 + 2x\\) in the simplified form \\(ax + b\\).",
+              "matching": "EXACT",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "value": "\\(5x+12\\)",
+                  "variables": ["x"],
+                  "valid_alternatives": ["\\(5x + 12\\)"]
+                }
+              ],
+              "answers_interchangeable": false,
+              "answer_box": "{placeholder1}",
+              "solution": "Collect like terms: \\(3x + 2x = 5x\\), giving \\(5x + 12\\).",
+              "hint": "Combine the terms in x.",
+              "language": "English"
+            }
+          ],
+          "language": "English",
+          "ct_key": "expanding_and_simplifying_ct_016",
+          "question_no": 1
+        }
+      ]
+    },
+    {
+      "key": "potassium_chloride_notation_ct_017",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "PATTERN_MATCH_SUBPART",
+          "question": "Potassium reacts with chlorine to form an ionic compound. Answer using correct chemical notation.",
+          "difficulty_level": "MEDIUM",
+          "subparts": [
+            {
+              "question_type": "PATTERN_MATCH",
+              "question": "Write the chemical symbol for potassium.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "value": "K",
+                  "valid_examples": ["K"]
+                }
+              ],
+              "answer_box": "{placeholder1}",
+              "solution": "Potassium's symbol is \\(\\text{K}\\), from its Latin name kalium.",
+              "hint": "The symbol comes from the Latin name.",
+              "language": "English"
+            },
+            {
+              "question_type": "PATTERN_MATCH",
+              "question": "Write the formula of potassium chloride.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "value": "KCl",
+                  "valid_examples": ["KCl"]
+                }
+              ],
+              "answer_box": "{placeholder1}",
+              "solution": "Potassium forms \\(\\text{K}^+\\) and chlorine forms \\(\\text{Cl}^-\\), so the formula is \\(\\text{KCl}\\).",
+              "hint": "Balance the charges of the two ions.",
+              "language": "English"
+            }
+          ],
+          "language": "English",
+          "ct_key": "potassium_chloride_notation_ct_017",
+          "question_no": 1
+        }
+      ]
+    },
+    {
+      "key": "cylinder_geometry_ct_018",
+      "difficulty_level": "MEDIUM",
+      "variations": [
+        {
+          "question_type": "HYBRID_SUBPART",
+          "question": [
+            {
+              "type": "text",
+              "text": "The cylinder shown below has diameter \\(6\\) cm and height \\(10\\) cm. Use \\(\\pi \\approx 3.14\\) where a decimal answer is needed.\n"
+            },
+            {
+              "type": "media",
+              "media_type": "image",
+              "url": "https://example.com/assets/cylinder_6_by_10.png",
+              "description": "Cylinder with diameter 6 cm and height 10 cm"
+            }
+          ],
+          "difficulty_level": "MEDIUM",
+          "subparts": [
+            {
+              "question_type": "MTC",
+              "question": "Match each quantity with its value for this cylinder.",
+              "matches": [
+                {
+                  "left": "Radius",
+                  "right": "\\(3\\) cm",
+                  "hint": "Halve the diameter.",
+                  "explanation": "The radius is half of \\(6\\) cm."
+                },
+                {
+                  "left": "Base area",
+                  "right": "\\(9\\pi\\,\\text{cm}^2\\)",
+                  "hint": "Use the area of a circle.",
+                  "explanation": "\\(\\pi r^2 = 9\\pi\\,\\text{cm}^2\\)."
+                }
+              ],
+              "hint": "Use the formulas for the circle and the cylinder."
+            },
+            {
+              "question_type": "DECIMAL",
+              "question": "Find the volume of the cylinder, correct to one decimal place.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "value": 282.6,
+                  "min_decimal_places": 1
+                }
+              ],
+              "acceptance_tolerance": {
+                "lower": 0.05,
+                "upper": 0.05
+              },
+              "answers_interchangeable": false,
+              "answer_box": "Volume: {placeholder1} \\(\\text{cm}^3\\)",
+              "solution": "\\(V = \\pi r^2 h \\approx 3.14 \\times 9 \\times 10 = 282.6\\,\\text{cm}^3\\).",
+              "hint": "Multiply the base area by the height.",
+              "language": "English"
+            },
+            {
+              "question_type": "MATH_EXPRESSION",
+              "question": "Write an expression for the volume of a cylinder of radius \\(3\\) cm and height \\(h\\) cm, in terms of \\(\\pi\\) and \\(h\\).",
+              "matching": "EQUIVALENT",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "value": "\\(9\\pi h\\)",
+                  "variables": ["h"],
+                  "valid_alternatives": []
+                }
+              ],
+              "answers_interchangeable": false,
+              "answer_box": "\\(V =\\) {placeholder1}",
+              "solution": "\\(V = \\pi r^2 h = \\pi (3)^2 h = 9\\pi h\\).",
+              "hint": "Substitute the radius into the volume formula.",
+              "language": "English"
+            },
+            {
+              "question_type": "FIB",
+              "question": "A cylinder has {placeholder1} flat faces.",
+              "placeholders": [
+                {
+                  "placeholder_id": 1,
+                  "correct_keyword": "2",
+                  "incorrect_keywords": ["1", "3", "0"]
+                }
+              ],
+              "solution": "A cylinder has two flat circular faces and one curved surface.",
+              "hint": "Count the top and the bottom."
+            },
+            {
+              "question_type": "TRUE_FALSE",
+              "question": "Doubling the radius of the cylinder doubles its volume.",
+              "correct_answer": false,
+              "solution": "Volume depends on \\(r^2\\), so doubling the radius multiplies the volume by \\(4\\).",
+              "hint": "Look at the power of r in the volume formula."
+            }
+          ],
+          "language": "English",
+          "ct_key": "cylinder_geometry_ct_018",
+          "question_no": 1
+        }
+      ]
+    }
+  ]
+}
