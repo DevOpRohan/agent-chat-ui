@@ -12,7 +12,7 @@ const authBearer = process.env.PLAYWRIGHT_AUTH_BEARER;
  * their own project, without the IAP `setup` dependency or its storageState, and skip themselves
  * unless the base URL is a local dev server.
  */
-const MOCKED_BACKEND_SPECS = /ingester-mode\.spec\.ts$/;
+const MOCKED_BACKEND_SPECS = /ingester-mode(-shell)?\.spec\.ts$/;
 
 /** Vitest unit tests (`*.test.ts`, run by `pnpm test`), never Playwright's. */
 const UNIT_TESTS = /[\\/]tests[\\/]unit[\\/]/;

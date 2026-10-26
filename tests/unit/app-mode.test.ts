@@ -4,6 +4,7 @@ import {
   type AppMode,
   DEFAULT_MODE_ID,
   getAppMode,
+  getModeParamToPin,
   getThreadSearchMetadata,
   resolveAppModeId,
 } from "@/lib/app-mode";
@@ -23,6 +24,10 @@ describe("resolveAppModeId", () => {
     [{ mode: "ingester", ingestId: null }, "ingester"],
     [{ mode: "digitizer" }, "crafter"],
     [{ mode: "digitizer", ingestId: "thread-1" }, "ingester"],
+    // Crafter's own id never picks a mode: it is the default anyway.
+    [{ threadId: "chat-1" }, "crafter"],
+    [{ threadId: "chat-1", ingestId: "thread-1" }, "ingester"],
+    [{ mode: "crafter", threadId: "chat-1", ingestId: "thread-1" }, "crafter"],
   ] as const)("%j -> %s", (params, expected) => {
     expect(resolveAppModeId(params)).toBe(expected);
   });
@@ -33,6 +38,47 @@ describe("resolveAppModeId", () => {
       expect(
         resolveAppModeId({ mode: mode.urlValue, ingestId: "thread-1" }),
       ).toBe(mode.id);
+    }
+  });
+});
+
+describe("getModeParamToPin", () => {
+  it.each([
+    // A link that chose Ingester through its id alone gets ?mode=ingester.
+    [{ ingestId: "thread-1" }, "ingester"],
+    [{ mode: null, ingestId: "thread-1" }, "ingester"],
+    [{ mode: "", ingestId: "thread-1" }, "ingester"],
+    [{ threadId: "chat-1", ingestId: "thread-1" }, "ingester"],
+    // An unknown mode is replaced by the one on screen.
+    [{ mode: "digitizer", ingestId: "thread-1" }, "ingester"],
+    // A valid mode is never rewritten.
+    [{ mode: "ingester", ingestId: "thread-1" }, null],
+    [{ mode: " Ingester ", ingestId: "thread-1" }, null],
+    [{ mode: "crafter", ingestId: "thread-1" }, null],
+    [{ mode: "ingester" }, null],
+    // Plain Crafter links stay as they are.
+    [{}, null],
+    [{ mode: null, ingestId: null }, null],
+    [{ ingestId: "   " }, null],
+    [{ threadId: "chat-1" }, null],
+    [{ mode: "digitizer" }, null],
+  ] as const)("%j -> %s", (params, expected) => {
+    expect(getModeParamToPin(params)).toBe(expected);
+  });
+
+  it("pins exactly the mode the URL resolves to", () => {
+    for (const mode of APP_MODES) {
+      const params = { [mode.idParam]: "id-1" };
+      const pin = getModeParamToPin(params);
+      if (mode.id === DEFAULT_MODE_ID) {
+        expect(pin).toBeNull();
+      } else {
+        expect(pin).toBe(mode.urlValue);
+        expect(resolveAppModeId({ ...params, mode: pin })).toBe(mode.id);
+        // Once pinned, clearing the id keeps the mode.
+        expect(resolveAppModeId({ mode: pin })).toBe(mode.id);
+        expect(getModeParamToPin({ ...params, mode: pin })).toBeNull();
+      }
     }
   });
 });

@@ -9,8 +9,9 @@ const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown"]);
 const PREVIOUS_KEYS = new Set(["ArrowLeft", "ArrowUp"]);
 
 /**
- * The mode chosen from the keyboard, until its radio has focus. Each mode's top bar renders its own
- * switch, so the switch that receives the focus may be a new one, mounted after the change.
+ * The mode chosen on the switch (keyboard or click), until its radio has focus. Each mode's top bar
+ * renders its own switch, so the one that receives the focus is usually a new one, mounted after
+ * the change. Only a choice made on the switch sets it, so a page load never moves the focus.
  */
 let focusAfterSwitch: AppModeId | null = null;
 
@@ -80,7 +81,9 @@ export function ModeSwitch(props?: { className?: string }) {
                 : "text-muted-foreground hover:text-accent-foreground",
             )}
             onClick={() => {
-              if (!selected) setMode(option.id);
+              if (selected) return;
+              focusAfterSwitch = option.id;
+              setMode(option.id);
             }}
             onKeyDown={(event) => onKeyDown(event, index)}
           >

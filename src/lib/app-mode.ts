@@ -1,5 +1,5 @@
-import { parseAsString, useQueryState, useQueryStates } from "nuqs";
-import { useCallback, useMemo } from "react";
+import { parseAsString, useQueryStates } from "nuqs";
+import { useCallback, useEffect, useMemo } from "react";
 import { validate as isUuid } from "uuid";
 import { INGEST_GRAPH_ID } from "@/lib/ingest/ingest-types";
 
@@ -58,15 +58,34 @@ function findModeByUrlValue(value: string | null | undefined): AppMode | null {
   return APP_MODES.find((mode) => mode.urlValue === normalized) ?? null;
 }
 
-/** Pure: ?mode= wins when valid; else a link with ingestId (and no mode) opens Ingester; else Crafter. */
-export function resolveAppModeId(params: {
-  mode?: string | null;
-  ingestId?: string | null;
-}): AppModeId {
+/** The URL parameters that decide the mode: `?mode=` and every mode's id parameter. */
+export type AppModeUrlParams = { mode?: string | null } & Partial<
+  Record<AppMode["idParam"], string | null>
+>;
+
+/**
+ * Pure: ?mode= wins when valid; else a link carrying another mode's id (an
+ * `ingestId`, with no mode) opens that mode; else Crafter.
+ */
+export function resolveAppModeId(params: AppModeUrlParams): AppModeId {
   const fromUrl = findModeByUrlValue(params.mode);
   if (fromUrl) return fromUrl.id;
-  if (params.ingestId?.trim()) return "ingester";
-  return DEFAULT_MODE_ID;
+  const fromId = APP_MODES.find(
+    (mode) => mode.id !== DEFAULT_MODE_ID && !!params[mode.idParam]?.trim(),
+  );
+  return fromId?.id ?? DEFAULT_MODE_ID;
+}
+
+/**
+ * Pure: the `?mode=` value to write into the URL, or null. Only a link that
+ * picked a mode through its id alone (`?ingestId=` with no valid `mode`) gets
+ * one, so the mode stays when that id is later cleared (New, Upload a
+ * different file). A plain Crafter link never gains `?mode=`.
+ */
+export function getModeParamToPin(params: AppModeUrlParams): string | null {
+  if (findModeByUrlValue(params.mode)) return null;
+  const id = resolveAppModeId(params);
+  return id === DEFAULT_MODE_ID ? null : getAppMode(id).urlValue;
 }
 
 /** Upstream agent-chat-ui's pattern: a UUID graphId filters on assistant_id, otherwise on graph_id. */
@@ -76,30 +95,43 @@ export function getThreadSearchMetadata(mode: AppMode): Record<string, string> {
     : { graph_id: mode.graphId };
 }
 
-// One static key map so every caller shares the same nuqs subscriptions.
+// Static key maps so every caller shares the same nuqs subscriptions.
 const MODE_ID_PARAMS = Object.fromEntries(
   APP_MODES.map((mode) => [mode.idParam, parseAsString]),
 ) as Record<AppMode["idParam"], typeof parseAsString>;
+
+const MODE_URL_PARAMS = { mode: parseAsString, ...MODE_ID_PARAMS };
 
 export function useAppMode(): {
   mode: AppMode;
   setMode: (id: AppModeId) => void;
 } {
-  const [modeParam, setModeParam] = useQueryState("mode");
-  const [ingestId] = useQueryState("ingestId");
-  const mode = getAppMode(resolveAppModeId({ mode: modeParam, ingestId }));
+  const [params, setParams] = useQueryStates(MODE_URL_PARAMS);
+  const mode = getAppMode(resolveAppModeId(params));
 
   // Always written explicitly, so a link with an ingestId can still show
   // Crafter. Both thread ids stay in the URL, so switching back returns the
   // user to where they were.
   const setMode = useCallback(
     (id: AppModeId) => {
-      void setModeParam(getAppMode(id).urlValue);
+      void setParams({ mode: getAppMode(id).urlValue });
     },
-    [setModeParam],
+    [setParams],
   );
 
   return useMemo(() => ({ mode, setMode }), [mode, setMode]);
+}
+
+/**
+ * Call once, in the shell. Writes `?mode=` (replacing the history entry) when
+ * a link chose its mode through an id alone; see `getModeParamToPin`.
+ */
+export function usePinModeParam(): void {
+  const [params, setParams] = useQueryStates(MODE_URL_PARAMS);
+  const pin = getModeParamToPin(params);
+  useEffect(() => {
+    if (pin) void setParams({ mode: pin }, { history: "replace" });
+  }, [pin, setParams]);
 }
 
 /** The active thread id of a mode, read/written in the URL with nuqs (threadId or ingestId). */
@@ -117,6 +149,7 @@ export function useModeThreadId(
   return [ids[idParam] ?? null, setId];
 }
 
+/** The Ingester's active ingest (`?ingestId=`). */
 export function useIngestId(): [string | null, (id: string | null) => void] {
   return useModeThreadId(getAppMode("ingester"));
 }

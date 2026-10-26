@@ -22,8 +22,6 @@ import {
 import { createClient } from "./client";
 
 interface ThreadContextType {
-  /** The mode whose history list this is. */
-  modeId: AppModeId;
   getThreads: (params?: {
     limit?: number;
     offset?: number;
@@ -41,6 +39,8 @@ interface ThreadContextType {
 type ByMode<T> = Record<AppModeId, T>;
 
 interface ThreadStoreContextType {
+  /** Per mode, the metadata its history list filters on (`graph_id` or `assistant_id`). */
+  listMetadataByMode: ByMode<Record<string, string>>;
   threadsByMode: ByMode<Thread[]>;
   setThreadsByMode: Dispatch<SetStateAction<ByMode<Thread[]>>>;
   loadingByMode: ByMode<boolean>;
@@ -70,11 +70,11 @@ const THREAD_HISTORY_SELECT = [
  * thread in `?threadId=`, which is a Crafter thread. Its `useThreads()` is
  * therefore always bound to Crafter's list, whatever mode is on screen.
  */
-const CHAT_RUNTIME_MODE_ID: AppModeId = "crafter";
+export const CHAT_RUNTIME_MODE_ID: AppModeId = "crafter";
 
-function byMode<T>(value: () => T): ByMode<T> {
+function byMode<T>(value: (mode: AppMode) => T): ByMode<T> {
   return Object.fromEntries(
-    APP_MODES.map((mode) => [mode.id, value()]),
+    APP_MODES.map((mode) => [mode.id, value(mode)]),
   ) as ByMode<T>;
 }
 
@@ -86,6 +86,17 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   // The chat runs on `?assistantId=` when the setup screen set one (see
   // Stream.tsx), so the chat mode's history filters on that id too.
   const [assistantId] = useQueryState("assistantId");
+  const listMetadataByMode = useMemo(
+    () =>
+      byMode((mode) =>
+        getThreadSearchMetadata(
+          mode.pane === "chat" && assistantId
+            ? { ...mode, graphId: assistantId }
+            : mode,
+        ),
+      ),
+    [assistantId],
+  );
   const [threadsByMode, setThreadsByMode] = useState(() =>
     byMode<Thread[]>(() => []),
   );
@@ -111,13 +122,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         typeof params?.offset === "number" && params.offset >= 0
           ? params.offset
           : 0;
-      const searchMode =
-        mode.pane === "chat" && assistantId
-          ? { ...mode, graphId: assistantId }
-          : mode;
 
       const threads = await client.threads.search({
-        metadata: getThreadSearchMetadata(searchMode),
+        metadata: listMetadataByMode[mode.id],
         limit,
         offset,
         sortBy: "updated_at",
@@ -127,7 +134,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
       return threads;
     },
-    [apiUrl, assistantId, envApiUrl],
+    [apiUrl, envApiUrl, listMetadataByMode],
   );
 
   const updateThread = useCallback(
@@ -144,6 +151,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const store = useMemo<ThreadStoreContextType>(
     () => ({
+      listMetadataByMode,
       threadsByMode,
       setThreadsByMode,
       loadingByMode,
@@ -151,7 +159,13 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
       getThreadsForMode,
       updateThread,
     }),
-    [getThreadsForMode, loadingByMode, threadsByMode, updateThread],
+    [
+      getThreadsForMode,
+      listMetadataByMode,
+      loadingByMode,
+      threadsByMode,
+      updateThread,
+    ],
   );
 
   return (
@@ -218,7 +232,6 @@ export function useModeThreads(modeId: AppModeId): ThreadContextType {
 
   return useMemo(
     () => ({
-      modeId,
       getThreads,
       updateThread,
       threads,
@@ -228,7 +241,6 @@ export function useModeThreads(modeId: AppModeId): ThreadContextType {
     }),
     [
       getThreads,
-      modeId,
       setThreads,
       setThreadsLoading,
       threads,
@@ -236,6 +248,15 @@ export function useModeThreads(modeId: AppModeId): ThreadContextType {
       updateThread,
     ],
   );
+}
+
+/**
+ * The metadata a new thread of `modeId` needs to appear in that mode's history:
+ * exactly what the list filters on. Written at `threads.create`, so a thread
+ * whose first run never started (a 429, say) is still listed.
+ */
+export function useModeListMetadata(modeId: AppModeId): Record<string, string> {
+  return useThreadStore().listMetadataByMode[modeId];
 }
 
 /**
