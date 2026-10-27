@@ -1,3 +1,59 @@
+# Crafter | Ingester Modes Scratchpad (2026-10-26)
+
+## Problem Statement
+
+- Creators make topics in Crafter (this chat) and ingest TopicCrafter `.json` files in a separate standalone app (topic-ingester, Firestore records, never deployed). Goal: one app with a **Crafter | Ingester** switch, each mode with its own History, Ingester built only from this app's components and tokens, and Crafter unchanged.
+- Design: the "Agent Chat UI: Crafter and Ingester modes (PRD and design)" Claude Doc. Backend: QuestionCrafterAgent PR #253 (`topic_ingest`, merged into `develop`, live on dev).
+
+## Subproblem Tree
+
+- A. Mode state in the URL (`?mode=`, `ingestId`), one mode list (`src/lib/app-mode.ts`) so a later Digitizer is one entry.
+- B. Separate History per mode (filter on `graph_id`), never mixing with Stream.tsx's Crafter list.
+- C. Ingest flow: JSON-only upload with no OpenAI path, thread + run, poll, result, Run again, downloads.
+- D. Progress: thread metadata (designed) vs the deployed runtime (see Failed Hypotheses).
+- E. Crafter unchanged across mode switches (draft, artifact, layout, scroll, drops).
+- F. Tests: vitest for ported logic and routes; Playwright against a stateful fake LangGraph; local UI against dev.
+
+## Strategy Decisions
+
+- Shared contract first (`src/lib/ingest/ingest-types.ts`), then parallel work on logic, shell, pane, routes, typed topic model and tests.
+- Ported the standalone app's words word for word; tone colours reuse class strings already in `daily-budget.tsx`.
+- `Stream.tsx` untouched: it always sees Crafter's list through `ThreadModeScope`; the ingest pane has its own hook.
+- Chat stays mounted (invisible, `inert`) under the Ingester pane instead of unmounting.
+- Progress fallback (design doc): `threads.getState().next` every 3 s while busy; end of run from thread status + `runs.list`.
+- Topic file downloads allow GCS (`GCS_BUCKET_NAME`) and the backend's S3 topic bucket (fixed topics are saved there).
+
+## Experiment Log
+
+- `pnpm test` (vitest): 264 passed (11 files).
+- `npx tsc --noEmit`, `pnpm lint` (warnings only, no errors), `pnpm build`: pass.
+- `pnpm format:check`: clean `main` already fails on 22 files (Stream.tsx among them); every file this branch adds or changes is formatted.
+- Playwright, mocked backend (`--project=mocked-backend`, local `pnpm dev --port 3210` with `NEXT_PUBLIC_API_URL=http://127.0.0.1:2299`): `tests/ingester-mode.spec.ts` + `tests/ingester-mode-shell.spec.ts` 56 passed.
+- Crafter regression (`playwright.user-limits.config.ts`, same local server): 34 passed, 7 failed — the same 7 (attachment-limits ×4, pdf-pages ×3) and the same 34 as clean `main` `a5720d5` run the same way.
+- Independent review of the branch: confirmed bugs fixed (chat unmount on mode switch, `ingestId`-only links, focus on click, `created_at` in the poll, History insert, sign-in message, Run again re-check, upload size without Content-Length).
+
+## Deploy/Test Run Log
+
+- Backend `topic_ingest` live on dev (`develop` `0234692`) at 19:41:38Z.
+- Local UI (non-IAP, test JWT added by the browser harness, web security off for the dev CORS list) against dev, identity `local-test:ingest-e2e`:
+  - valid `all_types.json`: steps Reading → Checking → Preparing your preview, result `valid` with a preview link.
+  - broken copy (one hint without a full stop): tab closed during Checking, reopened from History; steps Checking → Fixing → Re-checking → Preparing; result `fixed` with the `.md` + `.json` pair; the `.md` downloaded through `/api/topic-file` from S3 (200, attachment). Fixer cost $0.099.
+  - History: Ingester listed only ingests (6); Crafter listed only a seeded Crafter-graph thread. No request to `api.openai.com`.
+  - Screenshots: `docs/screenshots/ingester/`.
+- No Cloud Run deploy (not requested).
+
+## Failed Hypotheses
+
+- "The graph's `Threads.patch` metadata writes show progress on the deployed runtime." False on dev's Postgres runtime: metadata stayed `queued` through whole runs (polled every 0.3 s), while the run, state and `values.record` were correct. Hence the `getState().next` fallback.
+- "New Crafter threads can carry `graph_id` from `threads.create` metadata." The SDK overwrites `metadata.graph_id` from its `graphId` option; Stream.tsx doesn't pass one, so the change was reverted. Ingest threads use `graphId`.
+
+## Final Learnings
+
+- Verify server-side metadata writes on the deployed runtime before building UI on them; keep a fallback that needs no backend change.
+- Keep hidden panes mounted rather than conditionally rendered when their state (artifacts keyed by `useId`, scroll, listeners) must survive.
+
+---
+
 # Stream Recovery Scratchpad
 
 ## Problem Statement
@@ -741,3 +797,16 @@ User requested PAGE_COUNT in ATTACHMENTS_INFO and reuse of existing file metadat
 - Release complete: PR #10 merged as 8374d10, identical runtime tree to baa71bd. Cloud Build ddd24dd2-acdd-4038-a291-30664c58a559 succeeded in us-east1; final receipt develop/prod digests and revisions are in DEPLOYMENT_GUIDE.md. Both runners provide Poppler 25.12.0. Promoted exact production revision to 100% after backend receipt commit 45f16711 was confirmed active in both environments; retained develop/older tags, IAP, resources and secret references.
 - Hosted limitation: Safari activity gate prevented acceptance without interrupting the user. Existing test-auth state returned 302 to sign-in; bearer absent. Stopped after the read-only auth check, with no hosted count/upload/generation request. Reported this separately from local tests and infrastructure readiness; no further browser attempts.
 - Final operational evidence: /tmp/ui-pdf-receipt-release-evidence.json records curated traffic, readiness, digest, resource, port and secret-reference names only. No credential values were printed or stored. Local test server stopped. Final follow-up changes only release documentation; no extra image build.
+
+
+## 2026-10-27 IST — CT terminology on develop
+
+User request: replace “question set” with CT and describe the entries inside each CT as variants. Keep the JSON schema and each existing question_no identity. Scope: upload summary/type badges, result header, issue summary/labels and local validation copy; deploy develop only. Existing phone primary-action viewport failure is outside this copy change.
+
+Plan: update existing expectations, confirm the old labels fail, replace copy, run unit/lint and focused one-worker browser checks, then build and deploy a pinned develop image with no production traffic.
+
+Evidence: updated expectations failed as intended (7 failures, 257 passes) before implementation. New labels are CT N, variant M; summaries show CTs containing variants. No application/API schema or variant identifiers changed.
+
+Verification: 264 unit tests, lint, affected-file Prettier and 10 focused browser scenarios passed. Cloud Build 6366a808-7107-4d7a-b451-4e6c4fb8a8ba succeeded. Develop revision `agent-chat-ui-dev-ct-3299cea9-1027` is Ready/ContainerHealthy, zero canonical traffic, with production still on the same revision at 100%. Existing mobile viewport failure remains open. Evidence: `/Users/rohanverma/NextjsProject/agent-chat-ui/output/ct-terminology-20261027/report.md`. At that stage no commit or PR had been created.
+
+Follow-up authorization: the user requested updating the origin develop codebase. Fetched `origin/develop` and confirmed it still equals the base `12cddde`; reran `pnpm test` before committing the scoped changes. Commit message: `fix: use CT and variant terminology in Ingester`. Push directly to `origin/develop` with a normal fast-forward push; no PR or production deployment is part of this follow-up.

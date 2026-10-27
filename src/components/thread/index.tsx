@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
 import {
   Component,
+  type ComponentType,
+  type DragEvent,
   type ErrorInfo,
   FormEvent,
   KeyboardEvent,
@@ -63,6 +65,10 @@ import {
 import { useTheme } from "next-themes";
 import { ThreadSettings } from "./thread-settings";
 import { getContentString } from "./utils";
+import { ModeSwitch } from "../mode-switch";
+import { IngestPane } from "../ingester/ingest-pane";
+import { type AppPane, useAppMode, usePinModeParam } from "@/lib/app-mode";
+import { ThreadModeScope } from "@/providers/Thread";
 
 function showThreadRunningToast() {
   toast("Thread is still running", {
@@ -362,10 +368,7 @@ class MessageRenderBoundary extends Component<
   }
 
   componentDidUpdate(previousProps: MessageRenderBoundaryProps) {
-    if (
-      previousProps.resetKey !== this.props.resetKey &&
-      this.state.hasError
-    ) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.hasError) {
       this.setState({ hasError: false });
     }
   }
@@ -421,15 +424,47 @@ function ScrollToBottom(props: { className?: string }) {
 
 const ENTER_TO_SEND_STORAGE_KEY = "lg:chat:enterToSend";
 
+/**
+ * Panes other than the chat, keyed by `AppMode.pane`. The chat pane is drawn
+ * inline in `Thread` because it shares the shell's state. While another mode
+ * is on screen, the chat and its artifact stay mounted and laid out, but
+ * invisible and inert, so a draft, an open artifact, the layout and the scroll
+ * position all survive a round trip; the mode's pane, with its own top bar,
+ * covers the whole main column.
+ */
+const MODE_PANES: Record<
+  Exclude<AppPane, "chat">,
+  { Pane: ComponentType; testId: string }
+> = {
+  ingest: { Pane: IngestPane, testId: "pane-ingest" },
+};
+
+// The chat composer's upload hook listens for file drops on `window`, and the
+// composer stays mounted in every mode. Outside the chat, the shell stops file
+// drags at its root so a dropped file never lands in the hidden chat draft;
+// panes handle drops on their own elements.
+function containFileDrag(event: DragEvent<HTMLDivElement>) {
+  event.stopPropagation();
+}
+
+function containFileDrop(event: DragEvent<HTMLDivElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 export function Thread() {
   const runtime = useThreadRuntime();
   const { resolvedTheme } = useTheme();
-  const [artifactContext, setArtifactContext] = useArtifactContext();
+  const [artifactContext] = useArtifactContext();
   const artifactSurfaceMode = useArtifactSurfaceMode();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
   const [manualArtifactOpen, setManualArtifactOpen] = useState(false);
 
-  const [threadId, _setThreadId] = useQueryState("threadId");
+  const [threadId] = useQueryState("threadId");
+  const { mode } = useAppMode();
+  usePinModeParam();
+  const modePane = mode.pane === "chat" ? null : MODE_PANES[mode.pane];
+  const isChatPane = modePane === null;
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
@@ -537,19 +572,25 @@ export function Thread() {
     }
     return ids;
   }, [runtime.values.ui]);
+  // The chat's layout (artifact column, expanded artifact) is kept in every
+  // mode, since the chat stays laid out under other panes.
   const artifactPaneOpen = artifactOpen || manualArtifactOpen;
   const isIframeArtifactSurface = artifactSurfaceMode === "iframe";
   const isArtifactExpandedMode =
     isLargeScreen && artifactPaneOpen && artifactExpanded;
+  // An expanded artifact hides the history only while the chat is on screen.
   const showDesktopHistoryPane =
-    isLargeScreen && chatHistoryOpen && !isArtifactExpandedMode;
+    isLargeScreen && chatHistoryOpen && !(isChatPane && isArtifactExpandedMode);
   const showDesktopArtifactHandle =
     isLargeScreen && artifactPaneOpen && !isArtifactExpandedMode;
   const showDesktopHistoryHandle = showDesktopHistoryPane;
   const isPaneDragActive = paneDragState.type !== "none";
 
   useEffect(() => {
-    if (threadId && displayMessages.length !== previousMessageLengthRef.current) {
+    if (
+      threadId &&
+      displayMessages.length !== previousMessageLengthRef.current
+    ) {
       markThreadSeen(threadId, Date.now());
     }
 
@@ -634,15 +675,6 @@ export function Thread() {
     setArtifactExpanded(false);
     closeArtifact();
   }, [closeArtifact, isArtifactExpandedMode, restoreLayoutFromExpand]);
-
-  const setThreadId = useCallback(
-    (value: string | null) => {
-      _setThreadId(value);
-      handleArtifactClose();
-      setArtifactContext({});
-    },
-    [_setThreadId, handleArtifactClose, setArtifactContext],
-  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -788,11 +820,15 @@ export function Thread() {
     event.preventDefault();
     if (isUploading) return;
     if (unverifiedPdfPages) {
-      toast.error("Remove and reattach the PDFs so their page count can be verified before sending.");
+      toast.error(
+        "Remove and reattach the PDFs so their page count can be verified before sending.",
+      );
       return;
     }
     if (pdfPages > MAX_PDF_PAGES) {
-      toast.error(`PDF attachments contain ${pdfPages} pages; maximum ${MAX_PDF_PAGES} combined. Remove extra pages or attachments before sending.`);
+      toast.error(
+        `PDF attachments contain ${pdfPages} pages; maximum ${MAX_PDF_PAGES} combined. Remove extra pages or attachments before sending.`,
+      );
       return;
     }
     if (
@@ -900,7 +936,7 @@ export function Thread() {
             <code>
               {String(
                 typeof error === "object" && error && "message" in error
-                  ? (error as { message?: unknown }).message ?? error
+                  ? ((error as { message?: unknown }).message ?? error)
                   : error,
               )}
             </code>
@@ -1073,7 +1109,9 @@ export function Thread() {
         return (
           <div
             key={String(message.id ?? `${message.type}-${index}`)}
-            data-conversation-turn={message.type === "human" ? index : undefined}
+            data-conversation-turn={
+              message.type === "human" ? index : undefined
+            }
             className={cn(
               "max-w-[min(100%,72ch)] rounded-2xl border px-4 py-3 text-sm whitespace-pre-wrap",
               message.type === "human"
@@ -1092,7 +1130,8 @@ export function Thread() {
       ) : null}
     </div>
   );
-  const showWorkingBadge = effectiveIsLoading || isThreadActiveStatus(runtime.threadStatus);
+  const showWorkingBadge =
+    effectiveIsLoading || isThreadActiveStatus(runtime.threadStatus);
   const logoVariant = resolvedTheme === "dark" ? "dark" : "light";
   const desktopHistoryWidth = showDesktopHistoryPane ? historyWidthPx : 0;
   const desktopMainGridTemplate = isLargeScreen
@@ -1106,6 +1145,69 @@ export function Thread() {
     "grid-cols-[1fr_0fr] transition-all duration-500",
     artifactPaneOpen && "grid-cols-[3fr_2fr]",
   );
+  const historyToggle = (!chatHistoryOpen || !isLargeScreen) && (
+    <Button
+      data-testid="chat-history-toggle"
+      className="hover:bg-accent"
+      variant="ghost"
+      onClick={() => setChatHistoryOpen((previous) => !previous)}
+    >
+      {chatHistoryOpen ? (
+        <PanelRightOpen className="size-5" />
+      ) : (
+        <PanelRightClose className="size-5" />
+      )}
+    </Button>
+  );
+  // The bar of a started chat; other panes always show it.
+  const topBar = (
+    <div className="relative z-10 flex items-center gap-3 p-2">
+      <div className="relative flex min-w-0 items-center justify-start gap-2">
+        <div className="absolute left-0 z-10">{historyToggle}</div>
+        <motion.div
+          animate={{
+            marginLeft: !chatHistoryOpen ? 48 : 0,
+          }}
+          transition={{
+            damping: 30,
+            stiffness: 300,
+            type: "spring",
+          }}
+        >
+          <ModeSwitch />
+        </motion.div>
+      </div>
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {isChatPane ? (
+          <>
+            <div ref={setNavigatorTriggerContainer} />
+            <ThreadSettings
+              enterToSend={enterToSend}
+              onEnterToSendChange={setEnterToSend}
+            />
+          </>
+        ) : (
+          <ThreadSettings />
+        )}
+      </div>
+
+      <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
+    </div>
+  );
+  // Takes the started chat's top bar's place while another mode is on screen
+  // (that mode's pane draws the only top bar, so the switch and the history
+  // toggle exist once). It keeps the bar's height, so the hidden chat's scroll
+  // position doesn't move: p-2 around the 40 px logo's box and the
+  // conversation navigator's trigger, which keeps rendering here, hidden.
+  const chatTopBarSpacer = (
+    <div
+      aria-hidden="true"
+      className="flex shrink-0 items-center gap-3 p-2"
+    >
+      <div className="h-10" />
+      <div ref={setNavigatorTriggerContainer} />
+    </div>
+  );
 
   return (
     <div
@@ -1113,6 +1215,9 @@ export function Thread() {
         "flex h-screen w-full overflow-hidden",
         isPaneDragActive && "cursor-col-resize",
       )}
+      onDragEnter={isChatPane ? undefined : containFileDrag}
+      onDragLeave={isChatPane ? undefined : containFileDrag}
+      onDrop={isChatPane ? undefined : containFileDrop}
     >
       <div
         data-testid="pane-history"
@@ -1135,7 +1240,9 @@ export function Thread() {
             ? "cursor-col-resize"
             : "pointer-events-none opacity-0",
         )}
-        style={{ width: showDesktopHistoryHandle ? RESIZE_HANDLE_WIDTH_PX : 0 }}
+        style={{
+          width: showDesktopHistoryHandle ? RESIZE_HANDLE_WIDTH_PX : 0,
+        }}
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize history and chat panes"
@@ -1171,6 +1278,7 @@ export function Thread() {
           className={cn(
             "grid h-full w-full",
             !isLargeScreen && mobileMainGridClasses,
+            !isChatPane && "relative",
           )}
           style={
             isLargeScreen
@@ -1184,26 +1292,16 @@ export function Thread() {
               "relative flex min-w-0 flex-col overflow-hidden",
               !chatStarted && "grid-rows-[1fr]",
               isArtifactExpandedMode && "pointer-events-none opacity-0",
+              !isChatPane && "invisible opacity-0",
             )}
             aria-hidden={isArtifactExpandedMode ? "true" : undefined}
+            inert={!isChatPane}
           >
-            {!chatStarted && (
+            {isChatPane && !chatStarted && (
               <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
-                <div>
-                  {(!chatHistoryOpen || !isLargeScreen) && (
-                    <Button
-                      data-testid="chat-history-toggle"
-                      className="hover:bg-accent"
-                      variant="ghost"
-                      onClick={() => setChatHistoryOpen((previous) => !previous)}
-                    >
-                      {chatHistoryOpen ? (
-                        <PanelRightOpen className="size-5" />
-                      ) : (
-                        <PanelRightClose className="size-5" />
-                      )}
-                    </Button>
-                  )}
+                <div className="flex items-center gap-2">
+                  {historyToggle}
+                  <ModeSwitch />
                 </div>
                 <ThreadSettings
                   enterToSend={enterToSend}
@@ -1211,58 +1309,7 @@ export function Thread() {
                 />
               </div>
             )}
-            {chatStarted && (
-              <div className="relative z-10 flex items-center gap-3 p-2">
-                <div className="relative flex min-w-0 items-center justify-start gap-2">
-                  <div className="absolute left-0 z-10">
-                    {(!chatHistoryOpen || !isLargeScreen) && (
-                      <Button
-                        data-testid="chat-history-toggle"
-                        className="hover:bg-accent"
-                        variant="ghost"
-                        onClick={() => setChatHistoryOpen((previous) => !previous)}
-                      >
-                        {chatHistoryOpen ? (
-                          <PanelRightOpen className="size-5" />
-                        ) : (
-                          <PanelRightClose className="size-5" />
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                  <motion.button
-                    className="flex min-w-0 cursor-pointer items-center gap-2"
-                    onClick={() => setThreadId(null)}
-                    animate={{
-                      marginLeft: !chatHistoryOpen ? 48 : 0,
-                    }}
-                    transition={{
-                      damping: 30,
-                      stiffness: 300,
-                      type: "spring",
-                    }}
-                  >
-                    <QuestionCrafterLogoSVG
-                      width={40}
-                      height={40}
-                      variant={logoVariant}
-                    />
-                    <span className="truncate text-xl font-semibold tracking-tight">
-                      Question Crafter
-                    </span>
-                  </motion.button>
-                </div>
-                <div className="ml-auto flex shrink-0 items-center gap-1">
-                  <div ref={setNavigatorTriggerContainer} />
-                  <ThreadSettings
-                    enterToSend={enterToSend}
-                    onEnterToSendChange={setEnterToSend}
-                  />
-                </div>
-
-                <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
-              </div>
-            )}
+            {chatStarted && (isChatPane ? topBar : chatTopBarSpacer)}
 
             <StickToBottom className="relative flex-1 overflow-hidden">
               <StickyToBottomContent
@@ -1303,7 +1350,8 @@ export function Thread() {
                             getMessagesMetadata={runtime.getMessagesMetadata}
                             onSelectBranch={runtime.setBranch}
                             hasCustomComponentsForMessage={
-                              !!message.id && uiMessageIdsByMessageId.has(message.id)
+                              !!message.id &&
+                              uiMessageIdsByMessageId.has(message.id)
                             }
                           />
                         ),
@@ -1336,7 +1384,7 @@ export function Thread() {
                           variant={logoVariant}
                         />
                         <h1 className="text-2xl font-semibold tracking-tight">
-                          Question Crafter
+                          Crafter
                         </h1>
                       </div>
                     )}
@@ -1401,7 +1449,9 @@ export function Thread() {
                                     !enterToSend))
                               ) {
                                 event.preventDefault();
-                                const element = event.target as HTMLElement | undefined;
+                                const element = event.target as
+                                  | HTMLElement
+                                  | undefined;
                                 const form = element?.closest("form");
                                 form?.requestSubmit();
                               }
@@ -1428,16 +1478,29 @@ export function Thread() {
                                 aria-live="polite"
                                 data-testid="attachment-counts"
                               >
-                                {attachmentCounts.images}/{MAX_IMAGE_ATTACHMENTS} images · {attachmentCounts.pdfs}/{MAX_PDF_ATTACHMENTS} PDFs
+                                {attachmentCounts.images}/
+                                {MAX_IMAGE_ATTACHMENTS} images ·{" "}
+                                {attachmentCounts.pdfs}/{MAX_PDF_ATTACHMENTS}{" "}
+                                PDFs
                               </span>
-                              <span className="text-xs" aria-live="polite" data-testid="pdf-page-count">
-                                {unverifiedPdfPages ? "Reattach PDFs to verify pages" : checkingPdfPages ? "Checking PDF pages…" : `${pdfPages}/${MAX_PDF_PAGES} PDF pages`}
+                              <span
+                                className="text-xs"
+                                aria-live="polite"
+                                data-testid="pdf-page-count"
+                              >
+                                {unverifiedPdfPages
+                                  ? "Reattach PDFs to verify pages"
+                                  : checkingPdfPages
+                                    ? "Checking PDF pages…"
+                                    : `${pdfPages}/${MAX_PDF_PAGES} PDF pages`}
                               </span>
                             </span>
                             {isUploading && (
                               <span className="text-muted-foreground ml-2 flex items-center gap-2 text-sm">
                                 <LoaderCircle className="h-4 w-4 animate-spin" />
-                                <span className="sr-only sm:not-sr-only">Uploading...</span>
+                                <span className="sr-only sm:not-sr-only">
+                                  Uploading...
+                                </span>
                               </span>
                             )}
                           </Label>
@@ -1503,6 +1566,7 @@ export function Thread() {
                 showDesktopArtifactHandle
                   ? "cursor-col-resize"
                   : "pointer-events-none opacity-0",
+                !isChatPane && "invisible",
               )}
               role="separator"
               aria-orientation="vertical"
@@ -1510,6 +1574,7 @@ export function Thread() {
               title="Drag to resize chat and artifact panes"
               aria-hidden={showDesktopArtifactHandle ? undefined : "true"}
               tabIndex={showDesktopArtifactHandle ? 0 : -1}
+              inert={!isChatPane}
               onPointerDown={handleArtifactResizePointerDown}
               onKeyDown={handleArtifactResizeKeyDown}
             >
@@ -1529,7 +1594,9 @@ export function Thread() {
             className={cn(
               "relative flex min-w-0 flex-col border-l",
               !artifactPaneOpen && "pointer-events-none",
+              !isChatPane && "invisible opacity-0",
             )}
+            inert={!isChatPane}
           >
             <div className="absolute inset-0 flex min-w-0 flex-col overflow-hidden">
               <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b p-4">
@@ -1577,6 +1644,20 @@ export function Thread() {
               ) : null}
             </div>
           </div>
+
+          {modePane ? (
+            <div
+              data-testid={modePane.testId}
+              className="absolute inset-0 flex min-w-0 flex-col overflow-hidden"
+            >
+              {topBar}
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                <ThreadModeScope modeId={mode.id}>
+                  <modePane.Pane />
+                </ThreadModeScope>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

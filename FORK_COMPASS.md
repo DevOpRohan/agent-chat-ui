@@ -1,11 +1,11 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-10-08_
-_Branch: main / develop_
+_Last updated: 2026-10-27_
+_Branch: develop (CT terminology update on base `12cddde`; mode dropdown on `fix/mode-menu`)_
 _Runtime release: PR #7 (`597dcb8`, source `15f6f1c`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
-This document is the current map of fork-specific behavior in this worktree. The poll-first runtime is now the source-of-truth baseline for the fork, alongside the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, and HITL flows.
+This document is the current map of fork-specific behavior in this worktree. The poll-first runtime is now the source-of-truth baseline for the fork, alongside the existing fork features that still matter: GCS/OpenAI uploads, IAP-backed auth, thread history, artifact rendering, HITL flows, and the Crafter | Ingester modes (section 4.7).
 
 ## 1) Executive Summary
 
@@ -52,7 +52,21 @@ Verified-count metadata snapshot (2026-10-08):
 
 - Runtime source `baa71bd`: 95 fork-only commits against pinned `upstream/main`; 104 files changed, 15,549 insertions and 1,573 deletions (`git diff upstream/main...baa71bd --shortstat`). PR #10 merged the identical tree as `8374d10`.
 
+Crafter | Ingester modes snapshot (2026-10-26):
+
+- Branch `feat/crafter-ingester-modes` from `origin/main` `a5720d5`: 13 commits; 76 files changed, 20884 insertions(+), 154 deletions(-) (`git diff a5720d5...HEAD --shortstat`). New files are mostly `src/lib/ingest/*`, `src/components/ingester/*`, the two API routes, unit tests and the Playwright spec; `src/providers/Stream.tsx` is unchanged.
+
+CT terminology release snapshot (2026-10-27):
+
+- Develop base `12cddde`, followed by the CT terminology commit: 113 fork-only commits against the pinned `upstream/main`. Release diff: 170 files changed, 36839 insertions(+), 2496 deletions(-).
+
 Recent fork-only commit log:
+
+- `feat: mode dropdown in the top bar, and plain updated-files copy` (`fix/mode-menu`, on develop `8e61163`): the Crafter | Ingester switch becomes a dropdown in place of the logo and title; "Your updated topic files" says to work on the new files for further changes.
+
+- `fix: use CT and variant terminology in Ingester` (develop): CT/CTs in summaries, type badges, issue/report labels and validation messages; variants keep their existing `question_no` identities. Includes updated expectations and documentation.
+
+- `feat/crafter-ingester-modes` (PR to `main`): contract types and vitest; ported Ingester logic; JSON-only ingest upload, topic file download and skill zip; typed topic model; Crafter | Ingester switch with per-mode history; Ingester pane and hook; Playwright spec; docs.
 
 - `baa71bd`: `feat: reuse verified PDF page counts through signed metadata` — generation-pinned sources, domain-separated receipts, native metadata preservation and model-readable PAGE_COUNT.
 
@@ -74,6 +88,12 @@ Recent fork-only commit log:
 - `51d28c9`: `feat: migrate chat runtime to poll-first execution`
 
 ## 3) Recent Change
+
+- 2026-10-27: The daily credit limit no longer stops an ingest. Checking a topic is algorithmic, so the backend (QuestionCrafterAgent `topic_import/credits.py`) never refuses a `topic_ingest` run for the limit; it only skips the automatic fixer. Such a result is `needs_author_fixes` with `record.result.fix_skipped` (`daily_limit` or `credits_unavailable`), and the result panel says: "We can't fix these for you because you've reached your daily credit limit. Fix them yourself with your assistant, using the steps below, or ask your reporting manager for more credits and then select Run again." (`FIX_SKIPPED_NOTE`), with a Run again button. The empty-chat welcome title is now "Crafter".
+
+- 2026-10-27: The top bar drops the Question Crafter logo and title. In their place, a **mode menu** names the current mode (Crafter or Ingester) and opens a menu with both modes, each with one line about what it does. The empty-chat welcome (logo and "Question Crafter") is unchanged. To start a new chat or ingest, use New in History (the logo used to do this). Ingester's "Your updated topic files" card now says plainly to work on the new files for any further changes.
+
+- 2026-10-26: Add a **Crafter | Ingester** mode switch. Ingester checks a TopicCrafter `.json` on the backend's thread-based `topic_ingest` graph (one LangGraph thread per ingest), shows progress and the result in its own pane, and lists ingests in its own History (filtered by `graph_id`; Crafter's history now lists only Crafter threads). The JSON-only `/api/ingest/upload` has no OpenAI path. Heading is "History" in every mode. See section 4.7.
 
 - 2026-09-08: Refine conversation navigation with uniform 12px resting ticks and tapered hover/focus expansion. Show controls only for overflowing conversations with at least three turns. Use an outline sheet on touch/narrow panes, with search for 12+ turns and a desktop outline shortcut for long chats. Hold reading position while exploring the outline; restore keyboard focus on close. Pane grips appear only on hover/focus/drag.
 
@@ -191,6 +211,7 @@ Current behavior:
 - Touch/narrow panes use a header outline action and modal sheet with large rows. At 12+ turns, search is available and desktop also exposes the outline. Opening it pauses bottom-follow and centers/focuses the current row; closing restores trigger focus. Selecting a turn scrolls only the chat. The existing bottom button restores following.
 - Navigator previews/search use prompt and first assistant text, excluding hidden messages, tool payloads, and reasoning blocks. Attachment-only prompts have a fallback label; a pending final response has quiet status text. Arrow keys, Home/End, PageUp/PageDown, Escape, reduced motion, pane resizing, and thread switches are supported. Full-width artifacts hide navigation.
 - History/chat and chat/artifact resize grips retain their hit areas and keyboard controls but appear only on hover, keyboard focus, or drag; hover titles describe the resize action.
+- History is per mode (section 4.7): `ThreadProvider` keeps one list per mode and adds `metadata: getThreadSearchMetadata(mode)` (`graph_id`, or `assistant_id` for a UUID) to `threads.search`. The heading is "History" in every mode. `Stream.tsx` always gets Crafter's list through `ThreadModeScope`, so its background refresh never touches the Ingester list.
 
 Primary files:
 
@@ -219,6 +240,30 @@ Primary files:
 - `src/components/thread/messages/markdown-artifact.tsx`
 - `src/components/thread/markdown-text.tsx`
 - `src/components/thread/artifact.tsx`
+
+### 4.7 Crafter | Ingester Modes
+
+Current behavior:
+
+- Modes are one list in `src/lib/app-mode.ts` (`APP_MODES`: label, `?mode=` value, graph id, URL id param, pane). `?mode=crafter|ingester` via `nuqs`; no mode → Crafter; an `ingestId`-only link → Ingester; Crafter keeps `threadId`, Ingester uses `ingestId`, switching keeps both. A later mode (Digitizer) is one entry plus its pane in the shell's `MODE_PANES` map.
+- `ModeSwitch` (`src/components/mode-switch.tsx`): a dropdown in the top bar's left corner, where the logo and title used to be, in both modes and on phones. It is a ghost `Button` naming the current mode (`aria-haspopup="menu"`, accessible name "Mode: <mode>") over a popover-coloured `role="menu"` of `menuitemradio`s (label, the mode's `description` from `APP_MODES`, a check on the current one). Keyboard: Enter, Space or the arrows open it on the current mode; arrows, Home and End move; Escape closes it and returns focus to the button. After a pick, focus moves to the new mode's button.
+- Ingester hides the chat pane, composer, artifact pane, conversation navigator and enter-to-send setting; the theme setting stays. The pane lives in the chat column at the chat's width, built only from `src/components/ui/*`, existing tokens and `lucide-react`.
+- One ingest = one thread on `topic_ingest`: browser file check → `POST /api/ingest/upload` (JSON only, 10 MB, saves `topic-ingest/<uuid>.json` to `GCS_BUCKET_NAME`, no OpenAI code path) → `threads.create` (metadata `graph_id`, `thread_title`, `ingest_file_name`, `ingest_source_url`, stage/status `queued`) → `runs.create(..., { input: { source_url, file_name }, onDisconnect: "continue" })`.
+- `use-ingest-thread.ts` polls `threads.search({ ids, select })` every 1.5 s (paused while hidden; slower when stalled; backoff on errors). The graph's own thread-metadata writes don't persist on the deployed Postgres runtime (checked live on dev, 2026-10-26), so while busy the hook also reads `threads.getState` at most every 3 s and maps the checkpoint's `next` to a stage (`record-view.ts` `stageFromNext`; metadata wins when it has a stage). The run has ended when the thread errors, metadata is final, or `runs.list` shows the latest run finished; then `values.record` is read once and mapped by `record-view.ts`. Run again re-checks the thread, patches stage/status back to `queued` and starts a new run on the same thread; it is disabled while busy (the deployed runtime queues a second run instead of rejecting it).
+- Mode switches keep the chat subtree mounted: in Ingester the chat pane, chat↔artifact handle and artifact pane are invisible and `inert` under the mode pane (an absolute overlay), so Crafter returns with its draft, scroll, artifact and layout. A link with only `ingestId` writes `mode=ingester` once.
+- Results use the standalone topic-ingester app's words (`status-copy.ts`, `plain-issues.ts`, `FILE_MESSAGES`), with CT/CTs terminology for `cts`. Summaries count CTs and their variants; type badges count CTs, and issue/report labels use `CT N, variant M`, preserving each variant's `question_no`. UI-only statuses: `run_error` (thread error; the "couldn't finish" copy), `failed_to_start` (no run started), stalled (busy with no metadata update for 30 minutes).
+- Downloads: the report is made in the browser; topic `.json`/`.md` go through `GET /api/topic-file` (https, allow-listed hosts and buckets, no redirects, 25 MB). The skill zip is `public/skill/TopicCrafter-v0.1.0.zip` with `skill:sync`/`skill:check`.
+- `src/lib/ingest/topic-model.ts`: the typed topic JSON, one interface per `question_type` plus the `QUESTION_TYPES` registry, for per-type UX.
+- Credits: the daily limit never refuses an ingest (the backend only skips its fixer). `record.result.fix_skipped` becomes `IngestResult.fixSkipped`; the result shows `FIX_SKIPPED_NOTE` in the status banner and offers Run again next to the report download. The checkpoint step `skip_fix` maps to the checking stage. The 429/503 limit notices on start and Run again stay, for a backend that still refuses.
+
+Primary files:
+
+- `src/lib/app-mode.ts`, `src/components/mode-switch.tsx`
+- `src/components/ingester/*`, `src/hooks/use-ingest-thread.ts`
+- `src/lib/ingest/*` (`ingest-types.ts` is the shared contract)
+- `src/app/api/ingest/upload/*`, `src/app/api/topic-file/*`
+- `scripts/skill.mjs`, `public/skill/`
+- Tests: `tests/unit/**` (vitest, `pnpm test`), `tests/ingester-mode.spec.ts`, `tests/helpers/ingest-backend.ts`
 
 ## 5) Removed Stream-Only Subsystems
 
@@ -269,6 +314,11 @@ Start here when modifying the fork:
 - Activity tracking: `src/lib/thread-activity.ts`
 - Upload APIs: `src/app/api/upload/route.ts`, `src/app/api/openai/upload/route.ts`
 - Artifact provider: `src/components/thread/artifact.tsx`
+- Modes: `src/lib/app-mode.ts`, `src/components/mode-switch.tsx`
+- Ingester pane and hook: `src/components/ingester/ingest-pane.tsx`, `src/hooks/use-ingest-thread.ts`
+- Ingester logic and contract: `src/lib/ingest/ingest-types.ts`, `record-view.ts`, `status-copy.ts`, `topic-model.ts`
+- Ingester routes: `src/app/api/ingest/upload/route.ts`, `src/app/api/topic-file/route.ts`
+- Ingester coverage: `tests/unit/**`, `tests/ingester-mode.spec.ts`
 
 ## 7) Notes / Known Deviations
 
@@ -277,6 +327,7 @@ Start here when modifying the fork:
 - Message metadata for branches/checkpoints is derived from `threads.getHistory({ limit: 100 })`; older checkpoints beyond that window may not expose branch controls in the UI.
 - `LoadExternalComponent` still receives a `stream` prop because that is the upstream component API shape, even though the backing object is the polling runtime.
 - `DEPLOYMENT_GUIDE.md` did not need changes for this migration because env vars and deployment flow stayed the same.
+- Crafter history filters on `graph_id` since the modes change: a Crafter thread that was created but never had a run (no `graph_id`; for example its first run was refused by the daily limit) is no longer listed. The SDK's `threads.create` writes `metadata.graph_id` only from its `graphId` option, and `Stream.tsx` (unchanged) doesn't pass one. Stream keeps polling the selected Crafter thread while the user is in Ingester, so a Crafter run notice can appear there.
 
 ## Daily cost admission feedback (2026-10-08)
 

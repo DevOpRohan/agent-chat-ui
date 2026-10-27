@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "file": "TopicCrafter-v0.1.0.zip",
+  "bytes": 167780,
+  "sha256": "035a4c58afe985bf9012c712e57513e6bfe2a03f97362a6665de7013e91ad7a7",
+  "source": {
+    "repository": "DevOpRohan/QuestionCrafterAgent",
+    "path": "skills/TopicCrafter.zip",
+    "commit": "ebbda586b05192d91270aa86e6b5dd61c76833ac"
+  }
+}

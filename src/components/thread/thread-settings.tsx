@@ -27,8 +27,9 @@ export function ThreadSettings({
   enterToSend,
   onEnterToSendChange,
 }: {
-  enterToSend: boolean;
-  onEnterToSendChange: (checked: boolean) => void;
+  /** Omit both to hide the composer section (panes without a composer). */
+  enterToSend?: boolean;
+  onEnterToSendChange?: (checked: boolean) => void;
 }) {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [open, setOpen] = useState(false);
@@ -89,24 +90,26 @@ export function ThreadSettings({
             </div>
           </section>
 
-          <section className="space-y-2">
-            <h3 className="text-sm font-medium">Message composer</h3>
-            <div className="border-border bg-muted/30 flex items-center justify-between rounded-lg border px-3 py-3">
-              <div className="space-y-1 pr-3">
-                <p className="text-sm font-medium">Press Enter to send</p>
-                <p className="text-muted-foreground text-xs">
-                  {enterToSend
-                    ? "Enter sends, Shift+Enter inserts a new line."
-                    : "Enter inserts a new line. Use Ctrl/Cmd+Enter to send."}
-                </p>
+          {onEnterToSendChange ? (
+            <section className="space-y-2">
+              <h3 className="text-sm font-medium">Message composer</h3>
+              <div className="border-border bg-muted/30 flex items-center justify-between rounded-lg border px-3 py-3">
+                <div className="space-y-1 pr-3">
+                  <p className="text-sm font-medium">Press Enter to send</p>
+                  <p className="text-muted-foreground text-xs">
+                    {enterToSend
+                      ? "Enter sends, Shift+Enter inserts a new line."
+                      : "Enter inserts a new line. Use Ctrl/Cmd+Enter to send."}
+                  </p>
+                </div>
+                <Switch
+                  checked={enterToSend}
+                  onCheckedChange={onEnterToSendChange}
+                  aria-label="Toggle Enter to send"
+                />
               </div>
-              <Switch
-                checked={enterToSend}
-                onCheckedChange={onEnterToSendChange}
-                aria-label="Toggle Enter to send"
-              />
-            </div>
-          </section>
+            </section>
+          ) : null}
         </div>
       </SheetContent>
     </Sheet>

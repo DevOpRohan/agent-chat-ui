@@ -92,6 +92,37 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 > [!NOTE]
 > The chat now includes a light/dark mode toggle in the top-right of the UI (and on the setup screen). Theme preference is persisted via `next-themes`.
 
+## Crafter and Ingester modes
+
+A **mode menu** sits in the top bar's left corner, in both modes and on phones. Its button names the current mode (Crafter or Ingester), and the menu lists both modes, each with one line about what it does.
+
+- **Crafter** is the chat with the `NEXT_PUBLIC_ASSISTANT_ID` graph, unchanged.
+- **Ingester** checks a topic `.json` that a creator made with the TopicCrafter skill in their own ChatGPT or Claude, fixes small formatting issues once, and publishes a preview. Markdown is never ingested.
+
+**URL state.** `?mode=crafter|ingester` (read with `nuqs`). No `mode` means Crafter, so existing links behave as before; a link with `ingestId` and no `mode` opens Ingester. Crafter keeps `threadId`, Ingester uses `ingestId`, and switching keeps both. The modes are one list in `src/lib/app-mode.ts` (label, URL value, graph id, URL id param, pane), so a later mode is one entry plus its pane.
+
+**History.** Each mode has its own list, drawn by the same `ThreadHistory` component under one "History" heading. `threads.search` filters on the thread's `graph_id`: the Crafter graph (`NEXT_PUBLIC_ASSISTANT_ID`; a UUID filters on `assistant_id`) or `topic_ingest`. The lists never mix, and each keeps its own selected item; a new ingest appears in the list at once. The server writes `graph_id` when a run starts, so a Crafter thread whose first run never started (for example, refused by the daily limit) is no longer listed. Ingest threads get `graph_id` at `threads.create` (the SDK's `graphId` option), so they are listed even then.
+
+**Switching modes** keeps the chat mounted but hidden (`inert`) under the Ingester pane, so coming back to Crafter keeps the draft, scroll position, open artifact and pane layout.
+
+**One ingest.** Each ingest is one LangGraph thread on the backend's `topic_ingest` graph:
+
+1. The browser checks the file (`src/lib/ingest/topic-file.ts`): `.json` only, up to 10 MB; a `.md` gets a plain "upload the .json" message.
+2. `POST /api/ingest/upload` saves it to `GCS_BUCKET_NAME` as `topic-ingest/<uuid>.json` and returns its `https://storage.googleapis.com/...` link. This route has **no OpenAI code path**; the chat's `/api/upload` is unchanged.
+3. `threads.create` with metadata `graph_id`, `thread_title`, `ingest_file_name`, `ingest_source_url`, and `ingest_stage`/`ingest_status` = `queued`, then `runs.create(threadId, "topic_ingest", { input: { source_url, file_name }, onDisconnect: "continue" })`. A daily-limit rejection shows the existing notice.
+4. The pane (`src/hooks/use-ingest-thread.ts`) polls `threads.search({ ids: [id], select: ["thread_id", "status", "metadata", "created_at", "updated_at"] })` every 1.5 s while the run is going, paused while the tab is hidden. The graph also writes its stage into the thread's metadata, but on the deployed (Postgres) runtime those writes don't persist, so while the thread is busy the pane also reads `threads.getState` at most every 3 s and takes the stage from the checkpoint's `next` (the design's fallback; metadata wins when it carries a stage). A run has ended when the thread is in error, its metadata is final, or `runs.list` shows the latest run is no longer pending or running; then `values.record` is read once. The run continues if the tab is closed; the result is in History.
+5. **Run again** starts a new run on the same thread with the same uploaded file. It is disabled while the thread is busy.
+
+All LangGraph calls go through `createClient` and the existing JWT flow; `Stream.tsx` never sees an ingest thread. In Ingester the composer, artifact pane, conversation navigator and enter-to-send setting are hidden, and the daily budget control sits beside **Ingest topic**.
+
+**Credits.** Checking a topic is free, so the daily credit limit never stops an ingest; it only stops the automatic fixer. Over the limit (or when the limit can't be checked), the backend reports the issues unfixed with `record.result.fix_skipped`, and the result says so: fix them yourself with your assistant, or get more credits and select **Run again**.
+
+**Results and downloads.** Wording comes from the standalone topic-ingester app (`src/lib/ingest/status-copy.ts`, `plain-issues.ts`), with **CT/CTs** used for entries in `cts`. Each CT can contain multiple variants in `variations`; summaries count CTs and variants, and issue labels keep the file's variant number (for example, **CT 2, variant 3**). The report for the creator's assistant is made in the browser from `record.result.issue_report_md`. The topic `.json`/`.md` links (the `.md` + `.json` pair only when the fixer changed the topic) go through `GET /api/topic-file?url=&name=`, which fetches only `https` links on allow-listed hosts and buckets (`TOPIC_JSON_ALLOWED_HOSTS`, `TOPIC_JSON_ALLOWED_BUCKETS`), follows no redirects and caps files at 25 MB.
+
+**Skill.** The TopicCrafter skill zip is served from `public/skill/TopicCrafter-v0.1.0.zip` (manifest `src/lib/ingest/skill-release.json`). `pnpm skill:sync` copies a new build from `$QUESTIONCRAFTER_AGENT_DIR/skills/TopicCrafter.zip`; `pnpm skill:check` verifies the zip and manifest agree.
+
+**Typed topic model.** `src/lib/ingest/topic-model.ts` defines the topic JSON with one TypeScript interface per `question_type` (a discriminated union over all 18 types) and a `QUESTION_TYPES` registry (label, family, part type, icon), from the backend's `question_models.py`. Build per-type UI on it.
+
 ## Environment Variables
 
 You can bypass the initial setup form by setting the following environment variables:
@@ -111,6 +142,11 @@ GCS_BUCKET_NAME=my-chat-bucket
 # Provider selection (affects client hints and server behavior)
 NEXT_PUBLIC_MODEL_PROVIDER=OPENAI
 MODEL_PROVIDER=OPENAI
+# Ingester: where /api/topic-file may download topic files from (defaults shown; GCS_BUCKET_NAME is always allowed)
+TOPIC_JSON_ALLOWED_HOSTS=storage.googleapis.com,.amazonaws.com
+TOPIC_JSON_ALLOWED_BUCKETS=transferredv2-cerebry-ai-topic-jsons
+# Optional (build time): link the TopicCrafter skill somewhere else instead of the bundled zip
+NEXT_PUBLIC_TOPICCRAFTER_SKILL_URL=
 ```
 
 > [!TIP]
@@ -143,6 +179,14 @@ When these environment variables are set, the application will use them instead 
 
 - Fork customization guide (includes upload refactor details): `FORK_COMPASS.md`
 - Build, push, and Cloud Run deployment: `DEPLOYMENT_GUIDE.md`
+
+## Unit tests (vitest)
+
+```bash
+pnpm test
+```
+
+Runs `tests/unit/**/*.test.ts`: the Ingester's ported logic, record → view mapping, file links, the typed topic model, the mode list, the upload and topic-file routes (including a test that no request reaches `api.openai.com`) and the skill manifest.
 
 ## E2E Testing (Playwright)
 

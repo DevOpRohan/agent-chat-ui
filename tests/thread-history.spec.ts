@@ -17,7 +17,10 @@ test("thread history lists new thread", async ({ page }) => {
   const cancelButton = page.getByRole("button", { name: "Cancel" });
   await expect(cancelButton).toBeVisible({ timeout: 60_000 });
 
-  const historyHeading = page.getByRole("heading", { name: "Chat History" });
+  const historyHeading = page.getByRole("heading", {
+    name: "History",
+    exact: true,
+  });
   await expect(historyHeading).toBeVisible({ timeout: 60_000 });
 
   const historyPanel = page.locator("div", { has: historyHeading });
