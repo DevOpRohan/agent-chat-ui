@@ -998,6 +998,80 @@ test.describe("Run again", () => {
   });
 });
 
+// ---------------------------------------------------------------- the daily credit limit
+
+test.describe("the daily credit limit holds back only the fixer", () => {
+  const reasons = [
+    { reason: "daily_limit", note: /reached your daily credit limit/ },
+    {
+      reason: "credits_unavailable",
+      note: /couldn't check your daily credit limit/,
+    },
+  ] as const;
+
+  for (const { reason, note } of reasons) {
+    test(`${reason}: the issues come back unfixed, saying why, with Run again`, async ({
+      page,
+      backend,
+    }) => {
+      const $ = ui(page);
+      const ingest = backend.seedIngestThread({
+        state: "needs_author_fixes",
+        recordOptions: { fixSkipped: reason },
+      });
+      await openIngest(page, ingest);
+      await expect($.result).toHaveAttribute(
+        "data-status",
+        "needs_author_fixes",
+      );
+      await expect($.result.getByTestId("ingest-result-note")).toHaveText(note);
+      await expect($.result.getByTestId("ingest-result-note")).toContainText(
+        "Fix them yourself with your assistant",
+      );
+      await expect(action($.result, ACTIONS.downloadReport)).toBeVisible();
+      await expect(action($.result, ACTIONS.runAgain)).toBeEnabled();
+      await expect(page.getByTestId("ingest-next-steps")).toBeVisible();
+    });
+  }
+
+  test("Run again after more credits runs the fixer, and the note goes", async ({
+    page,
+    backend,
+  }) => {
+    const $ = ui(page);
+    const ingest = backend.seedIngestThread({
+      state: "needs_author_fixes",
+      recordOptions: { fixSkipped: "daily_limit" },
+    });
+    backend.queueRun({
+      stages: FIX_STAGES,
+      stageMs: "manual",
+      record: ({ threadId }) => buildRecord("fixed", { threadId }),
+    });
+    await openIngest(page, ingest);
+    await action($.result, ACTIONS.runAgain).click();
+    await expect.poll(() => backend.ingestRunCreates().length).toBe(1);
+    await expect($.progress).toBeVisible();
+    backend.finish(ingest.thread_id);
+    await expect($.result).toHaveAttribute("data-status", "fixed");
+    await expect($.result.getByTestId("ingest-result-note")).toHaveCount(0);
+  });
+
+  test("results the fixer worked on carry no credit note", async ({
+    page,
+    backend,
+  }) => {
+    const $ = ui(page);
+    await openIngest(
+      page,
+      backend.seedIngestThread({ state: "needs_author_fixes" }),
+    );
+    await expect($.result).toHaveAttribute("data-status", "needs_author_fixes");
+    await expect($.result.getByTestId("ingest-result-note")).toHaveCount(0);
+    await expect(action($.result, ACTIONS.runAgain)).toHaveCount(0);
+  });
+});
+
 // ---------------------------------------------------------------- the fallback (no metadata writes)
 
 /** Resolves after the pane's next poll of `threadId` (its last answer has been shown by then). */

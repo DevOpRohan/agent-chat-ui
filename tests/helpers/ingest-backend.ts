@@ -208,7 +208,20 @@ export interface RecordOptions {
   threadId?: string;
   /** `fixed` only: whether the graph could make the matching .md (default true). */
   withMarkdown?: boolean;
+  /**
+   * `needs_author_fixes` only: the daily credit limit held the fixer back (topic_import/credits.py),
+   * so the issues come back unfixed, with no preview.
+   */
+  fixSkipped?: "daily_limit" | "credits_unavailable";
 }
+
+/** topic_import/credits.py REPORT_NOTES. */
+const FIX_SKIPPED_REPORT_NOTES = {
+  daily_limit:
+    "Not sent to the automatic fixer: the daily credit limit was reached. Fix these issues yourself, or get more credits and run the check again.",
+  credits_unavailable:
+    "Not sent to the automatic fixer: the daily credit limit could not be checked. Fix these issues yourself, or run the check again later.",
+} as const;
 
 const STATUS_TEXT: Record<string, string> = {
   validation_incomplete:
@@ -366,6 +379,29 @@ export function buildRecord(
     warnings: [] as string[],
     findings: [] as IngestRecordFinding[],
   };
+
+  if (status === "needs_author_fixes" && options.fixSkipped) {
+    return {
+      status,
+      stage: "done",
+      message:
+        "The topic has issues to fix; the automatic fixer was skipped because of the daily credit limit.",
+      result: {
+        ...empty,
+        topic_json_url: saved,
+        source_topic_json_url: saved,
+        issue_report_md: issueReportMd(status, [HINT_FINDING], {
+          title: name,
+          notes: [FIX_SKIPPED_REPORT_NOTES[options.fixSkipped]],
+        }),
+        validation: validation(1),
+        findings: [HINT_FINDING],
+        fix_skipped: options.fixSkipped,
+      },
+      cost: { updater_ran: false, updater_cost_usd: null },
+      ...summary,
+    };
+  }
 
   switch (status) {
     case "valid":

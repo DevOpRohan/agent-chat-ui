@@ -15,7 +15,11 @@
  * topic-ingester (src/lib/status-copy.ts); only that button label is the UI's own.
  */
 
-import { INGEST_FINAL_STATUSES, type IngestFinalStatus } from "./ingest-types";
+import {
+  INGEST_FINAL_STATUSES,
+  type FixSkipReason,
+  type IngestFinalStatus,
+} from "./ingest-types";
 
 /** The graph's six final statuses (INGEST_FINAL_STATUSES in ingest-types.ts). */
 export const IMPORT_STATUSES = INGEST_FINAL_STATUSES;
@@ -97,6 +101,17 @@ export const UPDATED_FILES_NEXT_STEPS =
 
 export const PREVIEW_HINT =
   "The preview opens in a new tab. If it says it's still being prepared, wait a minute, then refresh that tab.";
+
+/**
+ * When the fixer was skipped because of the daily credit limit (`result.fixSkipped`). Checking a
+ * topic is free, so the limit never stops an ingest; it only stops our automatic fixer.
+ */
+export const FIX_SKIPPED_NOTE: Record<FixSkipReason, string> = {
+  daily_limit:
+    "We can't fix these for you because you've reached your daily credit limit. Fix them yourself with your assistant, using the steps below, or ask your reporting manager for more credits and then select Run again.",
+  credits_unavailable:
+    "We couldn't check your daily credit limit just now, so we didn't fix these for you. Fix them yourself with your assistant, using the steps below, or select Run again in a few minutes.",
+};
 
 /** Only when the fixer changed the topic but its matching .md couldn't be made. */
 export const KEEP_IN_STEP_TITLE = "Keep your own copy in step";

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { INGEST_FINAL_STATUSES } from "@/lib/ingest/ingest-types";
 import {
   FAILED_TO_START,
+  FIX_SKIPPED_NOTE,
   friendlyWarning,
   friendlyWarnings,
   IMPORT_STATUSES,
@@ -78,6 +79,22 @@ describe("statusCopy", () => {
     expect(KEEP_IN_STEP_TITLE).toBe("Keep your own copy in step");
     expect(statusCopy("validation_incomplete").report).toBe("none");
     expect(statusCopy("valid").report).toBe("none");
+  });
+
+  it("says plainly when the credit limit held the fixer back: fix it yourself, or Run again", () => {
+    expect(Object.keys(FIX_SKIPPED_NOTE).sort()).toEqual([
+      "credits_unavailable",
+      "daily_limit",
+    ]);
+    expect(FIX_SKIPPED_NOTE.daily_limit).toMatch(
+      /^We can't fix these for you because you've reached your daily credit limit\./,
+    );
+    expect(FIX_SKIPPED_NOTE.daily_limit).toMatch(/more credits/);
+    for (const note of Object.values(FIX_SKIPPED_NOTE)) {
+      expect(note).toMatch(/Fix them yourself with your assistant/);
+      expect(note).toMatch(/Run again/);
+      expect(note).not.toMatch(JARGON);
+    }
   });
 
   it("offers topic files only as the updated .md and .json pair, in plain words", () => {

@@ -19,6 +19,7 @@
  */
 import { isTopicFileUrl } from "./file-links";
 import type {
+  FixSkipReason,
   Finding,
   IngestCheckpointProgress,
   IngestCost,
@@ -171,6 +172,8 @@ const NODE_STAGE: Readonly<Record<string, IngestStage>> = {
   reset: "reading",
   load: "reading",
   validate: "checking",
+  // Over the daily credit limit: straight from the checks to the report, without fixing.
+  skip_fix: "checking",
   fix: "fixing",
   revalidate: "rechecking",
   publish: "publishing",
@@ -319,6 +322,15 @@ function costOf(record: IngestRecord): IngestCost | undefined {
   };
 }
 
+const FIX_SKIP_REASONS: readonly FixSkipReason[] = [
+  "daily_limit",
+  "credits_unavailable",
+];
+
+function fixSkipReason(value: unknown): FixSkipReason | undefined {
+  return FIX_SKIP_REASONS.find((reason) => reason === value);
+}
+
 /** The final record (`values.record`) as the result panel shows it. */
 export function buildResult(
   record: IngestRecord,
@@ -331,6 +343,7 @@ export function buildResult(
   const ctIndex = ctIndexFromRecord(record);
   const updaterReport = str(result.updater_report);
   const open: RawFinding[] = findings.filter((f) => !f.infrastructure);
+  const fixSkipped = fixSkipReason(result.fix_skipped);
   return {
     status: str(record.status) ?? "unknown",
     message: str(record.message) ?? "",
@@ -346,6 +359,7 @@ export function buildResult(
       ? result.topic_md_url
       : undefined,
     issues: groupIssues(open, ctIndex),
+    ...(fixSkipped ? { fixSkipped } : {}),
     warnings: Array.isArray(result.warnings)
       ? result.warnings.filter((w): w is string => typeof w === "string")
       : [],

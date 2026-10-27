@@ -1384,7 +1384,7 @@ export function Thread() {
                           variant={logoVariant}
                         />
                         <h1 className="text-2xl font-semibold tracking-tight">
-                          Question Crafter
+                          Crafter
                         </h1>
                       </div>
                     )}

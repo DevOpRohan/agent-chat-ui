@@ -144,6 +144,8 @@ export interface IngestRecord {
       infrastructure_failures?: number | null;
     };
     findings?: IngestRecordFinding[];
+    /** Why the automatic fixer wasn't run: the daily credit limit (checking itself is free). */
+    fix_skipped?: string | null;
   };
   cost?: { updater_ran?: boolean; updater_cost_usd?: number | null };
   topic_id?: string | null;
@@ -229,6 +231,13 @@ export interface IngestCost {
   updaterCostUsd?: number;
 }
 
+/**
+ * Why the graph didn't run the automatic fixer (`record.result.fix_skipped`). The daily credit
+ * limit never stops an ingest, only its fixer: over the limit, or when the limit couldn't be
+ * checked, the issues come back unfixed.
+ */
+export type FixSkipReason = "daily_limit" | "credits_unavailable";
+
 export interface IngestResult {
   /** A final status, or the UI-only "failed_to_start" | "run_error" | "unknown". */
   status: string;
@@ -244,6 +253,8 @@ export interface IngestResult {
   topicMdUrl?: string;
   /** Open issues in plain words, grouped by set and variant. */
   issues: IssueGroup[];
+  /** The fixer was skipped because of the daily credit limit. */
+  fixSkipped?: FixSkipReason;
   warnings: string[];
   technical: {
     validation?: ValidationSummary;

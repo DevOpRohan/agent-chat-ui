@@ -241,6 +241,7 @@ describe("fallback progress: the checkpoint's next step", () => {
     expect(stageFromNext(["reset"])).toBe("reading");
     expect(stageFromNext(["load"])).toBe("reading");
     expect(stageFromNext(["validate"])).toBe("checking");
+    expect(stageFromNext(["skip_fix"])).toBe("checking");
     expect(stageFromNext(["fix"])).toBe("fixing");
     expect(stageFromNext(["revalidate"])).toBe("rechecking");
     expect(stageFromNext(["publish"])).toBe("publishing");
@@ -889,6 +890,23 @@ describe("threadToView: the uploaded file's link (for Run again)", () => {
 });
 
 describe("buildResult", () => {
+  it("says when the daily credit limit held the fixer back, and only with a known reason", () => {
+    const skipped = (fix_skipped?: string | null) =>
+      buildResult(
+        finished({ status: "needs_author_fixes", result: { fix_skipped } }),
+        { threadId: "t" },
+      ).fixSkipped;
+    expect(skipped("daily_limit")).toBe("daily_limit");
+    expect(skipped("credits_unavailable")).toBe("credits_unavailable");
+    expect(skipped(undefined)).toBeUndefined();
+    expect(skipped(null)).toBeUndefined();
+    expect(skipped("something_else")).toBeUndefined();
+    expect(
+      "fixSkipped" in
+        buildResult(finished({ status: "fixed" }), { threadId: "t" }),
+    ).toBe(false);
+  });
+
   it("knows when the fixer didn't run, and when a download isn't allowed", () => {
     const result = buildResult(
       finished({

@@ -12,11 +12,11 @@ const STEPS = [
 const INGEST_STEPS = [
   {
     title: "We check every question",
-    body: "The same checks your assistant runs, plus one more on how maths is written.",
+    body: "The same checks your assistant runs, plus one more on how maths is written. Checking never uses your credits.",
   },
   {
     title: "If needed, we fix small formatting issues",
-    body: "Things like maths formatting or punctuation. We never change the meaning or the answers.",
+    body: "Things like maths formatting or punctuation. We never change the meaning or the answers. Only this step uses credits.",
   },
   {
     title: "You get a preview link",

@@ -27,6 +27,7 @@ import {
 import type { IngestResult, IngestTopicInfo } from "@/lib/ingest/ingest-types";
 import { SET_KEY_MARKER } from "@/lib/ingest/plain-issues";
 import {
+  FIX_SKIPPED_NOTE,
   friendlyWarnings,
   KEEP_IN_STEP_TEXT,
   KEEP_IN_STEP_TITLE,
@@ -428,6 +429,11 @@ export function ResultPanel({
     ? result.updaterReport
     : undefined;
   const issues = copy.showIssues ? result.issues : [];
+  // The fixer was held back by the daily credit limit: say so, and offer Run again for after more
+  // credits are added.
+  const fixSkippedNote = result.fixSkipped
+    ? FIX_SKIPPED_NOTE[result.fixSkipped]
+    : undefined;
   const notes = friendlyWarnings({
     status: result.status,
     warnings: result.warnings,
@@ -532,6 +538,14 @@ export function ResultPanel({
               {REPORT_DOWNLOAD_LABEL}
             </Button>
           ) : null}
+          {fixSkippedNote ? (
+            <RunAgainButton
+              secondary
+              disabled={!canRunAgain}
+              starting={starting}
+              onRunAgain={onRunAgain}
+            />
+          ) : null}
           <UploadDifferentButton
             onClick={onUploadDifferent}
             primary={!report}
@@ -568,7 +582,7 @@ export function ResultPanel({
         tone={copy.tone}
         title={copy.title}
         body={copy.body}
-        note={copy.note}
+        note={fixSkippedNote ?? copy.note}
         hint={hint}
         status={
           <p

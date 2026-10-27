@@ -89,6 +89,8 @@ Recent fork-only commit log:
 
 ## 3) Recent Change
 
+- 2026-10-27: The daily credit limit no longer stops an ingest. Checking a topic is algorithmic, so the backend (QuestionCrafterAgent `topic_import/credits.py`) never refuses a `topic_ingest` run for the limit; it only skips the automatic fixer. Such a result is `needs_author_fixes` with `record.result.fix_skipped` (`daily_limit` or `credits_unavailable`), and the result panel says: "We can't fix these for you because you've reached your daily credit limit. Fix them yourself with your assistant, using the steps below, or ask your reporting manager for more credits and then select Run again." (`FIX_SKIPPED_NOTE`), with a Run again button. The empty-chat welcome title is now "Crafter".
+
 - 2026-10-27: The top bar drops the Question Crafter logo and title. In their place, a **mode menu** names the current mode (Crafter or Ingester) and opens a menu with both modes, each with one line about what it does. The empty-chat welcome (logo and "Question Crafter") is unchanged. To start a new chat or ingest, use New in History (the logo used to do this). Ingester's "Your updated topic files" card now says plainly to work on the new files for any further changes.
 
 - 2026-10-26: Add a **Crafter | Ingester** mode switch. Ingester checks a TopicCrafter `.json` on the backend's thread-based `topic_ingest` graph (one LangGraph thread per ingest), shows progress and the result in its own pane, and lists ingests in its own History (filtered by `graph_id`; Crafter's history now lists only Crafter threads). The JSON-only `/api/ingest/upload` has no OpenAI path. Heading is "History" in every mode. See section 4.7.
@@ -252,6 +254,7 @@ Current behavior:
 - Results use the standalone topic-ingester app's words (`status-copy.ts`, `plain-issues.ts`, `FILE_MESSAGES`), with CT/CTs terminology for `cts`. Summaries count CTs and their variants; type badges count CTs, and issue/report labels use `CT N, variant M`, preserving each variant's `question_no`. UI-only statuses: `run_error` (thread error; the "couldn't finish" copy), `failed_to_start` (no run started), stalled (busy with no metadata update for 30 minutes).
 - Downloads: the report is made in the browser; topic `.json`/`.md` go through `GET /api/topic-file` (https, allow-listed hosts and buckets, no redirects, 25 MB). The skill zip is `public/skill/TopicCrafter-v0.1.0.zip` with `skill:sync`/`skill:check`.
 - `src/lib/ingest/topic-model.ts`: the typed topic JSON, one interface per `question_type` plus the `QUESTION_TYPES` registry, for per-type UX.
+- Credits: the daily limit never refuses an ingest (the backend only skips its fixer). `record.result.fix_skipped` becomes `IngestResult.fixSkipped`; the result shows `FIX_SKIPPED_NOTE` in the status banner and offers Run again next to the report download. The checkpoint step `skip_fix` maps to the checking stage. The 429/503 limit notices on start and Run again stay, for a backend that still refuses.
 
 Primary files:
 
