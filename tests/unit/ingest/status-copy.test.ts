@@ -83,10 +83,16 @@ describe("statusCopy", () => {
   it("offers topic files only as the updated .md and .json pair, in plain words", () => {
     expect(UPDATED_FILES_TITLE).toBe("Your updated topic files");
     expect(UPDATED_FILES_TEXT).toMatch(
-      /your own \.md and \.json are now out of date/,
+      /your old \.md and \.json are out of date/,
     );
-    expect(UPDATED_FILES_TEXT).toMatch(/Download both/);
+    // Further changes start from the new files, not the creator's old copies.
+    expect(UPDATED_FILES_TEXT).toMatch(
+      /For any further changes, work on these new files/,
+    );
     expect(UPDATED_FILES_NEXT_STEPS).toMatch(/updated \.md and \.json below/);
+    expect(UPDATED_FILES_NEXT_STEPS).toMatch(
+      /work on these from now on, not your old copies/,
+    );
     for (const text of [UPDATED_FILES_TEXT, UPDATED_FILES_NEXT_STEPS])
       expect(text).not.toMatch(JARGON);
     for (const status of IMPORT_STATUSES)

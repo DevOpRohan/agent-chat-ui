@@ -1,7 +1,7 @@
 # Fork Compass — Agent Chat UI Customizations
 
 _Last updated: 2026-10-27_
-_Branch: develop (CT terminology update on base `12cddde`)_
+_Branch: develop (CT terminology update on base `12cddde`; mode dropdown on `fix/mode-menu`)_
 _Runtime release: PR #7 (`597dcb8`, source `15f6f1c`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
@@ -62,6 +62,8 @@ CT terminology release snapshot (2026-10-27):
 
 Recent fork-only commit log:
 
+- `feat: mode dropdown in the top bar, and plain updated-files copy` (`fix/mode-menu`, on develop `8e61163`): the Crafter | Ingester switch becomes a dropdown in place of the logo and title; "Your updated topic files" says to work on the new files for further changes.
+
 - `fix: use CT and variant terminology in Ingester` (develop): CT/CTs in summaries, type badges, issue/report labels and validation messages; variants keep their existing `question_no` identities. Includes updated expectations and documentation.
 
 - `feat/crafter-ingester-modes` (PR to `main`): contract types and vitest; ported Ingester logic; JSON-only ingest upload, topic file download and skill zip; typed topic model; Crafter | Ingester switch with per-mode history; Ingester pane and hook; Playwright spec; docs.
@@ -86,6 +88,8 @@ Recent fork-only commit log:
 - `51d28c9`: `feat: migrate chat runtime to poll-first execution`
 
 ## 3) Recent Change
+
+- 2026-10-27: The top bar drops the Question Crafter logo and title. In their place, a **mode menu** names the current mode (Crafter or Ingester) and opens a menu with both modes, each with one line about what it does. The empty-chat welcome (logo and "Question Crafter") is unchanged. To start a new chat or ingest, use New in History (the logo used to do this). Ingester's "Your updated topic files" card now says plainly to work on the new files for any further changes.
 
 - 2026-10-26: Add a **Crafter | Ingester** mode switch. Ingester checks a TopicCrafter `.json` on the backend's thread-based `topic_ingest` graph (one LangGraph thread per ingest), shows progress and the result in its own pane, and lists ingests in its own History (filtered by `graph_id`; Crafter's history now lists only Crafter threads). The JSON-only `/api/ingest/upload` has no OpenAI path. Heading is "History" in every mode. See section 4.7.
 
@@ -240,7 +244,7 @@ Primary files:
 Current behavior:
 
 - Modes are one list in `src/lib/app-mode.ts` (`APP_MODES`: label, `?mode=` value, graph id, URL id param, pane). `?mode=crafter|ingester` via `nuqs`; no mode → Crafter; an `ingestId`-only link → Ingester; Crafter keeps `threadId`, Ingester uses `ingestId`, switching keeps both. A later mode (Digitizer) is one entry plus its pane in the shell's `MODE_PANES` map.
-- `ModeSwitch` (`src/components/mode-switch.tsx`): two ghost `Button`s in a bordered group, `role="radiogroup"` with roving focus, in the top bar of both modes and on phones.
+- `ModeSwitch` (`src/components/mode-switch.tsx`): a dropdown in the top bar's left corner, where the logo and title used to be, in both modes and on phones. It is a ghost `Button` naming the current mode (`aria-haspopup="menu"`, accessible name "Mode: <mode>") over a popover-coloured `role="menu"` of `menuitemradio`s (label, the mode's `description` from `APP_MODES`, a check on the current one). Keyboard: Enter, Space or the arrows open it on the current mode; arrows, Home and End move; Escape closes it and returns focus to the button. After a pick, focus moves to the new mode's button.
 - Ingester hides the chat pane, composer, artifact pane, conversation navigator and enter-to-send setting; the theme setting stays. The pane lives in the chat column at the chat's width, built only from `src/components/ui/*`, existing tokens and `lucide-react`.
 - One ingest = one thread on `topic_ingest`: browser file check → `POST /api/ingest/upload` (JSON only, 10 MB, saves `topic-ingest/<uuid>.json` to `GCS_BUCKET_NAME`, no OpenAI code path) → `threads.create` (metadata `graph_id`, `thread_title`, `ingest_file_name`, `ingest_source_url`, stage/status `queued`) → `runs.create(..., { input: { source_url, file_name }, onDisconnect: "continue" })`.
 - `use-ingest-thread.ts` polls `threads.search({ ids, select })` every 1.5 s (paused while hidden; slower when stalled; backoff on errors). The graph's own thread-metadata writes don't persist on the deployed Postgres runtime (checked live on dev, 2026-10-26), so while busy the hook also reads `threads.getState` at most every 3 s and maps the checkpoint's `next` to a stage (`record-view.ts` `stageFromNext`; metadata wins when it has a stage). The run has ended when the thread errors, metadata is final, or `runs.list` shows the latest run finished; then `values.record` is read once and mapped by `record-view.ts`. Run again re-checks the thread, patches stage/status back to `queued` and starts a new run on the same thread; it is disabled while busy (the deployed runtime queues a second run instead of rejecting it).

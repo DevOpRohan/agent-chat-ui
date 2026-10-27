@@ -145,14 +145,19 @@ export const COPY = {
 
 export const COMPOSER_PLACEHOLDER = "Type your message...";
 
+export type ModeId = "crafter" | "ingester";
+
 export function ui(page: Page) {
-  const modeSwitch = page.getByRole("radiogroup", { name: "Mode" });
+  const modeMenu = page.getByRole("menu", { name: /^Mode: / });
   const upload = page.getByTestId("ingest-upload");
   return {
-    modeSwitch,
-    modeSwitchById: page.getByTestId("mode-switch"),
-    crafter: modeSwitch.getByRole("radio", { name: "Crafter", exact: true }),
-    ingester: modeSwitch.getByRole("radio", { name: "Ingester", exact: true }),
+    modeSwitch: page.getByTestId("mode-switch"),
+    /** The mode menu's button, named "Mode: <current mode>". */
+    modeButton: page.getByRole("button", { name: /^Mode: / }),
+    modeMenu,
+    /** The menu's items: only there while the menu is open. */
+    crafter: modeMenu.getByRole("menuitemradio", { name: /^Crafter/ }),
+    ingester: modeMenu.getByRole("menuitemradio", { name: /^Ingester/ }),
     composer: page.getByPlaceholder(COMPOSER_PLACEHOLDER),
     pane: page.getByTestId("ingest-pane"),
     upload,
@@ -252,12 +257,34 @@ export async function waitForHydration(locator: Locator) {
     .toBe(true);
 }
 
-/** Opens the app; waits for the hydrated mode switch (generous: the dev server may still compile). */
+/** Opens the app; waits for the hydrated mode menu (generous: the dev server may still compile). */
 export async function openApp(page: Page, params: AppParams = {}) {
   await page.goto(appPath(params), { waitUntil: "domcontentloaded" });
-  const { modeSwitch } = ui(page);
-  await expect(modeSwitch).toBeVisible({ timeout: 90_000 });
-  await waitForHydration(modeSwitch.getByRole("radio").first());
+  const { modeButton } = ui(page);
+  await expect(modeButton).toBeVisible({ timeout: 90_000 });
+  await waitForHydration(modeButton);
+}
+
+/**
+ * The mode the menu's button shows. Found by test id: an expanded artifact hides the chat's
+ * top bar (aria-hidden), and with it the button's role.
+ */
+export async function expectMode(
+  page: Page,
+  mode: ModeId,
+  options?: { timeout?: number },
+) {
+  await expect(
+    page.getByTestId("mode-switch").locator('button[aria-haspopup="menu"]'),
+  ).toHaveAttribute("data-mode", mode, options);
+}
+
+/** Opens the mode menu and picks a mode. */
+export async function chooseMode(page: Page, mode: ModeId) {
+  const $ = ui(page);
+  await $.modeButton.click();
+  await $[mode].click();
+  await expectMode(page, mode);
 }
 
 export function urlParam(page: Page, key: string): string | null {

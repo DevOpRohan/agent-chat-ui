@@ -18,7 +18,9 @@ import { isLocalBaseUrl, type IngestBackend } from "./helpers/ingest-backend";
 import {
   ACTIONS,
   action,
+  chooseMode,
   expect,
+  expectMode,
   expectUrlParam,
   historyNewButton,
   openApp,
@@ -71,21 +73,16 @@ function distanceFromBottom(page: Page) {
 }
 
 async function switchToIngester(page: Page) {
-  const $ = ui(page);
-  await $.ingester.click();
-  await expect($.ingester).toHaveAttribute("aria-checked", "true");
+  await chooseMode(page, "ingester");
   await expect(ingestPane(page)).toBeVisible();
 }
 
 /**
- * Clicks Crafter (in Ingester's top bar). Checked through the switch's test id: back in Crafter,
- * the switch sits in the chat, which an expanded artifact covers (aria-hidden).
+ * Picks Crafter (in Ingester's top bar). Back in Crafter, the menu sits in the chat, which an
+ * expanded artifact covers (aria-hidden); chooseMode checks it by test id.
  */
 async function switchToCrafter(page: Page) {
-  await ui(page).crafter.click();
-  await expect(
-    page.getByTestId("mode-switch").locator('[data-mode="crafter"]'),
-  ).toHaveAttribute("aria-checked", "true");
+  await chooseMode(page, "crafter");
   await expect(ingestPane(page)).toHaveCount(0);
   await expect(chatPane(page)).not.toHaveAttribute("inert");
 }
@@ -137,12 +134,12 @@ test.describe("the chat stays mounted, hidden, while Ingester is on screen", () 
         return document.activeElement === el;
       }),
     ).toBe(false);
-    await $.ingester.focus();
+    await $.modeButton.focus();
     for (let press = 0; press < 30; press += 1) {
       await page.keyboard.press("Tab");
       expect(await focusIsInHiddenChat(page), `Tab #${press + 1}`).toBe(false);
     }
-    // One mode switch and one history toggle on the page: the hidden chat draws no top bar.
+    // One mode menu and one history toggle on the page: the hidden chat draws no top bar.
     await expect(page.getByTestId("mode-switch")).toHaveCount(1);
     await expect(page.getByTestId("chat-history-toggle")).toHaveCount(1);
 
@@ -203,7 +200,6 @@ test.describe("the chat stays mounted, hidden, while Ingester is on screen", () 
   test("the artifact panel keeps its width, and an expanded artifact stays expanded", async ({
     page,
   }) => {
-    const $ = ui(page);
     const history = page.getByTestId("pane-history");
     const artifactPane = page.getByTestId("pane-artifact");
     const artifactText = artifactPane.getByText("Artifact panel", {
@@ -251,12 +247,15 @@ test.describe("the chat stays mounted, hidden, while Ingester is on screen", () 
     await expect
       .poll(async () => (await history.boundingBox())?.width ?? 0)
       .toBeLessThanOrEqual(1);
+    // The expanded artifact hides the chat's top bar, so the keyboard picks Ingester.
     await page
       .getByTestId("mode-switch")
-      .locator('[data-mode="crafter"]')
+      .locator('button[aria-haspopup="menu"]')
       .focus();
-    await page.keyboard.press("ArrowRight");
-    await expect($.ingester).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expectMode(page, "ingester");
     await expect(ingestPane(page)).toBeVisible();
     await expect(artifactPane).toBeHidden();
 
@@ -329,16 +328,6 @@ test.describe("a link with only ingestId stays in Ingester", () => {
       },
     },
     {
-      name: "the logo",
-      seed: (backend) => backend.seedIngestThread({ state: "valid" }).thread_id,
-      clear: async (page) => {
-        await expect(ui(page).result).toHaveAttribute("data-status", "valid");
-        await ingestPane(page)
-          .getByRole("button", { name: /Question Crafter/ })
-          .click();
-      },
-    },
-    {
       name: "Upload a topic (an ingest that isn't there)",
       seed: () => "00000000-0000-4000-8000-00000000e2e0",
       clear: async (page) => {
@@ -358,7 +347,7 @@ test.describe("a link with only ingestId stays in Ingester", () => {
       const $ = ui(page);
       const ingestId = way.seed(backend);
       await openApp(page, { ingestId, ...way.params });
-      await expect($.ingester).toHaveAttribute("aria-checked", "true");
+      await expectMode(page, "ingester");
       // The link's mode is written into the URL straight away (history replace).
       await expectUrlParam(page, "mode", "ingester");
       await expectUrlParam(page, "ingestId", ingestId);
@@ -366,7 +355,7 @@ test.describe("a link with only ingestId stays in Ingester", () => {
       await way.clear(page);
       await expectUrlParam(page, "ingestId", null);
       await expect($.upload).toBeVisible();
-      await expect($.ingester).toHaveAttribute("aria-checked", "true");
+      await expectMode(page, "ingester");
       await expectUrlParam(page, "mode", "ingester");
       await expect($.composer).toBeHidden();
     });
@@ -376,7 +365,7 @@ test.describe("a link with only ingestId stays in Ingester", () => {
     const $ = ui(page);
     const chat = backend.seedCrafterThread({ title: "Fractions lesson" });
     await openApp(page, { threadId: chat.thread_id });
-    await expect($.crafter).toHaveAttribute("aria-checked", "true");
+    await expectMode(page, "crafter");
     await expect($.composer).toBeVisible();
     await page.waitForTimeout(1_000);
     expect(urlParam(page, "mode")).toBeNull();
@@ -386,39 +375,36 @@ test.describe("a link with only ingestId stays in Ingester", () => {
 
 // ---------------------------------------------------------------- focus
 
-test.describe("focus follows the mode switch", () => {
+test.describe("focus follows the mode menu", () => {
   test("a page load leaves the focus alone", async ({ page }) => {
     const $ = ui(page);
     await openApp(page, { mode: "ingester" });
     await expect($.upload).toBeVisible();
-    await expect($.ingester).not.toBeFocused();
-    await expect($.crafter).not.toBeFocused();
+    await expect($.modeButton).not.toBeFocused();
   });
 
-  test("clicking a mode keeps the focus on the checked option, new chat or started chat", async ({
+  test("picking a mode keeps the focus on the mode button, new chat or started chat", async ({
     page,
     backend,
   }) => {
     const $ = ui(page);
     const chat = backend.seedCrafterThread({ title: "Fractions lesson" });
 
-    // A new chat: the switch sits in the chat's empty-state header.
+    // A new chat: the menu sits in the chat's empty-state header.
     await openApp(page);
-    await $.ingester.click();
-    await expect($.ingester).toHaveAttribute("aria-checked", "true");
-    await expect($.ingester).toBeFocused();
-    await $.crafter.click();
-    await expect($.crafter).toHaveAttribute("aria-checked", "true");
-    await expect($.crafter).toBeFocused();
+    await chooseMode(page, "ingester");
+    await expect($.modeButton).toBeFocused();
+    await chooseMode(page, "crafter");
+    await expect($.modeButton).toBeFocused();
 
-    // A started chat: the switch sits in the chat's top bar.
+    // A started chat: the menu sits in the chat's top bar.
     await openApp(page, { threadId: chat.thread_id });
     await expect(
       page.getByText(/Here is a plan for Fractions lesson/),
     ).toBeVisible();
-    await $.ingester.click();
-    await expect($.ingester).toBeFocused();
-    await $.crafter.click();
-    await expect($.crafter).toBeFocused();
+    await chooseMode(page, "ingester");
+    await expect($.modeButton).toBeFocused();
+    await chooseMode(page, "crafter");
+    await expect($.modeButton).toBeFocused();
   });
 });

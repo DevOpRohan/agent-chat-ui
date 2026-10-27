@@ -8,8 +8,10 @@ export type AppPane = "chat" | "ingest";
 
 export interface AppMode {
   id: AppModeId;
-  /** Text on the mode switch. */
+  /** Name in the mode menu, and on its button. */
   label: string;
+  /** One line under the name in the mode menu. */
+  description: string;
   /** Value of `?mode=`. */
   urlValue: string;
   /** Graph (or assistant) whose threads make up this mode's history. */
@@ -21,13 +23,14 @@ export interface AppMode {
 }
 
 /**
- * Every mode of the app, in switch order. A new mode (a later "Digitizer")
+ * Every mode of the app, in menu order. A new mode (a later "Digitizer")
  * is one entry here plus its pane in the shell.
  */
 export const APP_MODES: readonly AppMode[] = [
   {
     id: "crafter",
     label: "Crafter",
+    description: "Plan and write questions with the agent",
     urlValue: "crafter",
     graphId:
       process.env.NEXT_PUBLIC_ASSISTANT_ID || "o3_question_crafter_agent",
@@ -37,6 +40,7 @@ export const APP_MODES: readonly AppMode[] = [
   {
     id: "ingester",
     label: "Ingester",
+    description: "Check a TopicCrafter .json and preview it",
     urlValue: "ingester",
     graphId: INGEST_GRAPH_ID,
     idParam: "ingestId",

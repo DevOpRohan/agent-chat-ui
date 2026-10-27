@@ -67,12 +67,7 @@ import { ThreadSettings } from "./thread-settings";
 import { getContentString } from "./utils";
 import { ModeSwitch } from "../mode-switch";
 import { IngestPane } from "../ingester/ingest-pane";
-import {
-  type AppPane,
-  useAppMode,
-  useModeThreadId,
-  usePinModeParam,
-} from "@/lib/app-mode";
+import { type AppPane, useAppMode, usePinModeParam } from "@/lib/app-mode";
 import { ThreadModeScope } from "@/providers/Thread";
 
 function showThreadRunningToast() {
@@ -460,15 +455,14 @@ function containFileDrop(event: DragEvent<HTMLDivElement>) {
 export function Thread() {
   const runtime = useThreadRuntime();
   const { resolvedTheme } = useTheme();
-  const [artifactContext, setArtifactContext] = useArtifactContext();
+  const [artifactContext] = useArtifactContext();
   const artifactSurfaceMode = useArtifactSurfaceMode();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
   const [manualArtifactOpen, setManualArtifactOpen] = useState(false);
 
-  const [threadId, _setThreadId] = useQueryState("threadId");
+  const [threadId] = useQueryState("threadId");
   const { mode } = useAppMode();
   usePinModeParam();
-  const [, setModeItemId] = useModeThreadId(mode);
   const modePane = mode.pane === "chat" ? null : MODE_PANES[mode.pane];
   const isChatPane = modePane === null;
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
@@ -681,15 +675,6 @@ export function Thread() {
     setArtifactExpanded(false);
     closeArtifact();
   }, [closeArtifact, isArtifactExpandedMode, restoreLayoutFromExpand]);
-
-  const setThreadId = useCallback(
-    (value: string | null) => {
-      _setThreadId(value);
-      handleArtifactClose();
-      setArtifactContext({});
-    },
-    [_setThreadId, handleArtifactClose, setArtifactContext],
-  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1174,15 +1159,12 @@ export function Thread() {
       )}
     </Button>
   );
-  // The bar of a started chat; other panes always show it. The logo starts
-  // a new item in the current mode.
+  // The bar of a started chat; other panes always show it.
   const topBar = (
     <div className="relative z-10 flex items-center gap-3 p-2">
       <div className="relative flex min-w-0 items-center justify-start gap-2">
         <div className="absolute left-0 z-10">{historyToggle}</div>
-        <motion.button
-          className="flex min-w-0 cursor-pointer items-center gap-2"
-          onClick={() => (isChatPane ? setThreadId(null) : setModeItemId(null))}
+        <motion.div
           animate={{
             marginLeft: !chatHistoryOpen ? 48 : 0,
           }}
@@ -1192,17 +1174,9 @@ export function Thread() {
             type: "spring",
           }}
         >
-          <QuestionCrafterLogoSVG
-            width={40}
-            height={40}
-            variant={logoVariant}
-          />
-          <span className="truncate text-xl font-semibold tracking-tight">
-            Question Crafter
-          </span>
-        </motion.button>
+          <ModeSwitch />
+        </motion.div>
       </div>
-      <ModeSwitch />
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {isChatPane ? (
           <>

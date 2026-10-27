@@ -91,9 +91,9 @@ export const REPORT_INSTRUCTIONS =
  */
 export const UPDATED_FILES_TITLE = "Your updated topic files";
 export const UPDATED_FILES_TEXT =
-  "We changed your topic, so your own .md and .json are now out of date. Download both and use them instead of your old copies. The .md is the one to read and to give your assistant next time. The .json is the one the platform takes.";
+  "We changed your topic to fix it, so your old .md and .json are out of date. For any further changes, work on these new files: give the .md to your assistant, and upload the .json here.";
 export const UPDATED_FILES_NEXT_STEPS =
-  "Download the updated .md and .json below. Give the .md and this report to your assistant (TopicCrafter), ask it to fix only these issues, then upload the new .json here.";
+  "Download the updated .md and .json below, and work on these from now on, not your old copies. Give the .md and this report to your assistant (TopicCrafter), ask it to fix only these issues, then upload the new .json here.";
 
 export const PREVIEW_HINT =
   "The preview opens in a new tab. If it says it's still being prepared, wait a minute, then refresh that tab.";

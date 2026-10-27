@@ -94,7 +94,7 @@ After entering these values, click `Continue`. You'll then be redirected to a ch
 
 ## Crafter and Ingester modes
 
-A **Crafter | Ingester** switch sits in the top bar, in both modes and on phones.
+A **mode menu** sits in the top bar's left corner, in both modes and on phones. Its button names the current mode (Crafter or Ingester), and the menu lists both modes, each with one line about what it does.
 
 - **Crafter** is the chat with the `NEXT_PUBLIC_ASSISTANT_ID` graph, unchanged.
 - **Ingester** checks a topic `.json` that a creator made with the TopicCrafter skill in their own ChatGPT or Claude, fixes small formatting issues once, and publishes a preview. Markdown is never ingested.

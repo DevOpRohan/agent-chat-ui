@@ -51,7 +51,9 @@ import {
   action,
   applyTheme,
   chooseFile,
+  chooseMode,
   expect,
+  expectMode,
   expectUrlParam,
   fitsWidth,
   historyHeading,
@@ -105,29 +107,23 @@ test.describe("mode switch and URL", () => {
   }) => {
     const $ = ui(page);
     await openApp(page);
-    await expect($.modeSwitchById).toBeVisible();
-    await expect($.crafter).toHaveAttribute("aria-checked", "true");
-    await expect($.ingester).toHaveAttribute("aria-checked", "false");
+    await expect($.modeSwitch).toBeVisible();
+    await expectMode(page, "crafter");
     await expect($.composer).toBeVisible();
     await expect($.pane).toBeHidden();
     expect(urlParam(page, "mode")).toBeNull();
 
-    await $.ingester.click();
+    await chooseMode(page, "ingester");
     await expectUrlParam(page, "mode", "ingester");
-    await expect($.ingester).toHaveAttribute("aria-checked", "true");
-    await expect($.crafter).toHaveAttribute("aria-checked", "false");
     await expect($.upload).toBeVisible();
     await expect($.composer).toBeHidden();
 
     await page.reload();
-    await expect($.ingester).toHaveAttribute("aria-checked", "true", {
-      timeout: 60_000,
-    });
+    await expectMode(page, "ingester", { timeout: 60_000 });
     await expect($.upload).toBeVisible();
     await expect($.composer).toBeHidden();
 
-    await $.crafter.click();
-    await expect($.crafter).toHaveAttribute("aria-checked", "true");
+    await chooseMode(page, "crafter");
     await expect($.composer).toBeVisible();
     await expect($.pane).toBeHidden();
     await expect.poll(() => urlParam(page, "mode")).not.toBe("ingester");
@@ -138,7 +134,7 @@ test.describe("mode switch and URL", () => {
   }) => {
     const $ = ui(page);
     await openApp(page, { mode: "ingester" });
-    await expect($.ingester).toHaveAttribute("aria-checked", "true");
+    await expectMode(page, "ingester");
     await expect($.pane).toBeVisible();
     await expect($.upload).toBeVisible();
     await expect($.dropZone).toBeVisible();
@@ -152,7 +148,7 @@ test.describe("mode switch and URL", () => {
     const $ = ui(page);
     const ingest = backend.seedIngestThread({ state: "valid" });
     await openApp(page, { ingestId: ingest.thread_id });
-    await expect($.ingester).toHaveAttribute("aria-checked", "true");
+    await expectMode(page, "ingester");
     await expect($.result).toHaveAttribute("data-status", "valid");
     await expect($.composer).toBeHidden();
   });
@@ -180,7 +176,7 @@ test.describe("mode switch and URL", () => {
     });
     await expect($.result).toHaveAttribute("data-status", "needs_author_fixes");
 
-    await $.crafter.click();
+    await chooseMode(page, "crafter");
     await expect(
       page.getByText("Here is a fractions lesson plan."),
     ).toBeVisible();
@@ -188,7 +184,7 @@ test.describe("mode switch and URL", () => {
     await expectUrlParam(page, "threadId", chat.thread_id);
     await expectUrlParam(page, "ingestId", ingest.thread_id);
 
-    await $.ingester.click();
+    await chooseMode(page, "ingester");
     await expect($.result).toHaveAttribute("data-status", "needs_author_fixes");
     await expect($.composer).toBeHidden();
     await expectUrlParam(page, "mode", "ingester");
@@ -196,19 +192,57 @@ test.describe("mode switch and URL", () => {
     await expectUrlParam(page, "ingestId", ingest.thread_id);
   });
 
-  test("the switch is a radio group that works from the keyboard", async ({
+  test("the mode menu works from the keyboard", async ({ page }) => {
+    const $ = ui(page);
+    await openApp(page);
+    await expect($.modeButton).toHaveAttribute("aria-haspopup", "menu");
+    await expect($.modeButton).toHaveAttribute("aria-expanded", "false");
+
+    // Arrows open it on the current mode; Escape closes it and returns to the button.
+    await $.modeButton.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect($.modeMenu).toBeVisible();
+    await expect($.modeButton).toHaveAttribute("aria-expanded", "true");
+    await expect($.crafter).toHaveAttribute("aria-checked", "true");
+    await expect($.ingester).toHaveAttribute("aria-checked", "false");
+    await expect($.crafter).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect($.modeMenu).toBeHidden();
+    await expect($.modeButton).toBeFocused();
+
+    // Enter opens it; Enter picks; the focus lands on the new mode's button.
+    await page.keyboard.press("Enter");
+    await expect($.crafter).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect($.ingester).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expectMode(page, "ingester");
+    await expectUrlParam(page, "mode", "ingester");
+    await expect($.modeMenu).toBeHidden();
+    await expect($.modeButton).toBeFocused();
+
+    // Home, then Space picks.
+    await page.keyboard.press("ArrowUp");
+    await expect($.ingester).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect($.crafter).toBeFocused();
+    await page.keyboard.press(" ");
+    await expectMode(page, "crafter");
+    await expect($.composer).toBeVisible();
+    await expect($.modeButton).toBeFocused();
+  });
+
+  test("a click outside closes the mode menu without a change", async ({
     page,
   }) => {
     const $ = ui(page);
-    await openApp(page);
-    await $.crafter.focus();
-    await page.keyboard.press("ArrowRight");
-    await expect($.ingester).toHaveAttribute("aria-checked", "true");
-    await expect($.ingester).toBeFocused();
+    await openApp(page, { mode: "ingester" });
+    await $.modeButton.click();
+    await expect($.modeMenu).toBeVisible();
+    await page.mouse.click(700, 500);
+    await expect($.modeMenu).toBeHidden();
+    await expectMode(page, "ingester");
     await expectUrlParam(page, "mode", "ingester");
-    await page.keyboard.press("ArrowLeft");
-    await expect($.crafter).toHaveAttribute("aria-checked", "true");
-    await expect($.composer).toBeVisible();
   });
 });
 
@@ -257,7 +291,7 @@ test.describe("history, one list per mode", () => {
       ),
     ).toBe(true);
 
-    await ui(page).ingester.click();
+    await chooseMode(page, "ingester");
     await expect
       .poll(() => historyIds(page))
       .toEqual([newerIngest.thread_id, olderIngest.thread_id]);
@@ -273,7 +307,7 @@ test.describe("history, one list per mode", () => {
       ),
     ).toBe(true);
 
-    await ui(page).crafter.click();
+    await chooseMode(page, "crafter");
     await expect
       .poll(() => historyIds(page))
       .toEqual([newerChat.thread_id, olderChat.thread_id]);
@@ -305,7 +339,7 @@ test.describe("history, one list per mode", () => {
       "true",
     );
 
-    await $.ingester.click();
+    await chooseMode(page, "ingester");
     await expect(historyRow(page, ingest.thread_id)).toHaveAttribute(
       "data-thread-active",
       "false",
@@ -319,7 +353,7 @@ test.describe("history, one list per mode", () => {
     );
     await expectUrlParam(page, "threadId", chat.thread_id);
 
-    await $.crafter.click();
+    await chooseMode(page, "crafter");
     await expect(historyRow(page, chat.thread_id)).toHaveAttribute(
       "data-thread-active",
       "true",
@@ -328,7 +362,7 @@ test.describe("history, one list per mode", () => {
       page.getByText("Here is a fractions lesson plan."),
     ).toBeVisible();
 
-    await $.ingester.click();
+    await chooseMode(page, "ingester");
     await expect(historyRow(page, ingest.thread_id)).toHaveAttribute(
       "data-thread-active",
       "true",
