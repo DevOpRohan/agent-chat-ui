@@ -50,7 +50,7 @@ import { TechnicalDetails } from "./technical-details";
 const ACTION = "w-full sm:w-auto";
 
 /**
- * Reports name sets "Set N `set-key:<ct key>`" (plain-issues' labelSetsInMarkdown); the chat's
+ * Reports name CTs "CT N `set-key:<ct key>`" (plain-issues' labelSetsInMarkdown); the chat's
  * Markdown renderer has no special case for that marker, so the key shows as plain inline code.
  */
 function reportMarkdown(markdown: string): string {

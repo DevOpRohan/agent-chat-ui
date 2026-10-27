@@ -1,6 +1,6 @@
 /**
  * Turns the checker's findings into a short, plain list for creators:
- * "Set 2, variant 3: The hint needs to end as a statement, with a full stop."
+ * "CT 2, variant 3: The hint needs to end as a statement, with a full stop."
  *
  * Wording follows the TopicCrafter skill's own table
  * (skills/topic-crafter/references/communication.md, "Turning check results into plain words"),
@@ -8,7 +8,7 @@
  * the topic (1-based), the same "CT <n>" numbering as the creator's .md headings; variants use
  * `question_no`. CT keys never lead a label; they only follow it, small, for cross-reference.
  *
- * Ported from topic-ingester (src/lib/plain-issues.ts); the sentences are kept word for word.
+ * Ported from topic-ingester (src/lib/plain-issues.ts), using CT terminology in labels and copy.
  */
 
 export interface RawFinding {
@@ -29,7 +29,7 @@ export interface PlainIssue {
 
 export interface IssueGroup {
   key: string;
-  /** "Whole topic", "Set 3", "Set 3, variant 2", or "A question set" when the set isn't in the topic. */
+  /** "Whole topic", "CT 3", "CT 3, variant 2", or "A CT" when the CT isn't in the topic. */
   label: string;
   setNumber?: number;
   variant?: number;
@@ -64,12 +64,12 @@ export function plainSentence(finding: RawFinding): string {
       return "A blank is in the shared intro instead of in a part.";
     case "IDENTITY":
       return /duplicate ct key/i.test(message)
-        ? "Two question sets have the same label."
-        : "Two questions share the same label.";
+        ? "Two CTs have the same label."
+        : "Two variants in a CT share the same label.";
     case "TOPIC":
       return "The topic's header details need a fix.";
     case "CT":
-      return "The set's header details need a fix.";
+      return "The CT's header details need a fix.";
     case "SYSTEM FIELDS":
       return "The question's header details need a fix.";
     case "STYLE":
@@ -128,7 +128,7 @@ export function groupLabel(
   hasSet = true,
 ): string {
   if (!hasSet) return "Whole topic";
-  const set = setNumber ? `Set ${setNumber}` : "A question set";
+  const set = setNumber ? `CT ${setNumber}` : "A CT";
   return variant !== undefined ? `${set}, variant ${variant}` : set;
 }
 
@@ -202,7 +202,7 @@ function escapeRegExp(text: string): string {
 }
 
 /**
- * Replaces known CT keys in Markdown (the fixer's report) with "Set N" or "Set N, variant M",
+ * Replaces known CT keys in Markdown (the fixer's report) with "CT N" or "CT N, variant M",
  * followed by the key as a small muted reference. Text inside code blocks is left alone.
  */
 export function labelSetsInMarkdown(

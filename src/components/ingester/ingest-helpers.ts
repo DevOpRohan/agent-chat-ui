@@ -64,7 +64,7 @@ export function badgeFor(status: string): {
   };
 }
 
-/** "We found 3 things to fix in 2 question sets." (errors only; optional suggestions aside). */
+/** "We found 3 things to fix in 2 CTs." (errors only; optional suggestions aside). */
 export function issueSummary(groups: readonly IssueGroup[]): string | null {
   const errors = groups.flatMap((g) => g.issues.filter((i) => !i.optional));
   if (!errors.length) return null;
@@ -75,7 +75,7 @@ export function issueSummary(groups: readonly IssueGroup[]): string | null {
   ).size;
   const things = plural(errors.length, "thing");
   return sets > 0
-    ? `We found ${things} to fix in ${plural(sets, "question set")}.`
+    ? `We found ${things} to fix in ${plural(sets, "CT")}.`
     : `We found ${things} to fix.`;
 }
 

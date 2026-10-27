@@ -797,3 +797,16 @@ User requested PAGE_COUNT in ATTACHMENTS_INFO and reuse of existing file metadat
 - Release complete: PR #10 merged as 8374d10, identical runtime tree to baa71bd. Cloud Build ddd24dd2-acdd-4038-a291-30664c58a559 succeeded in us-east1; final receipt develop/prod digests and revisions are in DEPLOYMENT_GUIDE.md. Both runners provide Poppler 25.12.0. Promoted exact production revision to 100% after backend receipt commit 45f16711 was confirmed active in both environments; retained develop/older tags, IAP, resources and secret references.
 - Hosted limitation: Safari activity gate prevented acceptance without interrupting the user. Existing test-auth state returned 302 to sign-in; bearer absent. Stopped after the read-only auth check, with no hosted count/upload/generation request. Reported this separately from local tests and infrastructure readiness; no further browser attempts.
 - Final operational evidence: /tmp/ui-pdf-receipt-release-evidence.json records curated traffic, readiness, digest, resource, port and secret-reference names only. No credential values were printed or stored. Local test server stopped. Final follow-up changes only release documentation; no extra image build.
+
+
+## 2026-10-27 IST — CT terminology on develop
+
+User request: replace “question set” with CT and describe the entries inside each CT as variants. Keep the JSON schema and each existing question_no identity. Scope: upload summary/type badges, result header, issue summary/labels and local validation copy; deploy develop only. Existing phone primary-action viewport failure is outside this copy change.
+
+Plan: update existing expectations, confirm the old labels fail, replace copy, run unit/lint and focused one-worker browser checks, then build and deploy a pinned develop image with no production traffic.
+
+Evidence: updated expectations failed as intended (7 failures, 257 passes) before implementation. New labels are CT N, variant M; summaries show CTs containing variants. No application/API schema or variant identifiers changed.
+
+Verification: 264 unit tests, lint, affected-file Prettier and 10 focused browser scenarios passed. Cloud Build 6366a808-7107-4d7a-b451-4e6c4fb8a8ba succeeded. Develop revision `agent-chat-ui-dev-ct-3299cea9-1027` is Ready/ContainerHealthy, zero canonical traffic, with production still on the same revision at 100%. Existing mobile viewport failure remains open. Evidence: `/Users/rohanverma/NextjsProject/agent-chat-ui/output/ct-terminology-20261027/report.md`. At that stage no commit or PR had been created.
+
+Follow-up authorization: the user requested updating the origin develop codebase. Fetched `origin/develop` and confirmed it still equals the base `12cddde`; reran `pnpm test` before committing the scoped changes. Commit message: `fix: use CT and variant terminology in Ingester`. Push directly to `origin/develop` with a normal fast-forward push; no PR or production deployment is part of this follow-up.

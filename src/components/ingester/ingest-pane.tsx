@@ -57,8 +57,7 @@ function TopicHeader({ view }: { view: IngestView }) {
   if (topic.questionSets !== undefined && topic.questions !== undefined)
     parts.push(
       <span key="counts">
-        {plural(topic.questionSets, "question set")},{" "}
-        {plural(topic.questions, "question")}
+        {plural(topic.questionSets, "CT")}, {plural(topic.questions, "variant")}
       </span>,
     );
   const uploaded = view.createdAt ? formatDateTime(view.createdAt) : "";

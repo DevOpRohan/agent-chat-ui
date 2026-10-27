@@ -251,8 +251,8 @@ export function UploadPanel({
             {check.summary.topicName}
           </h2>
           <p className="mt-2">
-            {plural(check.summary.questionSets, "question set")} and{" "}
-            {plural(check.summary.questions, "question")}
+            {plural(check.summary.questionSets, "CT")} containing{" "}
+            {plural(check.summary.questions, "variant")}
             {describeDifficulty(check.summary.difficulty) ? (
               <span className="text-muted-foreground">
                 {" "}
@@ -271,7 +271,7 @@ export function UploadPanel({
                   key={type.type}
                   className="bg-muted rounded-md border px-2 py-0.5 text-xs"
                 >
-                  {type.label} · {plural(type.sets, "set")}
+                  {type.label} · {plural(type.sets, "CT")}
                 </li>
               ))}
             </ul>

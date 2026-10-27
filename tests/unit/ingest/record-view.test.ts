@@ -702,7 +702,7 @@ describe("threadToView: done, with the record", () => {
       message: "The topic has issues to fix; download the issue report.",
       issueReportMd: "# Topic import report",
       updaterReport:
-        "Fixed:\n- Set 2, variant 1 `set-key:leaves_ct_002`: tidied the maths",
+        "Fixed:\n- CT 2, variant 1 `set-key:leaves_ct_002`: tidied the maths",
       previewLink: undefined,
       topicJsonUrl: JSON_URL,
       topicMdUrl: undefined,
@@ -722,7 +722,7 @@ describe("threadToView: done, with the record", () => {
     // A service outage isn't a topic issue.
     expect(view.result?.issues).toEqual([
       expect.objectContaining({
-        label: "Set 2, variant 1",
+        label: "CT 2, variant 1",
         ctKey: "leaves_ct_002",
       }),
     ]);

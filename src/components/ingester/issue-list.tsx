@@ -1,6 +1,6 @@
 import type { IssueGroup } from "@/lib/ingest/plain-issues";
 
-/** The open issues in plain words, grouped as "Set N, variant M" (the creator's .md headings). */
+/** The open issues in plain words, grouped as "CT N, variant M" (the creator's .md headings). */
 export function IssueList({ groups }: { groups: readonly IssueGroup[] }) {
   return (
     <ul

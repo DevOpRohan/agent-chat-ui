@@ -442,10 +442,10 @@ test.describe("the upload view checks the file first", () => {
     await expect($.fileSummary).toContainText(FIXTURE_TOPIC.name);
     await expect($.fileSummary).toContainText(TOPIC_FIXTURE);
     await expect($.fileSummary).toContainText(
-      `${FIXTURE_TOPIC.questionSets} question sets`,
+      `${FIXTURE_TOPIC.questionSets} CTs`,
     );
     await expect($.fileSummary).toContainText(
-      `${FIXTURE_TOPIC.questions} questions`,
+      `${FIXTURE_TOPIC.questions} variants`,
     );
     await expect($.enabledIngestButton).toBeVisible();
 
@@ -766,7 +766,7 @@ test.describe("one result per final status", () => {
       const $ = ui(page);
       await expect(action($.result, ACTIONS.uploadNew)).toBeVisible();
       await expect($.pane).toContainText(COPY.reportInstructions);
-      await expect($.pane).toContainText("Set 1, variant 1");
+      await expect($.pane).toContainText("CT 1, variant 1");
       await expect($.pane).toContainText(COPY.hintIssue);
       await expect(topicFileLinks(page)).toHaveCount(0);
     },

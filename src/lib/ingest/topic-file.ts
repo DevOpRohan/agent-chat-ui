@@ -7,8 +7,8 @@
  * mistakes early: the .md instead of the .json, a damaged file, or a file that
  * isn't a topic at all.
  *
- * Ported from topic-ingester (src/lib/topic-file.ts); the creator-facing text is
- * kept word for word.
+ * Ported from topic-ingester (src/lib/topic-file.ts), using CT terminology in
+ * creator-facing text.
  */
 
 /** Same limit as the backend (`MAX_SOURCE_BYTES` in topic_import/pipeline.py). */
@@ -24,7 +24,7 @@ export const FILE_MESSAGES = {
   notTopic:
     "This file doesn't look like a topic. Please pick the .json your assistant made for your topic with the TopicCrafter skill.",
   noQuestionSets:
-    "This topic doesn't have any question sets yet. Ask your assistant to make the .json again from your .md.",
+    "This topic doesn't have any CTs yet. Ask your assistant to make the .json again from your .md.",
   oneFile: "Please upload one file at a time.",
   unreadable:
     "We couldn't open this file. Please try again, or ask your assistant for a fresh copy of the .json.",

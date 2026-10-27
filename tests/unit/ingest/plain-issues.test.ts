@@ -68,11 +68,11 @@ describe("plainSentence (the skill's communication table, present tense)", () =>
         code: "IDENTITY",
         message: "Duplicate CT key 'a': CT keys must be unique",
       },
-      "Two question sets have the same label.",
+      "Two CTs have the same label.",
     ],
     [
       { code: "IDENTITY", message: "Duplicate question_no 2" },
-      "Two questions share the same label.",
+      "Two variants in a CT share the same label.",
     ],
     [
       { code: "TOPIC", message: "Missing 'topic_id'" },
@@ -80,7 +80,7 @@ describe("plainSentence (the skill's communication table, present tense)", () =>
     ],
     [
       { code: "CT", message: "CT has no variations" },
-      "The set's header details need a fix.",
+      "The CT's header details need a fix.",
     ],
     [
       { code: "SYSTEM FIELDS", message: "x" },
@@ -101,7 +101,7 @@ describe("plainSentence (the skill's communication table, present tense)", () =>
         code: "IDENTITY",
         message: "Duplicate CT key 'fractions_ct_001'",
       }),
-    ).not.toMatch(/_|CT/);
+    ).not.toMatch(/_|IDENTITY|fractions/);
   });
 });
 
@@ -117,7 +117,7 @@ describe("plainField", () => {
 });
 
 describe("groupIssues", () => {
-  it("groups by 'Set N, variant M' using the set's position in the topic, whole-topic items first", () => {
+  it("groups by 'CT N, variant M' using the CT's position in the topic, whole-topic items first", () => {
     const groups = groupIssues(
       [
         {
@@ -162,9 +162,9 @@ describe("groupIssues", () => {
     );
     expect(groups.map((g) => g.label)).toEqual([
       "Whole topic",
-      "Set 1",
-      "Set 2, variant 3",
-      "Set 3, variant 2",
+      "CT 1",
+      "CT 2, variant 3",
+      "CT 3, variant 2",
     ]);
     expect(groups[2]!.ctKey).toBe("two_step_equations_ct_002");
     expect(groups[2]!.issues).toEqual([
@@ -193,7 +193,7 @@ describe("groupIssues", () => {
         ],
         INDEX,
       )[0]!.label,
-    ).toBe("A question set, variant 1");
+    ).toBe("A CT, variant 1");
   });
 });
 
@@ -203,9 +203,9 @@ describe("labelSetsInMarkdown", () => {
       "Fixed:\n- ratios_ct_003 / 1: added the missing period to the hint\n- `fractions_ct_001`, question 2: fixed\n- two_step_equations_ct_002 checked";
     expect(labelSetsInMarkdown(md, INDEX)).toBe(
       "Fixed:\n" +
-        `- Set 3, variant 1 \`${SET_KEY_MARKER}ratios_ct_003\`: added the missing period to the hint\n` +
-        `- Set 1, variant 2 \`${SET_KEY_MARKER}fractions_ct_001\`: fixed\n` +
-        `- Set 2 \`${SET_KEY_MARKER}two_step_equations_ct_002\` checked`,
+        `- CT 3, variant 1 \`${SET_KEY_MARKER}ratios_ct_003\`: added the missing period to the hint\n` +
+        `- CT 1, variant 2 \`${SET_KEY_MARKER}fractions_ct_001\`: fixed\n` +
+        `- CT 2 \`${SET_KEY_MARKER}two_step_equations_ct_002\` checked`,
     );
   });
 

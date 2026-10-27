@@ -1,7 +1,7 @@
 # Fork Compass — Agent Chat UI Customizations
 
-_Last updated: 2026-10-26_
-_Branch: main / develop (Crafter | Ingester modes: `feat/crafter-ingester-modes`, PR to `main`)_
+_Last updated: 2026-10-27_
+_Branch: develop (CT terminology update on base `12cddde`)_
 _Runtime release: PR #7 (`597dcb8`, source `15f6f1c`)_
 _Upstream project: langchain-ai/agent-chat-ui_
 
@@ -56,7 +56,13 @@ Crafter | Ingester modes snapshot (2026-10-26):
 
 - Branch `feat/crafter-ingester-modes` from `origin/main` `a5720d5`: 13 commits; 76 files changed, 20884 insertions(+), 154 deletions(-) (`git diff a5720d5...HEAD --shortstat`). New files are mostly `src/lib/ingest/*`, `src/components/ingester/*`, the two API routes, unit tests and the Playwright spec; `src/providers/Stream.tsx` is unchanged.
 
+CT terminology release snapshot (2026-10-27):
+
+- Develop base `12cddde`, followed by the CT terminology commit: 113 fork-only commits against the pinned `upstream/main`. Release diff: 170 files changed, 36839 insertions(+), 2496 deletions(-).
+
 Recent fork-only commit log:
+
+- `fix: use CT and variant terminology in Ingester` (develop): CT/CTs in summaries, type badges, issue/report labels and validation messages; variants keep their existing `question_no` identities. Includes updated expectations and documentation.
 
 - `feat/crafter-ingester-modes` (PR to `main`): contract types and vitest; ported Ingester logic; JSON-only ingest upload, topic file download and skill zip; typed topic model; Crafter | Ingester switch with per-mode history; Ingester pane and hook; Playwright spec; docs.
 
@@ -239,7 +245,7 @@ Current behavior:
 - One ingest = one thread on `topic_ingest`: browser file check → `POST /api/ingest/upload` (JSON only, 10 MB, saves `topic-ingest/<uuid>.json` to `GCS_BUCKET_NAME`, no OpenAI code path) → `threads.create` (metadata `graph_id`, `thread_title`, `ingest_file_name`, `ingest_source_url`, stage/status `queued`) → `runs.create(..., { input: { source_url, file_name }, onDisconnect: "continue" })`.
 - `use-ingest-thread.ts` polls `threads.search({ ids, select })` every 1.5 s (paused while hidden; slower when stalled; backoff on errors). The graph's own thread-metadata writes don't persist on the deployed Postgres runtime (checked live on dev, 2026-10-26), so while busy the hook also reads `threads.getState` at most every 3 s and maps the checkpoint's `next` to a stage (`record-view.ts` `stageFromNext`; metadata wins when it has a stage). The run has ended when the thread errors, metadata is final, or `runs.list` shows the latest run finished; then `values.record` is read once and mapped by `record-view.ts`. Run again re-checks the thread, patches stage/status back to `queued` and starts a new run on the same thread; it is disabled while busy (the deployed runtime queues a second run instead of rejecting it).
 - Mode switches keep the chat subtree mounted: in Ingester the chat pane, chat↔artifact handle and artifact pane are invisible and `inert` under the mode pane (an absolute overlay), so Crafter returns with its draft, scroll, artifact and layout. A link with only `ingestId` writes `mode=ingester` once.
-- Results use the standalone topic-ingester app's words (`status-copy.ts`, `plain-issues.ts`, `FILE_MESSAGES`). UI-only statuses: `run_error` (thread error; the "couldn't finish" copy), `failed_to_start` (no run started), stalled (busy with no metadata update for 30 minutes).
+- Results use the standalone topic-ingester app's words (`status-copy.ts`, `plain-issues.ts`, `FILE_MESSAGES`), with CT/CTs terminology for `cts`. Summaries count CTs and their variants; type badges count CTs, and issue/report labels use `CT N, variant M`, preserving each variant's `question_no`. UI-only statuses: `run_error` (thread error; the "couldn't finish" copy), `failed_to_start` (no run started), stalled (busy with no metadata update for 30 minutes).
 - Downloads: the report is made in the browser; topic `.json`/`.md` go through `GET /api/topic-file` (https, allow-listed hosts and buckets, no redirects, 25 MB). The skill zip is `public/skill/TopicCrafter-v0.1.0.zip` with `skill:sync`/`skill:check`.
 - `src/lib/ingest/topic-model.ts`: the typed topic JSON, one interface per `question_type` plus the `QUESTION_TYPES` registry, for per-type UX.
 
